@@ -174,9 +174,17 @@ esac
 # Validated rather than interpolated: a value that is not a bare handle would be
 # arbitrary Markdown — and GitLab quick actions — in a note this job posts
 # with an `api`-scoped token.
+#
+# `[[ =~ ]]` and NOT `grep -Eq`, which is what this was until #191. **grep
+# anchors per LINE**, so `^@handle$` matched the first line of a multi-line value
+# and the guard passed: `@someone\n/close` was accepted and interpolated whole,
+# putting `/close` at the start of its own line — which is exactly how GitLab
+# recognises a quick action, executed with this job's token. Bash's `=~` anchors
+# the whole string (no REG_NEWLINE), measured on bash 3.2.57 and 5.x. The test
+# above it missed this for two releases because its malformed case was one line.
 MENTION_LINE=""
 if [ -n "${ALERT_MENTION:-}" ]; then
-  if printf '%s' "$ALERT_MENTION" | grep -Eq '^@[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$'; then
+  if [[ "$ALERT_MENTION" =~ ^@[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]]; then
     MENTION_LINE="${ALERT_MENTION} — \`${REF}\` needs a look."
   else
     echo "alert-pipeline-failure: ALERT_MENTION is not a single @handle — ignoring it." >&2

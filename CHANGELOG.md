@@ -31,6 +31,42 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **An alert about production that reaches a person, and cannot go quiet (#191).**
+  Production once served code from two days earlier on **one replica instead of
+  two** for roughly 24 hours before anyone noticed. Every signal existed — six
+  failed Helm revisions, `1/2 READY` throughout, and a note on the ops issue that
+  said in as many words that production was not running `main`. Nobody read it. So
+  the gap was never detection: **an alert nobody receives is not alerting, it is
+  logging.**
+
+  A new hourly job, `alert_prod_state`, answers two questions a deploy cannot: is
+  production on `main`, and is it running every replica it should be. The replica
+  half is genuinely new — a commit comparison against `/api/health` cannot see a
+  half-empty Deployment, because that endpoint is answered by whichever pod the
+  Service routes to, so a `1/2` whose surviving pod is on the right commit reads
+  green. A wedged Prisma migration shows up here too: migrations run in an
+  initContainer, so a failed one is a pod that never becomes ready, and `P3009`
+  appears in no other signal at all.
+
+  **The delivery is the point, and it needs no new account, secret or service.**
+  GitLab already notifies the owner of a pipeline schedule when its pipeline
+  fails, so the job exits non-zero on every outcome that is not "verified
+  healthy" — including "could not tell" and "the note was rejected". A red job
+  *is* the out-of-band alert. The note it posts carries the diagnosis, and setting
+  `ALERT_MENTION` to a single `@handle` makes it raise a to-do as well.
+
+  **New optional variable, and it is not a secret:** `ALERT_MENTION`. Self-hosted
+  operators need nothing; the job only runs on a pipeline schedule that does not
+  exist unless you create it. `docs/deploy-runbook.md` § 18 documents the setup and
+  how to read an alert, § 19 the wedged-migration recovery it points at.
+
+  It reports **how long**, not just whether: "behind since 24 hours ago" is a state
+  that stays true until somebody fixes it, where a failed deploy is an event that
+  is easy to miss. And it will not cry wolf — a rollout inside Kubernetes' own
+  `progressDeadlineSeconds` and a deploy still in flight are both reported as in
+  progress rather than alerted on, because a channel that fires on every normal
+  deploy gets muted, which is what took the original alert down.
+
 - **The inbox tells you the shopping list is there (#199).** When something is on
   the list, one line at the top of the inbox reads *"3 items on your shopping
   list"* and takes you straight there. **Not now** clears it, and it comes back the
@@ -870,6 +906,17 @@ operators upgrading a self-hosted instance don't get surprised.
   `session_clear_failed` rather than being absorbed alongside it. Refusing the
   request never depended on the sign-out landing, so this changes what an
   operator can see, not what the gate allows.
+
+- **A GitLab quick action could be injected into an alert note through
+  `ALERT_MENTION` (#191).** The handle was validated with
+  `grep -Eq '^@[A-Za-z0-9…]$'`, and **grep anchors per line** — so a multi-line
+  value whose first line was a valid handle passed the guard and was then
+  interpolated whole. That put text such as `/close` at the start of its own line
+  in a note posted with an `api`-scoped token, which is exactly how GitLab
+  recognises a quick action. Both alert scripts now validate with bash's `=~`,
+  which anchors the whole string; measured on bash 3.2.57 and 5.x. The variable is
+  operator-set rather than attacker-set, so exploitation required an operator to
+  paste a malformed value — but the guard was there to make that safe and did not.
 
 - **`.ics` text values now escape every line terminator, not just `\n` (#154).**
   `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC

@@ -21,6 +21,7 @@
  * would prove nothing about the script.
  */
 import { describe, expect, it } from "vitest";
+import { blocksGuarding, guardParityGaps } from "./ci-schedule-guards";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -534,26 +535,26 @@ describe("the schedule-flag guards", () => {
    * already guards `REGISTRY_PRUNE` must guard `SECURITY_ASSESSMENT` too, so a
    * future flag added to only some of them fails here.
    */
-  const lines = CI_YML.split("\n");
-  const guardIndexes = (flag: string) =>
-    lines
-      .map((line, i) => (line.includes(`$${flag} == "true"'`) ? i : -1))
-      .filter((i) => i !== -1);
-
   it("guards the same rule blocks REGISTRY_PRUNE guards", () => {
-    // Both flags' own jobs contribute one non-guard entry each (the rule that
-    // RUNS them), so compare the guard positions, not the raw counts.
-    const isGuard = (i: number) => lines[i + 1]?.trim() === "when: never";
-    const prune = guardIndexes("REGISTRY_PRUNE").filter(isGuard);
-    const assessment = guardIndexes("SECURITY_ASSESSMENT").filter(isGuard);
+    // Rewritten in #191, and the reason is worth keeping. This asserted line
+    // arithmetic: every SECURITY_ASSESSMENT guard had to sit exactly two lines
+    // below the REGISTRY_PRUNE guard it mirrored, plus a magic
+    // `toBeGreaterThan(4)`. Duo review flagged the identical shape in #191's copy
+    // of it — that pins **incidental formatting** rather than intent, so
+    // reordering conditions inside a rule block or inserting one comment between
+    // two guards fails a test whose subject is untouched.
+    //
+    // `guardParityGaps` asserts what the CI file actually promises: any block that
+    // guards one flag guards them all. Its parser is a pure module with its own
+    // synthetic-input tests (`ci-schedule-guards.test.ts`), so unlike the version
+    // this replaced it can be shown to fail when a guard really is missing.
+    expect(guardParityGaps(CI_YML)).toEqual([]);
+    // Kept explicit: "no gaps" is also true of a file with no guards at all, and
+    // of a parser that found nothing.
+    const prune = blocksGuarding(CI_YML, "REGISTRY_PRUNE");
+    const assessment = blocksGuarding(CI_YML, "SECURITY_ASSESSMENT");
     expect(prune.length).toBeGreaterThan(4);
-    expect(assessment).toHaveLength(prune.length);
-    // Each new guard sits directly beneath the REGISTRY_PRUNE one it mirrors.
-    for (const [n, index] of prune.entries()) {
-      expect(assessment[n], `guard missing near line ${index + 1}`).toBe(
-        index + 2,
-      );
-    }
+    expect(assessment).toEqual(prune);
   });
 
   it("documents the fourth schedule where the other three are listed", () => {

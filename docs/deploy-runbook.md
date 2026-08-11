@@ -739,3 +739,212 @@ glab api --method GET "projects/84020916/registry/repositories/11826214/tags?per
 Nothing here deletes. `scripts/prune-registry.sh` is the only thing in this repo
 that does, it ships as a dry run, and it needs a credential the CI job does not
 have — read its header before changing anything about it.
+
+## 18. Production state monitor — the alert that reaches a person (#191)
+
+Production once served code from two days earlier on **one replica instead of
+two** for roughly 24 hours. Six consecutive Helm revisions failed, the Deployment
+read `1/2 READY` the whole time, two pods sat in `Init:CrashLoopBackOff`, and the
+`alert_pipeline_failure` job posted "🔴 production is NOT running `main`" on the
+standing ops issue — correctly, more than once. Nobody read it. It was found by
+accident, while investigating an unrelated pipeline.
+
+So the thing that was missing was never detection. **An alert nobody receives is
+not alerting, it is logging.**
+
+### What runs, and when
+
+| Piece | Where it is defined |
+| --- | --- |
+| Job | `alert_prod_state` in `.gitlab-ci.yml` |
+| Schedule | "Hourly production state check", cron `0 * * * *`, variable `PROD_STATE_CHECK=true` |
+| Script | `scripts/alert-prod-state.sh`, which runs `check-prod-drift.sh` and `check-prod-replicas.sh` |
+
+Hourly is the whole point. `ops_digest` is weekly and the incident began on a
+Thursday — the next digest was four days after it was found. And
+`alert_pipeline_failure` is keyed on a pipeline going red, which makes it an
+**event** check, while what needed reporting was a **state** that stayed true
+while no pipeline ran at all.
+
+### The two channels
+
+**1. A red pipeline, and it needs nothing configured.** A scheduled pipeline runs
+as the schedule's **owner**, and GitLab's "pipeline failed" notification goes to
+that user at notification level Watch, Participating or a Custom level with failed
+pipelines enabled. `alert-prod-state.sh` exits non-zero on every outcome that is
+not "both checks verified healthy" — drifted, degraded, undetermined, note
+rejected, no token, no issue. So whoever owns that schedule is who gets told, and
+there is no webhook to forget.
+
+**Prove that channel once, do not assume it.** It is the only part of this design
+that depends on something outside the repo — a notification level, an email
+address, a spam filter — and the whole point of #191 is that an alert nobody
+receives is indistinguishable from no alert. A monitor trusted on the strength of
+an unread setting is the same bug in a new coat. Five minutes, once:
+
+```
+glab api notification_settings
+glab api "projects/84020916/pipeline_schedules/<id>" | jq '{owner: .owner.username, active}'
+```
+
+The first must report a `level` of `participating`, `watch`, or a `custom` level
+with failed pipelines on; the second must name the person who should be woken up.
+Then force one real failure end to end: set the schedule's `ALERT_ISSUE_IID`
+variable to an iid that does not exist, **Play** the schedule, and confirm three
+things — the job goes red, its log contains the entire note it could not deliver,
+and **an email actually arrives**. Remove the variable afterwards. That exercises
+the delivery path, the loudness guarantee and the fallback channel in one run, and
+it is the only way to know the email is not sitting in a filter.
+
+**2. The note it posts**, which carries the diagnosis. Set `ALERT_MENTION` to a
+single `@handle` (Settings → CI/CD → Variables; **not** a secret, do not mask it)
+and the note also raises a GitLab to-do, which is the difference between "sent"
+and "seen".
+
+`GL_TOKEN` and `OPS_DIGEST_ISSUE_IID` are already configured — the same pair
+`ops_digest` has used since #33. Nothing here introduces a new credential, which
+is deliberate: an alert that cannot be finished being set up is the bug being
+fixed, not the fix.
+
+### Reading an alert
+
+The note reports two independent questions, because neither can see the other's
+failure. A SHA comparison against `/api/health` cannot see a half-empty
+Deployment — that endpoint is answered by whichever pod the Service routes to, so
+a `1/2` whose surviving pod is on the right commit reads green. And a replica
+count cannot see stale code.
+
+**`1/2` on its own is not an incident, and that has been measured.** Hours after
+the outage was fixed, `kubectl get deploy` read exactly `1/2` and it was an
+ordinary transient: both pods were under 90 seconds old, both already on the new
+image, and `rollout status` returned success 90 seconds later. So the check does
+**not** alert on the count alone. It defers to Kubernetes' own
+`progressDeadlineSeconds` (600s by default; the chart sets none):
+
+| `Progressing` condition | Meaning | Alert? |
+| --- | --- | --- |
+| `True` / `ReplicaSetUpdated` | rollout in flight, deadline not blown | no — 🔄, and the next hourly run alerts if it stops progressing. **Except** when `progressDeadlineSeconds` is longer than `REPLICAS_MAX_PROGRESS_DEADLINE` (30 min): staying quiet then depends on a flip that may not come for hours, so that alerts — see below |
+| `False` / `ProgressDeadlineExceeded` | stuck | **yes** |
+| `True` / `NewReplicaSetAvailable` | rollout finished, a replica is still gone | **yes** — the `1/2` that does not move |
+
+**A deploy in flight is not drift either, for the same reason.** Production is
+legitimately a commit or two behind for a few minutes after every merge, and an
+hourly check would land inside that window every few days. So `alert_prod_state`
+passes `DRIFT_GRACE_SECONDS=1500` — just over `deploy_production`'s
+`--timeout 20m` — and divergence younger than that is reported as 🔄 rather than
+alerted on. Nothing is lost in the window: a deploy that blows its own timeout
+fails its pipeline, and `alert_pipeline_failure` reports *that* immediately with
+no grace at all. The grace is **off by default** in `check-prod-drift.sh`, so the
+weekly digest and the pipeline-failure alert are unaffected, and it only ever
+applies to an age that could actually be established.
+
+If you want to make that call by hand, the two commands that answer it are pod
+age and image, then the definitive one:
+
+```
+kubectl -n dlectroflow-prod get pods -o wide
+kubectl -n dlectroflow-prod rollout status deployment/dlectroflow --timeout=300s
+```
+
+### Escalation — decided, not left to chance
+
+**Out of hours it waits until morning.** Evenings and weekends are personal time,
+and this is a productivity app with a small user base, not a pager rotation. The
+honest reason to write that down is that the alternative is not "someone
+responds" — it is nobody deciding, which is what produced a 24-hour outage.
+
+What the hourly cadence buys is that the *first* thing anybody sees in the morning
+is the alert, rather than a discovery weeks later. Two properties make that safe:
+the monitor keeps failing every hour until the state clears, so it cannot be
+missed by being asleep at the wrong moment; and it posts a **recovery** note when
+the state clears, so silence can be told apart from the monitor having died.
+
+### If the monitor itself is broken
+
+That case is built in rather than assumed away, because a monitor that can die
+quietly manufactures false confidence:
+
+- "Could not tell" is a distinct state and never renders as ✅.
+- **Nor as a confident sentence anywhere else in the note.** Not rendering an
+  unknown as a tick is the easy half; the hard half is the headline and the
+  recovery instruction, which are the parts anybody actually acts on. Both are
+  composed from each check's **own** exit code, tested one value at a time, so a
+  check that could not read the cluster contributes "the replica count could not
+  be determined" and never "every replica is available". Matching on "not
+  degraded" instead would put *verified healthy* and *we could not look* behind
+  the same sentence — the original bug, committed by the monitor built to catch
+  it. A proven fault standing beside an unreadable check therefore says so in the
+  headline rather than presenting as one clean diagnosis.
+- **Both checks contribute their recovery steps, not just the loudest one.** A
+  simultaneous drift and replica alert needs the migration path *and* the
+  not-deployed path, because they are different repairs.
+- A rejected note POST prints the **whole note to the job log** and still exits
+  non-zero, so the diagnosis survives a broken channel.
+- Being unconfigured is an alert, not a skip — unlike `alert_pipeline_failure`,
+  which is right to stay quiet because it only runs when something else is
+  already red.
+- De-duplication fails **open**. A duplicate note is a nuisance; a suppressed
+  alert is an incident.
+- The quiet "rollout in progress" arm checks the property it depends on: if
+  `progressDeadlineSeconds` is ever raised past `REPLICAS_MAX_PROGRESS_DEADLINE`
+  (30 minutes), staying silent stops being self-limiting, so that becomes an alert
+  too. One Helm value should not be able to switch the monitor off.
+
+The one gap left is the schedule being **paused or deleted**, which no job can
+report about itself. `ops_digest` remains an independent weekly observer of the
+same drift signal, so that failure degrades to the previous week-long latency
+rather than to nothing.
+
+## 19. A wedged migration (P3009) — the fastest way back to two replicas
+
+This is the most likely reason § 18 alerts, and it is worth its own section
+because it is the one failure that **compounds**: Prisma's P3009 refuses every
+*later* migration once one has failed, so each subsequent merge makes it worse
+while looking like an unrelated deploy failure.
+
+Migrations run in the `migrate` initContainer
+(`charts/dlectroflow/templates/deployment.yaml`), so a failed migration is a pod
+that never becomes ready — which is why `check-prod-replicas.sh` reads that
+container's reason and message back into the alert. `P3009` appears in no other
+signal: not in the deploy job's status, not on `/api/health`, not in the pipeline.
+
+The steps below were used to recover on 2026-08-07; they are recorded here rather
+than re-verified on every read.
+
+**1. Clear the failed entry from the ledger first.** This alone restores
+redundancy — the init containers stop failing the moment P3009 is gone, before any
+merge.
+
+Replace the `MIG` value below with the migration directory name the alert quotes
+— the P3009 message names it, and the quotes matter because the name is pasted
+straight into a command. The rest of the block computes what it needs.
+
+```
+POD=$(kubectl -n dlectroflow-prod get pods -l app.kubernetes.io/name=dlectroflow \
+  --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
+MIG='20260806142530_add_focus_streak'
+kubectl -n dlectroflow-prod exec "$POD" -- npx prisma migrate resolve --rolled-back "$MIG"
+```
+
+`migrate resolve` reads the **database ledger, not the migrations directory**, so
+it works from a pod whose image predates the migration. Both errors it can answer
+with are statements about that ledger too: `P3011` means the name was never
+applied to the database — in practice a typo in the name copied out of the alert
+— and `P3012` means it is there but not in a failed state, so there is nothing to
+roll back. Neither is a reason to rebuild anything.
+
+**2. Do not trust `prisma migrate status` across versions.** It reports against
+its own image's copy of the migrations, so a pod whose image predates the newest
+migrations will cheerfully answer "Database schema is up to date!" while the ones
+it has never heard of are the problem.
+
+**3. Then fix the migration and roll forward.** The next green pipeline on `main`
+deploys. To go backwards instead, § 14.
+
+**4. Reproduce it locally before re-deploying.** Data migrations in this repo are
+only ever exercised against an **empty** table — CI, the integration suite and
+local runs all migrate a fresh database, so an `UPDATE` touching zero rows never
+evaluates a constraint. That is what made the original defect structurally
+incapable of failing anywhere but production. To reproduce: hold the later
+migrations aside, `migrate deploy` to the point before, seed representative rows,
+put them back, `migrate deploy`. The wider class is tracked in #190.

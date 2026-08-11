@@ -20,14 +20,15 @@ stages:
   - test          # security scanners (container_scanning needs the built image → after build_image)
   - deploy
   # Scheduled housekeeping (renovate, ops_digest, prune_registry,
-  # security_assessment) plus one job that is NOT scheduled:
+  # security_assessment) and the hourly production state monitor
+  # (alert_prod_state, #191), plus one job that is NOT scheduled:
   # alert_pipeline_failure runs `when: on_failure` on main. It lives here because
   # it must read deploy_production's FINAL status, which means a stage after
   # `deploy` (#147).
   - maintenance
 
 # ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
-# Four pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
+# Five pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
 #   1. "Weekly base-image rescan"  → no extra variables. Rebuilds the image on the
 #      current main and re-runs all scanners so new base/dependency CVEs surface in
 #      the Vulnerability Report even when no code changed. Does NOT deploy. Also
@@ -43,6 +44,20 @@ stages:
 #      active-vulnerability snapshot (#134). The cadence was documented in
 #      docs/quality-audit-prompts.md ## Cadence long before anything ran it, which
 #      is how 8 unread HIGH findings accumulated in the baseline.
+#   5. "Hourly production state check" → variable PROD_STATE_CHECK=true. Runs ONLY
+#      the alert_prod_state job (#191). Unlike the other four this one is not
+#      housekeeping — it is the only thing on this cadence, and the cadence IS the
+#      feature: production served stale code on one replica for roughly 24 hours
+#      and nobody knew, because every existing signal was either weekly
+#      (ops_digest) or tied to a failing pipeline (alert_pipeline_failure), and a
+#      state that stays true fires neither. Hourly turns a 24-hour miss into a
+#      one-hour one for ~24 short jobs a day.
+#
+#      **This schedule's owner is the alert channel.** GitLab notifies the owner
+#      of a schedule when its pipeline fails, and alert_prod_state exits non-zero
+#      on every outcome that is not "verified healthy" — so the email needs
+#      nothing configured and cannot be forgotten. Whoever owns this schedule is
+#      who gets told; that is a deliberate property, not an accident of setup.
 # Each flag variable gets a `when: never` guard on every OTHER scheduled job, so
 # a flagged maintenance schedule runs its own job and nothing else — no duplicate
 # ops digest, no pointless weekly rebuild. Add a flag, add its guards.
@@ -102,6 +117,8 @@ include:
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     allow_failure: false
@@ -189,6 +206,8 @@ include:
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     changes: *code_changes
@@ -445,6 +464,8 @@ build_app:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -527,6 +548,8 @@ test_app:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -598,6 +621,8 @@ e2e_test:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
@@ -676,6 +701,8 @@ build_image:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
@@ -1039,6 +1066,8 @@ ops_digest:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 # ── Registry prune (#114, from #113) ─────────────────────────────────────────
@@ -1174,7 +1203,9 @@ alert_pipeline_failure:
     # cannot cause the divergence this job exists to catch, and the weekly digest
     # already counts failed `main` pipelines. One blanket guard rather than one
     # per flag, matching deploy_production — it covers RENOVATE_RUN,
-    # REGISTRY_PRUNE and SECURITY_ASSESSMENT by construction.
+    # REGISTRY_PRUNE, SECURITY_ASSESSMENT and PROD_STATE_CHECK by construction,
+    # and any flag added later, since it never asks which one is set.
+    # `src/lib/pipeline-failure-alert.test.ts` keeps this list from undercounting.
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
       when: never
     # `main` only. A red merge-request pipeline is already in front of the person
@@ -1182,3 +1213,64 @@ alert_pipeline_failure:
     # would be the noise that gets the real alert filtered.
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: on_failure
+
+# ── Production state monitor (#191) ──────────────────────────────────────────
+# The one job on this file's list whose value is its CADENCE rather than its
+# logic. Production served code from two days earlier on ONE replica instead of
+# two for roughly 24 hours. Six Helm revisions failed, the Deployment read
+# `1/2 READY` throughout, two pods sat in `Init:CrashLoopBackOff`, and
+# alert_pipeline_failure posted "production is NOT running `main`" on the standing
+# ops issue — correctly, more than once. Nobody read it. It was found by accident.
+#
+# So neither existing signal could have closed this. ops_digest is WEEKLY, and the
+# incident began on a Thursday: the next digest was four days after it was found.
+# alert_pipeline_failure is keyed on a pipeline going red, which makes it an EVENT
+# check — and the thing that needed reporting was a STATE that stayed true while
+# no pipeline ran at all. A state check needs its own clock.
+#
+# ── Why it reaches somebody, with nothing to configure ───────────────────────
+# GitLab notifies the owner of a pipeline schedule when that pipeline fails, and
+# `scripts/alert-prod-state.sh` exits non-zero on every outcome that is not
+# "verified healthy" — including "could not tell" and "the note was rejected". So
+# a red job here IS the out-of-band alert, and it needs no webhook, no SMTP
+# credential and no third-party account. The note it posts carries the diagnosis
+# and, if `ALERT_MENTION` is set to a single `@handle`, raises a to-do as well.
+#
+# ── extends .deploy_base, and why that is not overreach ──────────────────────
+# The replica count cannot come from the app: a container cannot read its own
+# Deployment's `spec.replicas`. It has to come from the cluster, and the GitLab
+# agent context .deploy_base configures is the credential that already exists —
+# the same one prune_registry reads production's image tag through. Every verb
+# this job runs is a `get`. It deploys nothing; the `stage: maintenance` override
+# below is what keeps it out of the deploy stage's semantics.
+#
+# One-time owner setup (Settings → CI/CD):
+#   Schedules → "Hourly production state check", cron `0 * * * *`, PROD_STATE_CHECK=true
+#   Variables → ALERT_MENTION = a single @handle (optional, NOT a secret, not masked)
+# GL_TOKEN and OPS_DIGEST_ISSUE_IID are already configured — they are the pair
+# ops_digest has used since #33, which is why this works on its first run rather
+# than on the first run after somebody remembers to wire it.
+#
+# Behaviour is covered by src/lib/prod-state-alert.test.ts, which drives all three
+# scripts with curl and kubectl stubbed and asserts the settings below.
+alert_prod_state:
+  extends: .deploy_base       # helm-kubectl image + $KUBECONFIG perms + agent context
+  stage: maintenance          # this monitors; it must not sit in the deploy stage
+  needs: []                   # the whole point is that it always runs
+  interruptible: false        # an alert should finish, not be cancelled mid-post
+  # 10 minutes is ~20x a normal run. A monitor that hangs is a monitor that is
+  # not running, and the job timeout is the only thing that turns that back into
+  # a red pipeline — which is this job's alert channel.
+  timeout: 10m
+  variables:
+    PROD_URL: "https://dlectroflow.dev"
+    # This job reads no git history, only scripts/ from the checkout.
+    GIT_DEPTH: 1
+  script:
+    # The helm-kubectl image carries most of these, but the runner clones in a
+    # helper container, so nothing about the job image's toolchain is guaranteed.
+    # Same line, same reasoning, as prune_registry.
+    - 'for tool in curl jq bash; do command -v "$tool" >/dev/null 2>&1 || apk add --no-cache "$tool"; done'
+    - bash scripts/alert-prod-state.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'

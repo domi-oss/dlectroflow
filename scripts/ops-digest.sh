@@ -85,7 +85,16 @@ case "$site_code" in
 esac
 
 # ── 2. CI health — failed main pipelines, last 7d ────────────────────────────
-failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&status=failed${WINDOW}&per_page=100" \
+# `source=push` and not just `ref=main` (#191). This figure answers "how many
+# merges broke the build", and scheduled pipelines also run on `main` — so
+# without the filter the new hourly production monitor is counted as failed
+# `main` pipelines. It exits non-zero once an hour for as long as production is
+# degraded, by design, so a Monday-to-Thursday incident contributes ~72 of them
+# and pins this number at "100+" for the whole week. Real merge breakage would
+# then be invisible behind the monitor's own alarms, which is the failure this
+# monitor exists to prevent, reintroduced one layer up. The filter also excludes
+# the weekly rescan's scanner flakes, which were never merge breakage either.
+failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&source=push&status=failed${WINDOW}&per_page=100" \
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 2b. Is production actually running `main`? (#147) ─────────────────────────

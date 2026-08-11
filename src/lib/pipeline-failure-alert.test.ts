@@ -25,6 +25,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseJobNeeds } from "./ci-job-deps";
+import { allGuardedFlags } from "./ci-schedule-guards";
 
 const REPO_ROOT = process.cwd();
 const ALERT_SCRIPT = join(REPO_ROOT, "scripts/alert-pipeline-failure.sh");
@@ -713,6 +714,24 @@ describe("scripts/alert-pipeline-failure.sh", () => {
     expect(result.note?.body).not.toContain("/merge");
     expect(result.stderr).toMatch(/ALERT_MENTION/);
   });
+
+  it("refuses a MULTI-LINE ALERT_MENTION whose first line is a valid handle", () => {
+    // Regression, found while writing #191's sibling guard. The check was
+    // `printf '%s' "$ALERT_MENTION" | grep -Eq '^@…$'`, and **grep anchors per
+    // LINE** — so `^@handle$` matched line one and the guard passed, after which
+    // the whole value was interpolated. That put `/close` at the start of its own
+    // line in the note, which is precisely how GitLab recognises a quick action,
+    // executed with this job's `api`-scoped token.
+    //
+    // The case above did not catch it because it was single-line: there, `grep`
+    // and a whole-string match agree. Only a value that is valid on line one and
+    // hostile on line two separates them. Both scripts now use bash's `=~`,
+    // which anchors the whole string.
+    const result = alert({ env: { ALERT_MENTION: "@someone\n/close" } });
+    expect(result.status).toBe(0);
+    expect(result.note?.body).not.toContain("/close");
+    expect(result.stderr).toMatch(/ALERT_MENTION/);
+  });
 });
 
 // ── the weekly digest's drift backstop ───────────────────────────────────────
@@ -1071,6 +1090,31 @@ describe("the alert_pipeline_failure CI job", () => {
     );
   });
 
+  it("names every schedule flag in the blanket guard's comment", () => {
+    // The guard itself is right and needs no change: one
+    // `$CI_PIPELINE_SOURCE == "schedule"` rule suppresses every flagged schedule
+    // by construction, which is precisely why it does not carry one rule per
+    // flag. What rots is the COMMENT's enumeration — #191 added a fifth schedule
+    // and a fourth flag while the list still named three, and a comment that
+    // undercounts is how the next person concludes a flag is not covered and
+    // adds a redundant rule to a job that already suppresses it.
+    //
+    // Derived from the file with the same parser the parity check uses, rather
+    // than a second hard-coded list which would rot in exactly the same way.
+    const flags = allGuardedFlags(CI_YML);
+    // Not a count: a count is the incidental-formatting assertion this parser
+    // exists to replace. Naming the flag #191 added proves the derivation ran.
+    expect(flags).toContain("PROD_STATE_CHECK");
+    const comment = rules
+      .filter((line) => line.trim().startsWith("#"))
+      .join(" ");
+    const unnamed = flags.filter((flag) => !comment.includes(flag));
+    expect(
+      unnamed,
+      `the blanket schedule guard's comment does not name: ${unnamed.join(", ")}`,
+    ).toEqual([]);
+  });
+
   it("never runs on a merge-request pipeline", () => {
     // A red MR pipeline is already in front of the person who pushed it, and it
     // cannot make main and production diverge.
@@ -1119,8 +1163,15 @@ describe("the alert_pipeline_failure CI job", () => {
 describe("the ops_digest CI job", () => {
   const job = (CI_YML.split(/^ops_digest:$/m)[1] ?? "").split(/^\S/m)[0];
 
-  it("still runs only on schedules", () => {
+  it("still runs only on schedules, and on no flagged one", () => {
     // Adding the drift backstop must not change when the digest runs.
+    //
+    // The digest's LAST rule is a bare `schedule` catch-all, so every new flag
+    // has to be guarded here explicitly or the digest starts riding that flag's
+    // schedule. #191 added PROD_STATE_CHECK on an HOURLY cron, which without the
+    // guard would have posted 24 weekly digests a day — and the list is written
+    // out in full rather than matched loosely precisely so that a new flag
+    // cannot be added without somebody reading this comment.
     const ifs = (job.split(/^ {2}rules:$/m)[1] ?? "")
       .split("\n")
       .filter((line) => line.includes("if:"));
@@ -1128,6 +1179,7 @@ describe("the ops_digest CI job", () => {
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'`,
+      `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule"'`,
     ]);
   });

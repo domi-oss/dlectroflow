@@ -65,6 +65,28 @@ export default defineConfig({
     environment: "node",
     setupFiles: [path.join(__dirname, "vitest.setup.ts")],
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // #191 — Vitest's 5000 ms default is a WALL-CLOCK budget, and every
+    // `src/lib` suite that drives a real `scripts/*.sh` does so through a
+    // blocking `spawnSync`, several with `curl` and `kubectl` stubbed on PATH
+    // (the `pipeline-failure-alert` / `registry-prune` / `prod-state-alert`
+    // idiom). Those tests spend their time waiting on child processes that
+    // compete for the same cores as every other worker, so their wall clock
+    // stretches with suite-wide load while the code under test is unchanged.
+    //
+    // MEASURED, same tree, one file: the heaviest case in
+    // `prod-state-alert.test.ts` spawns four subprocesses and takes ~1.0 s run
+    // on its own — and 7.1 s inside a full-suite run, where it blew the default
+    // and failed. The suite held 298 files when that was measured; the count is
+    // recorded as a condition of the measurement rather than as a current fact,
+    // and it only ever grows. Three other full runs of that same tree were
+    // green, which is the signature of a budget being crossed, not a bug.
+    //
+    // 30 s is chosen to be far above the loaded worst case and far below
+    // anything a genuinely hung test would reach; it only costs time on a
+    // failure. Raising it is not papering over a slow test — a red pipeline
+    // caused by CPU contention says nothing about the code, and teaches people
+    // to re-run rather than read the failure.
+    testTimeout: 30_000,
     ...(DATABASE_URL ? { env: { DATABASE_URL } } : {}),
   },
   resolve: {
