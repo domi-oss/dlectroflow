@@ -121,8 +121,13 @@
   # Semgrep fingerprints a finding by file and line, so a dismissal attaches to
   # a position rather than to code: any edit above one resurfaces an
   # already-triaged finding as untriaged, and a human has to read it and dismiss
-  # it with written evidence again. 55 historical records for this rule, 54
-  # dismissed; the three constructs in the scoping harness account for 11 alone.
+  # it with written evidence again. 58 historical records for this rule, 57
+  # dismissed, on the project vulnerability report as of 2026-08-11; the three
+  # constructs in the scoping harness account for 11 alone. The cumulative count
+  # is quoted rather than a per-pipeline one because the snapshot rots — it read
+  # 15 of 37 on `57a272a` and 18 of 40 three merges later. Paginate if you
+  # re-measure: the SAST history is 141 records and one page of 100 undercounts
+  # this rule by three.
   #
   # ── Why Info and not `disable = true` ───────────────────────────────────────
   #
@@ -161,4 +166,4 @@
       value = "eslint.detect-non-literal-regexp"
     [semgrep.ruleset.override]
       severity = "Info"
-      description = "Dynamically-constructed RegExp. Demoted to Info in #234: 15 of 37 SAST findings on main and zero true positives, because every pattern here is built from a module constant, an escapeForRegExp call, a Postgres identifier out of this repo's own migrations, or a test fixture. This does not change any merge gate -- the scan-result policy gates on Critical/High only and this rule is Medium; what it ends is a recurring triage cost, because Semgrep re-fingerprints on line position and a dismissal has to be re-argued every time code moves. Pattern provenance is enforced instead by src/lib/regexp-source-hygiene.test.ts, which FAILS THE BUILD -- strictly stronger than this rule was -- and which is keyed without line numbers so it cannot re-fingerprint. Re-raise this to Medium if that guard is removed or its REVIEWED_DYNAMIC_PATTERNS map grows a request-derived value."
+      description = "Dynamically-constructed RegExp. Demoted to Info in #234: the largest single source of SAST findings in this repo -- 58 records in the project's history, 57 of them already dismissed -- and zero true positives, because every pattern here is built from a module constant, an escapeForRegExp call, a Postgres identifier out of this repo's own migrations, or a test fixture. This does not change any merge gate -- the scan-result policy gates on Critical/High only and this rule is Medium; what it ends is a recurring triage cost, because Semgrep re-fingerprints on line position and a dismissal has to be re-argued every time code moves. Pattern provenance is enforced instead by src/lib/regexp-source-hygiene.test.ts, which FAILS THE BUILD -- strictly stronger than this rule was -- and which is keyed without line numbers so it cannot re-fingerprint. Re-raise this to Medium if that guard is removed or its REVIEWED_DYNAMIC_PATTERNS map grows a request-derived value."

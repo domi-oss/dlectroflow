@@ -76,11 +76,13 @@ operators upgrading a self-hosted instance don't get surprised.
   project's own security scanning, and self-hosters inherit the same guard.
 
   One scanner rule — "this regular expression was built at run time rather than
-  written out" — accounts for **15 of the 37 findings** the scanners report
-  about this codebase, and none of them was ever a real problem: every pattern
-  here is assembled from fixed constants, from text already escaped, from
-  identifiers in the project's own database migrations, or from a test's own
-  fixtures. There is no route from anything a user types to one of them.
+  written out" — accounts for **more than a third of everything the scanners
+  report** about this codebase, 58 records across the project's history with 57
+  of them already reviewed and dismissed, and none was ever a real problem:
+  every pattern here is assembled from fixed constants, from text already
+  escaped, from identifiers in the project's own database migrations, or from a
+  test's own fixtures. There is no route from anything a user types to one of
+  them.
 
   The cost was never that these blocked anything — they did not. It was that the
   scanner remembers a finding by its **position in the file**, so adding a

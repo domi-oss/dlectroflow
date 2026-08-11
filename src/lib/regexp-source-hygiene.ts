@@ -33,19 +33,26 @@
  * finding by file and line, so a dismissal attaches to a POSITION rather than
  * to code: any edit above one — a comment, an import, a reordered block —
  * resurfaces an already-triaged finding as untriaged, and somebody has to read
- * it and dismiss it with written evidence again. There are 55 historical
- * records for this rule, 54 of them dismissed; the three constructs in the
- * scoping harness account for 11 by themselves. `!318`, which touched only a
- * page footer and its tests, produced three more.
+ * it and dismiss it with written evidence again. There are **58 historical
+ * records for this rule, 57 of them dismissed** (project vulnerability report,
+ * 2026-08-11); the three constructs in the scoping harness account for 11 by
+ * themselves, and `!318`, which touched only a page footer and its tests,
+ * produced three more.
+ *
+ * That total is the argument, and it is deliberately the *cumulative* one rather
+ * than a per-pipeline snapshot, because a snapshot rots: it read 15 of 37 on
+ * `57a272a` and 18 of 40 three merges later. If you re-measure, **paginate** —
+ * the project's SAST history runs to 141 records and a single page of 100
+ * undercounts this rule by three.
  *
  * ── Why a guard and not just a rewrite ───────────────────────────────────────
  *
  * #234 as filed proposed removing three `new RegExp` constructs from the
- * scoping harness. Those three are 3 of the rule's 15 current findings — a
- * fifth of it — and `registry-prune.test.ts` carries just as many. Worse, the
- * harness's patterns are assembled from `Prisma.dmmf` **at runtime**, which is
- * what makes a model enrol in the scoping check automatically; replacing them
- * with a fixed set would trade a false positive for a real hole.
+ * scoping harness. Those are 3 of the 25 constructions in the tree, and
+ * `registry-prune.test.ts` carries the same three. Worse, the harness's patterns
+ * are assembled from `Prisma.dmmf` **at runtime**, which is what makes a model
+ * enrol in the scoping check automatically; replacing them with a fixed set
+ * would trade a false positive for a real hole.
  *
  * So the fix follows #83's precedent, which is the one this repo already uses
  * for this shape: demote the rule in `.gitlab/sast-ruleset.toml` so it stops
@@ -139,6 +146,18 @@ export function regexpSiteKey(file: string, argument: string): string {
  * literals. Escapes are handled by skipping the escaped character rather than
  * by looking backwards at `src[i - 1]`, which mis-reads `\\` as escaping
  * whatever follows it.
+ *
+ * ── One invariant carries the `.tsx` cases (!319 review) ─────────────────────
+ *
+ * **A construct that does not terminate on its own line was never that
+ * construct.** Neither a regex literal nor a `'`/`"` string may contain a raw
+ * newline, so an unterminated one is ordinary code — and treating it as open,
+ * then skipping to the newline, blinded the scanner to the rest of that line.
+ * Two ordinary JSX shapes did exactly that: `</span>`, whose `/` sits in a
+ * position where a regex may legally open, and an apostrophe in prose text
+ * (`<p>don't</p>`). A `new RegExp` later on either line went unseen. JSX text is
+ * not JavaScript and no tokeniser here can know it is inside text, but it can
+ * know a string never closed.
  */
 function codeMask(src: string): Uint8Array {
   const mask = new Uint8Array(src.length);
@@ -168,18 +187,29 @@ function codeMask(src: string): Uint8Array {
     return REGEX_KEYWORD.test(src.slice(Math.max(0, at - 12), at).trimEnd());
   };
 
-  const skipTo = (from: number, close: string, escapable: boolean): number => {
+  /**
+   * The index just past `close`, or **-1** when the construct never terminated.
+   *
+   * `-1` is what the quote arm needs: a `'` or `"` that does not close on its own
+   * line was never a string opener, and returning the newline's index instead
+   * swallowed the remainder of the line as string content.
+   */
+  const skipTo = (
+    from: number,
+    close: string,
+    escapable: boolean,
+    bailOnNewline: boolean,
+  ): number => {
     for (let j = from; j < src.length; j++) {
       if (escapable && src[j] === "\\") {
         j++;
         continue;
       }
       if (src.startsWith(close, j)) return j + close.length;
-      // An unterminated single-quoted string cannot span a newline; bail rather
-      // than swallowing the rest of the file.
-      if (close.length === 1 && close !== "`" && src[j] === "\n") return j;
+      if (bailOnNewline && src[j] === "\n") return -1;
     }
-    return src.length;
+    // A comment may legitimately run to end of file; a string may not.
+    return bailOnNewline ? -1 : src.length;
   };
 
   while (i < src.length) {
@@ -210,28 +240,32 @@ function codeMask(src: string): Uint8Array {
 
     // Real code — either top level, or inside a template interpolation.
     if (src.startsWith("//", i)) {
-      i = skipTo(i + 2, "\n", false);
+      i = skipTo(i + 2, "\n", false, false);
       continue;
     }
     if (src.startsWith("/*", i)) {
-      i = skipTo(i + 2, "*/", false);
+      i = skipTo(i + 2, "*/", false, false);
       continue;
     }
     if (ch === '"' || ch === "'") {
-      i = skipTo(i + 1, ch, true);
-      continue;
-    }
-    if (ch === "`") {
+      const end = skipTo(i + 1, ch, true, true);
+      if (end !== -1) {
+        i = end;
+        continue;
+      }
+      // Never closed on this line, so not a string — an apostrophe in JSX prose
+      // is the ordinary case. Fall through and mask it as code.
+    } else if (ch === "`") {
       templates.push({ depth: 0 });
       i++;
       continue;
-    }
-    if (ch === "/" && startsRegex(i)) {
+    } else if (ch === "/" && startsRegex(i)) {
       // Skip the body. The flags that follow are ordinary identifier
       // characters and are left as code, which is harmless — `g`, `i` and `m`
       // cannot begin a `new RegExp(` match.
       let j = i + 1;
       let cls = false;
+      let closed = false;
       for (; j < src.length; j++) {
         if (src[j] === "\\") {
           j++;
@@ -239,11 +273,17 @@ function codeMask(src: string): Uint8Array {
         }
         if (src[j] === "[") cls = true;
         else if (src[j] === "]") cls = false;
-        else if (src[j] === "/" && !cls) break;
-        else if (src[j] === "\n") break;
+        else if (src[j] === "/" && !cls) {
+          closed = true;
+          break;
+        } else if (src[j] === "\n") break;
       }
-      i = j + 1;
-      continue;
+      if (closed) {
+        i = j + 1;
+        continue;
+      }
+      // No closing `/` before the line ended, so this was not a regex literal —
+      // `</span>` is the case that matters. Fall through and mask it as code.
     }
     if (frame !== undefined) {
       if (ch === "{") frame.depth++;
@@ -336,8 +376,16 @@ const MODULE_CONSTANT = /^[A-Z][A-Z0-9_]*$/;
 function isEscapedCall(expr: string): boolean {
   const head = /^escapeForRegExp\s*\(/.exec(expr);
   if (head === null) return false;
+  // Only the parens the mask calls code count. Duo raised this on !319 — "string
+  // literals passed to escapeForRegExp could themselves contain parens" — and the
+  // first fix closed the open half and left this one: `escapeForRegExp(")")` had
+  // its call ended by the `)` inside its own string argument, so a genuine single
+  // call was reported unreviewed. Fail-closed, but a guard that flags correct code
+  // is how a guard gets relaxed later.
+  const mask = codeMask(expr);
   let depth = 0;
   for (let i = head[0].length - 1; i < expr.length; i++) {
+    if (!mask[i]) continue;
     if (expr[i] === "(") depth++;
     else if (expr[i] === ")") {
       depth--;
@@ -350,37 +398,97 @@ function isEscapedCall(expr: string): boolean {
 }
 
 /**
- * Is `name` bound by a file-level `const NAME = …` in this source?
+ * Is `name` bound by a file-level `const NAME = <literal>` in this source?
  *
  * The first version tested the identifier's SHAPE, which is not a property of
  * the value at all. A SCREAMING_CASE function parameter, a reassignable `let`,
  * `const BASE = process.env.BASE`, and `const { QUERY } = await req.json()` all
  * match `^[A-Z][A-Z0-9_]*$` — and the last two are attacker-reachable by
- * definition. Requiring a file-level `const` is still not a proof (the
- * initialiser could be anything), but it rules out the reachable shapes and
- * leaves a human to argue the rest through the allowlist.
+ * definition.
+ *
+ * Three things it must get right, all found by the second !319 round:
+ *
+ * 1. **Only declarations the mask calls code.** A raw line scan let a
+ *    declaration written inside a template-literal FIXTURE vouch for a name it
+ *    never bound, and this repo's hygiene tests are built out of source
+ *    fixtures. That failed OPEN.
+ * 2. **Column 0 only.** The scan trimmed each line, so an indented `const`
+ *    inside some unrelated function body satisfied a check whose entire claim is
+ *    "file-level".
+ * 3. **`export const` counts.** It is a file-level const, and dozens of the
+ *    repo's SCREAMING_CASE literals are exported. Rejecting them told the reader
+ *    to build the pattern from a module constant, which is what they had done.
+ *
+ * **Known limit, stated rather than papered over:** this resolves a name by
+ * declaration, not by scope. A file-level `const NAME = "x"` *shadowed* at the
+ * construction site — by a same-named parameter, say — still reads as the
+ * constant. Closing that needs a scope-resolving parser rather than a line scan,
+ * which is a different module; the residual is narrow because the shadow has to
+ * be SCREAMING_CASE to reach this function at all, and the allowlist is where a
+ * reviewer disposes of anything this cannot decide.
  */
-function isFileLevelConst(name: string, source: string): boolean {
-  for (const raw of source.split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith(`const ${name}`)) continue;
-    const after = line.slice(`const ${name}`.length);
-    // Guard against `const PREFIXES = …` matching a request for `PREFIX`.
-    if (/^[A-Za-z0-9_$]/.test(after)) continue;
-    const eq = after.indexOf("=");
-    if (eq === -1) continue;
-    const init = after
-      .slice(eq + 1)
-      .trim()
-      .replace(/;$/, "");
-    // The INITIALISER has to be a literal too, not merely the binding.
-    // `const BASE = process.env.BASE ?? ""` is a file-level const and is
-    // external input; so is `const { QUERY } = await req.json()`. Being
-    // unreassignable says nothing about where the value came from, and where it
-    // came from is the only question this module asks.
-    if (/^-?\d[\d_.]*$/.test(init)) return true;
-    if (isSingleLiteral(init) && !init.includes("${")) return true;
-    return false;
+function isFileLevelConst(
+  name: string,
+  source: string,
+  mask: Uint8Array,
+): boolean {
+  const decl = `const ${name}`;
+  for (let at = 0; at < source.length;) {
+    const nl = source.indexOf("\n", at);
+    const end = nl === -1 ? source.length : nl;
+    const line = source.slice(at, end);
+    const offset = line.startsWith("export ") ? "export ".length : 0;
+    // `mask[at + offset]` is the check that keeps fixture text out: inside a
+    // template literal the declaration's own `c` is not code.
+    if (mask[at + offset] === 1 && line.startsWith(decl, offset)) {
+      const after = line.slice(offset + decl.length);
+      // Guard against `const PREFIXES = …` matching a request for `PREFIX`.
+      if (!/^[A-Za-z0-9_$]/.test(after)) {
+        const eq = after.indexOf("=");
+        if (eq === -1) return false;
+        const init = after
+          .slice(eq + 1)
+          .trim()
+          .replace(/;$/, "");
+        // The INITIALISER has to be a literal too, not merely the binding.
+        // `const BASE = process.env.BASE ?? ""` is a file-level const and is
+        // external input; so is `const { QUERY } = await req.json()`. Being
+        // unreassignable says nothing about where the value came from, and where
+        // it came from is the only question this module asks.
+        if (/^-?\d[\d_.]*$/.test(init)) return true;
+        return isSingleLiteral(init) && !init.includes("${");
+      }
+    }
+    if (nl === -1) break;
+    at = nl + 1;
+  }
+  return false;
+}
+
+/**
+ * Is the argument a single regex literal, as in `new RegExp(/^a$/, "gi")`?
+ *
+ * That idiom re-flags a written-out pattern, so it is exactly what the demoted
+ * rule asks for and it was being reported `unreviewed` (!319 review). What must
+ * not ride in on it is a literal used as a *value*: `new RegExp(/^a/.source +
+ * raw)` also begins with a `/` and is a concatenation, so the closing `/` has to
+ * be followed by nothing but flag letters.
+ */
+function isSingleRegexLiteral(argument: string): boolean {
+  if (argument[0] !== "/") return false;
+  let cls = false;
+  for (let i = 1; i < argument.length; i++) {
+    const ch = argument[i];
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === "[") cls = true;
+    else if (ch === "]") cls = false;
+    else if (ch === "\n") return false;
+    else if (ch === "/" && !cls) {
+      return /^[dgimsuvy]*$/.test(argument.slice(i + 1).trim());
+    }
   }
   return false;
 }
@@ -418,7 +526,10 @@ function classify(
   argument: string,
   interpolations: string[],
   source: string,
+  mask: Uint8Array,
 ): RegExpVerdict {
+  // A written-out `/pattern/` is as fixed as a string, and cannot interpolate.
+  if (isSingleRegexLiteral(argument)) return "literal";
   // Not one literal token: a bare expression (`new RegExp(line)`) or a
   // concatenation (`"^" + x`). Either way nothing about the pattern is fixed.
   if (!isSingleLiteral(argument)) return "unreviewed";
@@ -426,7 +537,8 @@ function classify(
 
   let sawEscape = false;
   for (const expr of interpolations) {
-    if (MODULE_CONSTANT.test(expr) && isFileLevelConst(expr, source)) continue;
+    if (MODULE_CONSTANT.test(expr) && isFileLevelConst(expr, source, mask))
+      continue;
     if (isEscapedCall(expr)) {
       sawEscape = true;
       continue;
@@ -469,7 +581,7 @@ export function scanRegExpSites(file: string, source: string): RegExpSite[] {
       .trim()
       .replace(/\s+/g, " ");
     const interpolations = interpolationsOf(argument);
-    let verdict = classify(argument, interpolations, source);
+    let verdict = classify(argument, interpolations, source, mask);
     if (verdict === "unreviewed" && isTestFile(file)) verdict = "test-only";
     sites.push({
       key: regexpSiteKey(file, argument),

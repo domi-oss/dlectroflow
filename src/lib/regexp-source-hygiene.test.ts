@@ -164,6 +164,75 @@ describe("scanRegExpSites — the verdicts", () => {
       ].join("\n");
       expect(verdict(real)).toBe("constant");
     });
+
+    it("does not accept a const declared only inside a fixture string", () => {
+      // Second !319 round. The check was a raw line scan over the whole file, so
+      // a declaration written inside a template-literal FIXTURE vouched for a
+      // name it never bound — and this repo's hygiene tests are made of source
+      // fixtures, which makes the shape ordinary rather than exotic. Fails OPEN,
+      // which is why it is here rather than in a docblock.
+      const src = [
+        "const FIXTURE = `",
+        'const PREFIX = "safe";',
+        "`;",
+        "function f(PREFIX: string) { return new RegExp(`^${PREFIX}$`); }",
+      ].join("\n");
+      expect(verdict(src)).toBe("unreviewed");
+    });
+
+    it("does not accept a block-scoped const as a file-level one", () => {
+      // The line scan trimmed, so an indented `const` inside a function body
+      // satisfied a check whose whole claim is "file-level".
+      const src = [
+        "function g() {",
+        '  const PREFIX = "safe";',
+        "  return PREFIX;",
+        "}",
+        "function f(PREFIX: string) { return new RegExp(`^${PREFIX}$`); }",
+      ].join("\n");
+      expect(verdict(src)).toBe("unreviewed");
+    });
+  });
+
+  it("accepts an EXPORTED file-level literal constant", () => {
+    // `export const NAME = …` is a file-level const, and the check only matched
+    // a bare `const`. So every exported SCREAMING_CASE literal in the repo —
+    // there are dozens — was rejected, with a failure message telling the reader
+    // to build the pattern from a module constant, which is what they had done
+    // (!319 review).
+    expect(
+      verdict(
+        [
+          'export const PREFIX = "[a-f0-9]";',
+          "const r = new RegExp(`^${PREFIX}+$`);",
+        ].join("\n"),
+      ),
+    ).toBe("constant");
+  });
+
+  it("treats a regex-literal argument as literal, but not one used as a value", () => {
+    // `new RegExp(/re/, "gi")` is the idiom for re-flagging a written-out
+    // pattern; it is as literal as a string and was reported `unreviewed`.
+    expect(verdict('const r = new RegExp(/^[a-z]+$/, "gi");')).toBe("literal");
+    // What must not ride in on that: this starts with a `/` too.
+    expect(verdict("const r = new RegExp(/^a/.source + raw);")).toBe(
+      "unreviewed",
+    );
+  });
+
+  it("counts only the parens that are code inside an escapeForRegExp call", () => {
+    // Duo raised exactly this on !319 — "string literals passed to
+    // escapeForRegExp could themselves contain parens" — and the first fix
+    // closed the open half and left this one. A `)` inside the escaped value's
+    // own string ended the call early, so a genuine single call read as
+    // unreviewed.
+    expect(verdict('const r = new RegExp(`^${escapeForRegExp(")")}$`);')).toBe(
+      "escaped",
+    );
+    // …and the shape that must not pass still does not.
+    expect(
+      verdict('const r = new RegExp(`^${escapeForRegExp(")") + raw}$`);'),
+    ).toBe("unreviewed");
   });
 
   it("classifies a construction inside a test file as test-only", () => {
@@ -188,6 +257,54 @@ describe("scanRegExpSites — the verdicts", () => {
       ");",
     ].join("\n");
     expect(verdict(src)).toBe("unreviewed");
+  });
+});
+
+/**
+ * !319 review, second round. One invariant, and it is the tokeniser's whole
+ * remaining weakness in `.tsx`: **a construct that does not terminate on its own
+ * line was never that construct.** Neither a regex literal nor a `'`/`"` string
+ * can contain a raw newline, so treating an unterminated one as open and running
+ * the skip to the end of the line made the scanner blind to everything after it
+ * on that line. For a compensating control that is the worst failure available,
+ * because the SAST demotion stays whether the guard looks or not — the same
+ * fault as the four files the first version missed, in a different disguise.
+ */
+describe("codeMask — an unterminated single-line construct was never one", () => {
+  it("sees a construction after a JSX closing tag on the same line", () => {
+    // `</span>`'s `/` follows a `<`, which is a position where a regex may
+    // legally open — so the skip ran to the newline and swallowed the rest.
+    const src = [
+      "export function C({ attacker }: { attacker: string }) {",
+      "  const label = <span>hi</span>; const r = new RegExp(attacker);",
+      "  return label && r;",
+      "}",
+    ].join("\n");
+    expect(scanRegExpSites("src/components/x/c.tsx", src)).toHaveLength(1);
+  });
+
+  it("sees a construction after an apostrophe in JSX text on the same line", () => {
+    // The `'` in ordinary prose read as a string opener. JSX text is not
+    // JavaScript, so no tokeniser can know it is in text — but it can know that
+    // a string which never closes on its line is not a string.
+    const src = [
+      "export function C({ attacker }: { attacker: string }) {",
+      "  const label = <p>don't</p>; const r = new RegExp(attacker);",
+      "  return label && r;",
+      "}",
+    ].join("\n");
+    expect(scanRegExpSites("src/components/x/c.tsx", src)).toHaveLength(1);
+  });
+
+  it("still treats a real regex literal and a real string as non-code", () => {
+    // The other direction, and the reason the fix is "unterminated" rather than
+    // "stop skipping": a terminated construct must stay invisible.
+    expect(
+      scanRegExpSites("src/lib/a.ts", "const re = /new RegExp\\(x\\)/;"),
+    ).toEqual([]);
+    expect(
+      scanRegExpSites("src/lib/a.ts", 'const s = "new RegExp(x)";'),
+    ).toEqual([]);
   });
 });
 
@@ -225,6 +342,24 @@ describe("regexpSiteKey", () => {
     );
     expect(a[0].key).toBe(b[0].key);
     expect(a[0].key).not.toMatch(/\d+$/);
+  });
+
+  it("survives a re-wrap, which is the whole re-fingerprint claim", () => {
+    // A repo-wide reformat is the documented way triaged SAST findings come back
+    // as new (`CLAUDE.md`), and this MR's argument is that the guard cannot do
+    // that. Line-independence is not enough on its own — the key embeds the
+    // argument's TEXT, so Prettier re-wrapping a long call must still produce the
+    // same key. Whitespace runs are collapsed for exactly this reason.
+    const oneLine = 'const r = new RegExp(`^${A}\\\\s+b$`, "i");';
+    const wrapped = [
+      "const r = new RegExp(",
+      "  `^${A}\\\\s+b$`,",
+      '  "i",',
+      ");",
+    ].join("\n");
+    const [a] = scanRegExpSites("src/lib/a.ts", oneLine);
+    const [b] = scanRegExpSites("src/lib/a.ts", wrapped);
+    expect(b.key).toBe(a.key);
   });
 });
 
