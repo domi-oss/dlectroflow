@@ -14,7 +14,7 @@ This is a **maintained production app, not a demo** — real users, real data. T
 - **LLM**: bring-your-own provider — `@anthropic-ai/sdk` and `openai` behind `src/lib/llm/`
 - **Tests**: Vitest (unit/integration) and Playwright (e2e, `@axe-core/playwright` for a11y)
 
-Next.js 16 has breaking changes vs. older training data — read `node_modules/next/dist/docs/` before writing framework code (see `AGENTS.md`).
+Next.js 16 ships version-matched documentation at `node_modules/next/dist/docs/`, which is the accurate reference for this version's APIs — worth consulting for framework code (see `AGENTS.md`).
 
 ## Commands
 

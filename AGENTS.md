@@ -1,14 +1,21 @@
 <!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Next.js version reference
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This project uses Next.js 16. Version-matched documentation ships with the
+dependency at `node_modules/next/dist/docs/` and is the accurate reference for
+this version's APIs, conventions and file structure — worth consulting for
+framework code.
 
 <!-- END:nextjs-agent-rules -->
 
-## Security Assessment
+## Security assessment prompt
 
-When asked to perform a security review or security assessment, agents are pointed to the prompt defined in `.gitlab/duo/prompts/security-assessment.md` via this AGENTS.md reference.
+The repository keeps a security-assessment prompt at
+`.gitlab/duo/prompts/security-assessment.md`, for anyone running a **full
+security assessment** of the project. It does not apply to ordinary code review.
 
-This prompt covers: vulnerability triage, secrets hygiene, least privilege, supply chain security, container security, frontend security, compliance posture, license review, GitLab platform configuration, incident response readiness, and security program cadence.
-
-The output should always be presented as an actionable work plan with prioritized work items, quick wins, agent automation opportunities, and a security debt register.
+It covers vulnerability triage, secrets hygiene, least privilege, supply chain,
+container and frontend security, compliance posture, licence review, GitLab
+platform configuration, incident response readiness and security program
+cadence. Its output format is a prioritised work plan with quick wins and a
+security debt register.
