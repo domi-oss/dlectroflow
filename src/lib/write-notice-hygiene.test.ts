@@ -411,6 +411,28 @@ describe("politeAnnouncersOf (rule E)", () => {
     ).toEqual([]);
   });
 
+  /**
+   * `!325`, Duo review — rule E accepted any `aria-live` that was not `"off"`,
+   * which included `"assertive"`. That is not a polite announcer, it is a second
+   * assertive one: two assertive regions describing the same write interrupt each
+   * other, and the notice's own `role="alert"` is already saying the louder half.
+   * The rule's own name promised the thing it was not checking.
+   */
+  it("does not accept a second assertive region as the polite announcer", () => {
+    expect(
+      politeAnnouncersOf(
+        `const v = (
+           <>
+             <div role="alert">{t("x.errorSaveFailed", voice)}</div>
+             <p aria-live="assertive" className="sr-only">{t("x.errorSaving", voice)}</p>
+           </>
+         );`,
+        "a.tsx",
+        "x.errorSaving",
+      ),
+    ).toEqual([]);
+  });
+
   it("does not accept an announcer for a different sentence", () => {
     expect(
       politeAnnouncersOf(sibling, "a.tsx", "x.errorSomethingElse"),

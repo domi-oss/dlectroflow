@@ -548,10 +548,14 @@ function collectLiterals(node: ts.Node): Set<string> {
  *
  * Three conditions, and each one is load-bearing:
  *
- *  * **`aria-live` explicitly.** `role="status"` implies `aria-live="polite"`, but
- *    only spelling it out survives the region being moved; and the surfaces that
- *    got this right all spell it out. A bare `role="status"` is accepted when it
- *    also carries `aria-live` — this checks the attribute, not the role.
+ *  * **`aria-live="polite"` explicitly.** `role="status"` implies it, but only
+ *    spelling it out survives the region being moved, and the surfaces that got
+ *    this right all spell it out. **`"assertive"` does not count**, which is the
+ *    correction `!325`'s Duo review earned: the first draft accepted any value but
+ *    `"off"`, so a second assertive region satisfied a rule whose own name
+ *    promises politeness. Two assertive regions describing one write interrupt
+ *    each other, and the notice's `role="alert"` is already saying the louder
+ *    half — which is the whole reason the wait is a separate, quieter channel.
  *  * **Not nested.** A polite region inside the notice's assertive `role="alert"`
  *    inherits the container's politeness across its whole subtree, so it does not
  *    announce politely; it makes the alert re-read itself. Rule D reports the
@@ -568,7 +572,7 @@ export function politeAnnouncersOf(
 ): LiveRegion[] {
   return liveRegionsIn(source, fileName).filter(
     (region) =>
-      region.declared.includes('aria-live="') &&
+      region.declared.includes('aria-live="polite"') &&
       region.ancestors.length === 0 &&
       region.selects.includes(key),
   );
