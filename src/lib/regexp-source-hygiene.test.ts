@@ -437,7 +437,20 @@ describe("the real tree", () => {
     // control when the thing being guarded against is silently seeing less
     // (!319 review). Update this deliberately when a construction is added or
     // removed; that is the point.
-    expect(sites.length).toBe(25);
+    //
+    // Which means an unrelated MR that adds a `new RegExp` anywhere in `src/` or
+    // `e2e/` fails HERE, in a file it never touched — `!306` (#225) adds one to
+    // `inbox-view.write-failure.test.tsx` and will. The message below is what
+    // turns that from a puzzle into a one-line fix, so keep it attached to the
+    // assertion.
+    expect(
+      sites.length,
+      "A `new RegExp` was added to or removed from src/ or e2e/. That is fine — " +
+        "bump this number to match. It is exact on purpose: a floor would let " +
+        "the scanner silently go blind and stay green. If the count went DOWN " +
+        "and you did not delete a construction, the tokeniser has stopped " +
+        "seeing one, which is the bug this guard exists to prevent.",
+    ).toBe(25);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);
