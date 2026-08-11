@@ -74,7 +74,7 @@ postgres:
   # customManager in .gitlab/renovate.json via the "# renovate:" annotation below, which
   # bumps this tag+digest — and the backup dumpImage that defaults to it. (#15)
   # renovate: datasource=docker depName=postgres versioning=docker
-  image: postgres:16.14@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+  image: postgres:16.14@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
 
 tls:
   clusterIssuer: letsencrypt-prod
