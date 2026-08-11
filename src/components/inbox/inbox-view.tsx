@@ -1016,14 +1016,21 @@ export function InboxView({
    * `refreshing` is already dimming the list while it does. #210's capture path
    * makes the same call for the same reason.
    *
-   * `keepAsTask` is why this is not merely tidy: it CREATES a Task and then
-   * points the item at it, so two in flight leave an orphaned Task row that
-   * nothing can reach.
+   * The three Task-CREATING writes are why this is not merely tidy — `keepAsTask`,
+   * `startBreakdown` and `ensureFocusStep` each make a Task and then point the
+   * item at it, so two in flight left an orphaned Task row that nothing could
+   * reach. **This guard is not what closes that**, and saying so is the point:
+   * it is per-press and per-client, so it cannot see the Retry this notice offers
+   * after a ten-second timeout, and it cannot span two tabs at all. All three are
+   * guarded in the write itself now (see their doc comments in
+   * `src/app/actions/braindump.ts` and `breakdown.ts`); the guard here just stops
+   * the ordinary double-tap ever getting that far.
    *
    * ## What this still cannot see
    *
-   * **All eight actions can decline without throwing** — every one of them is
-   * `findFirst`-then-write and returns early when the row is gone, and
+   * **All eight actions can decline without throwing** — each returns early when
+   * the row is gone, whether from a `findFirst` in front of the write or, for the
+   * three above, from the guarded write's own zero-row answer; and
    * `freshenItem`/`dismissPrompt` are bare `updateMany`s that report nothing when
    * they match zero rows. On the wire a decline is identical to a success, so
    * `run()` cannot tell them apart; closing that properly means the eight actions

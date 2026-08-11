@@ -12,12 +12,18 @@
  * row that already has its Task.
  *
  * Before the fix that created a second one. `keepAsTask` was
- * `findFirst`-then-`task.create` with no precondition at all — the only one of
- * the four brain-dump→task writers without one (`startBreakdown` and
- * `ensureFocusStep` both check `item.taskId` first) — so the item's `taskId`
- * was repointed at the new row and the first Task was left behind, reachable
- * from no inbox row but still counted by the focus lanes, the ICS feed and the
- * data export.
+ * `findFirst`-then-`task.create` with no precondition at all, so the item's
+ * `taskId` was repointed at the new row and the first Task was left behind,
+ * reachable from no inbox row but still counted by the focus lanes, the ICS feed
+ * and the data export.
+ *
+ * This docblock used to add "the only one of the four brain-dump→task writers
+ * without one (`startBreakdown` and `ensureFocusStep` both check `item.taskId`
+ * first)", and that reassurance was false (!306, substitute review). Checking
+ * `item.taskId` from a `findFirst` outside a transaction is the unlocked
+ * check-then-act this file exists to replace, not a defence against it — both
+ * were measured producing two Tasks under contention. They are guarded now, and
+ * `braindump-task-writers.integration.test.ts` is their proof.
  *
  * **Neither property can be shown with a mock.** A mocked `$transaction` runs
  * its callback with no row lock and no rollback to demonstrate, which is the
