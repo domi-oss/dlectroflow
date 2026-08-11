@@ -334,8 +334,11 @@ function LibraryRow({
           to-do. Below the row body and outside the <Link> — a button inside an
           anchor is invalid, and the delete is about the row rather than part of
           the thing the row navigates to. */}
-      <div className="mt-2 flex items-center justify-end">
-        <LibraryDoneDelete id={item.id} voice={voice} />
+      {/* Full width rather than a right-aligned cluster: the control itself is
+          right-aligned inside, but a failed delete opens a notice below it that
+          has to be able to use the row's width (#251 review). */}
+      <div className="mt-2 flex">
+        <LibraryDoneDelete id={item.id} title={item.text} voice={voice} />
       </div>
     </li>
   );

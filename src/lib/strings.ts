@@ -1165,6 +1165,53 @@ export const STRINGS = {
     plain: "Finished — every step done.",
     playful: "Finished — every step done. 🎉",
   },
+  // ── #251 — the Done row's delete-failure notice ──────────────────────────
+  //
+  // Named `lib.error.*`, following `focus.error.*` rather than the inbox's and
+  // shopping's `errorSave*` family, and the naming carries the decision: owning
+  // a `<prefix>.errorSaveTimeout` key is what enrols a surface in
+  // `write-notice-hygiene` rules A-C, which require the full four-cell
+  // timedOut × rowGone matrix. That matrix exists for the `rowGone` dimension —
+  // a write that needs a row to act on becomes un-retryable once the row is
+  // gone. **A delete is the one write for which the row being gone is the
+  // goal**, so those two cells could never be honestly selected here and adding
+  // them would mean writing copy for states that cannot occur. `focus-timer.tsx`
+  // is the recorded precedent for a notice with no row to lose; rules D and E
+  // still watch this file's live-region structure, which is the half that can
+  // see a missing or mis-nested announcement.
+  //
+  // Each message is the LEAD of a sentence the notice finishes by quoting the
+  // row's title, so each ends on a colon — the same shape the other surfaces'
+  // copy has, for the same reason.
+  "lib.error.delete": {
+    plain: "Couldn't delete that just now:",
+    playful: "Couldn't delete that just now:",
+  },
+  // Never "nothing changed": a timeout's verdict is genuinely unknown and the
+  // delete may well have landed. Retry stays on offer, and unlike the inbox and
+  // shopping surfaces it cannot mislead here — re-posting a delete that already
+  // landed is a no-op that reaches the state the user asked for either way.
+  "lib.error.deleteTimeout": {
+    plain:
+      "No answer from the server, so it may already have been deleted. Try again to be sure:",
+    playful:
+      "No answer from the server, so it may already have been deleted. Try again to be sure:",
+  },
+  // A stale action id cannot be re-posted — the running deployment has forgotten
+  // it — so this cell offers a reload and nothing else, and says so rather than
+  // inviting a press that is not on the screen.
+  "lib.error.stale": {
+    plain:
+      "The app updated while this page was open, so that didn't go through. Reload to carry on:",
+    playful:
+      "The app updated while this page was open, so that didn't go through. Reload to carry on:",
+  },
+  "lib.error.retry": { plain: "Try again", playful: "Try again" },
+  "lib.error.retrying": { plain: "Trying again…", playful: "Trying again…" },
+  "lib.error.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
   "lib.added": { plain: "added", playful: "added" },
   "lib.wakes": { plain: "wakes", playful: "wakes" },
   "lib.aToDo": { plain: "a to-do", playful: "a to-do" },

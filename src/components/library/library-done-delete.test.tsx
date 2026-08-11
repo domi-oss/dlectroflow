@@ -9,9 +9,13 @@
  * see the component's own doc comment for why it is not `<LibraryRows>`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { LibraryDoneDelete, LIB_PANEL_HEADING_ID } from "./library-done-delete";
+import {
+  LibraryDoneDelete,
+  LIB_PANEL_HEADING_ID,
+  LIBRARY_ACTION_TIMEOUT_MS,
+} from "./library-done-delete";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -38,7 +42,7 @@ function renderRow(id = "done-1") {
       <ul>
         <li>
           <span>Reply to recruiter</span>
-          <LibraryDoneDelete id={id} voice="plain" />
+          <LibraryDoneDelete id={id} title="Reply to recruiter" voice="plain" />
         </li>
       </ul>
     </section>,
@@ -46,7 +50,10 @@ function renderRow(id = "done-1") {
 }
 
 beforeEach(() => vi.clearAllMocks());
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("LibraryDoneDelete (#251)", () => {
   it("is a two-step confirm — the first press arms, the second deletes", async () => {
@@ -140,5 +147,203 @@ describe("LibraryDoneDelete (#251)", () => {
     await waitFor(() => expect(deleteBrainDumpItem).toHaveBeenCalled());
     expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
+  });
+});
+
+// ── #251 review — the failure path this component shipped without ──────────
+//
+// Every spec above mocks `deleteBrainDumpItem` as `mockResolvedValue(undefined)`,
+// which is exactly why the gap survived: the success path was the only one that
+// existed. `setConfirming(false)` runs synchronously, so the confirming button
+// unmounts and the resting 🗑 comes back WHILE the write is still in flight — and
+// with no `try`, a rejection propagated out of the transition as an unhandled
+// rejection, `router.refresh()` and the focus hand-off never ran, and the user was
+// left on `<body>` with nothing said and a live button that would start a second
+// concurrent delete.
+//
+// This is the failure class #210 and #225 exist for. The notice follows
+// `focus-timer.tsx`'s shape rather than the inbox/shopping `errorSave*` matrix,
+// because that matrix's whole purpose is the `rowGone` dimension — a write that
+// needs a row to act on becomes un-retryable once the row vanishes. For a DELETE
+// the row being gone is the goal, not a failure, so those cells could never be
+// honestly selected. See the component's doc comment.
+describe("LibraryDoneDelete — when the write does not land (#251)", () => {
+  const arm = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+  };
+
+  it("announces a rejection in an alert that names the item, and offers a retry", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    renderRow();
+
+    await arm(user);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't delete/i);
+    // Naming the row is the point: the Done pile is uncapped, so "it failed" with
+    // no subject leaves the user guessing which of forty rows it was about.
+    expect(alert).toHaveTextContent(/Reply to recruiter/);
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("puts focus on the notice rather than leaving it on <body>", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    renderRow();
+
+    await arm(user);
+
+    // The confirming button unmounted with the press, so the browser has already
+    // dropped focus. A notice nobody is sent to is a notice a keyboard user never
+    // meets (WCAG 2.4.3).
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /try again/i }),
+      ),
+    );
+  });
+
+  it("does not steal focus back from somewhere the user moved it", async () => {
+    const user = userEvent.setup();
+    let reject: (e: Error) => void = () => {};
+    vi.mocked(deleteBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((_, r) => {
+        reject = r;
+      }),
+    );
+    renderRow();
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+
+    await arm(user);
+    elsewhere.focus();
+    await act(async () => {
+      reject(new Error("offline"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+
+  it("retrying re-posts the delete and clears the notice when it lands", async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(undefined);
+    renderRow();
+
+    await arm(user);
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+
+    await waitFor(() => expect(deleteBrainDumpItem).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("offers a reload and no retry when the bundle is from another deployment", async () => {
+    // A stale action id cannot be re-posted: the running deployment has forgotten
+    // it, so a Retry is a button whose only outcome is the message already shown.
+    const user = userEvent.setup();
+    // The marker `isStaleActionError` actually recognises — a digest string is
+    // not one of them, and using one would have made this pass on the generic
+    // cell while claiming to test the stale one.
+    const stale = Object.assign(new Error("stale"), {
+      name: "UnrecognizedActionError",
+    });
+    vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(stale);
+    renderRow();
+
+    await arm(user);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/reload/i);
+    expect(
+      screen.getByRole("button", { name: /reload the page/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  it("keeps the polite announcer rendered and empty until there is a wait to announce", async () => {
+    // #218's shape: a live region that first appears WITH its message is silent,
+    // because assistive technology announces a change to a region already in the
+    // tree. It is also a SIBLING of the alert, never inside it — politeness
+    // applies to a whole subtree, so a polite region nested in an assertive one
+    // is just the assertive one re-reading itself.
+    const user = userEvent.setup();
+    vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    renderRow();
+
+    await arm(user);
+    await screen.findByRole("alert");
+
+    const announcer = screen.getByTestId("library-delete-announcer");
+    expect(announcer).toHaveTextContent("");
+    expect(announcer.closest('[role="alert"]')).toBeNull();
+  });
+
+  it("a second press while the write is in flight does not start a second delete", async () => {
+    const user = userEvent.setup();
+    let settle: () => void = () => {};
+    vi.mocked(deleteBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((r) => {
+        settle = () => r();
+      }),
+    );
+    renderRow();
+
+    await arm(user);
+    // The confirm has collapsed and the resting control is back on screen, which
+    // is what made this reachable at all. Its accessible name now carries the
+    // busy reason, because `aria-disabled`/`disabled` would drop focus.
+    const resting = screen.getByRole("button", { name: /^Delete/ });
+    expect(resting).toHaveAttribute("aria-busy", "true");
+    await user.click(resting);
+    await user.click(screen.getByRole("button", { name: /^Delete/ }));
+
+    expect(deleteBrainDumpItem).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      settle();
+      await Promise.resolve();
+    });
+  });
+
+  it("says the verdict is unknown when the write never answers", async () => {
+    // A timeout is not a failure: the delete may well have landed, so the copy
+    // must not claim it did not. Retry stays on offer here — unlike the inbox and
+    // shopping surfaces, re-posting a delete that already landed is a no-op that
+    // reaches the state the user asked for, so the button cannot mislead.
+    vi.useFakeTimers();
+    vi.mocked(deleteBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    renderRow();
+
+    await act(async () => {
+      screen.getByRole("button", { name: /^Delete/ }).click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /^Delete/ }).click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(LIBRARY_ACTION_TIMEOUT_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/no answer from the server/i);
+    expect(alert).toHaveTextContent(/may already have been deleted/i);
+    expect(alert.textContent).not.toMatch(/nothing changed/i);
   });
 });
