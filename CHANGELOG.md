@@ -63,9 +63,14 @@ operators upgrading a self-hosted instance don't get surprised.
   It reports **how long**, not just whether: "behind since 24 hours ago" is a state
   that stays true until somebody fixes it, where a failed deploy is an event that
   is easy to miss. And it will not cry wolf — a rollout inside Kubernetes' own
-  `progressDeadlineSeconds` and a deploy still in flight are both reported as in
-  progress rather than alerted on, because a channel that fires on every normal
-  deploy gets muted, which is what took the original alert down.
+  `progressDeadlineSeconds`, a deploy still in flight, and a replica shortfall that
+  has lasted less than one hour are all reported as in progress rather than alerted
+  on, because a channel that fires on every normal deploy gets muted, which is what
+  took the original alert down. The one-hour wait is the schedule's own cadence, so
+  a shortfall that does not fix itself alerts on the second run and the 24-hour case
+  is still caught an hour in; a routine pod replacement, which is a minute of `1/2`
+  with the rollout long finished, never alerts at all. **Drift is never waited on** —
+  production running the wrong commit is not transient and alerts on first sight.
 
 - **The inbox tells you the shopping list is there (#199).** When something is on
   the list, one line at the top of the inbox reads *"3 items on your shopping

@@ -317,6 +317,41 @@ function drive(script: string, harness: Harness): Result {
 // ── scripts/check-prod-replicas.sh ───────────────────────────────────────────
 
 /**
+ * An instant `seconds` in the past, in exactly the shape Kubernetes writes a
+ * condition's `lastTransitionTime`: `metav1.Time` marshals through
+ * `time.Time.UTC().Format(time.RFC3339)`, so it is ALWAYS UTC with a `Z` and no
+ * fractional part. Measured against production on 2026-08-11 — both of the
+ * Deployment's conditions read `…Z` — which is why the check refuses any other
+ * shape rather than carrying `check-prod-drift.sh`'s offset arithmetic.
+ *
+ * Relative to `Date.now()` rather than a fixed literal, because the whole point
+ * of the assertions below is how OLD the shortfall is. A hard-coded timestamp
+ * would silently age past every threshold and turn the quiet tests green for the
+ * wrong reason a few hours after they were written.
+ */
+function secondsAgo(seconds: number): string {
+  return new Date(Date.now() - seconds * 1000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * The `Available` condition Kubernetes really writes when a 2-replica Deployment
+ * has one replica available. `maxUnavailable` resolves to 25% of 2 rounded DOWN
+ * = 0, so minimum availability is 2 and `1/2` flips the condition to False —
+ * measured on the live Deployment, and captured verbatim in the 11:08 note this
+ * change comes from: `Available False (MinimumReplicasUnavailable) since
+ * 2026-08-11T11:07:56Z`.
+ */
+function unavailableFor(seconds: number) {
+  return {
+    status: "False",
+    reason: "MinimumReplicasUnavailable",
+    lastTransitionTime: secondsAgo(seconds),
+  };
+}
+
+/**
  * A Deployment status, shaped as the API returns it.
  *
  * `null` for a replica count means the field is OMITTED, which is what
@@ -339,8 +374,20 @@ function deployment({
   available?: number | null;
   ready?: number | null;
   updated?: number | null;
-  progressing?: { status: string; reason: string } | null;
-  availableCondition?: { status: string; reason: string } | null;
+  progressing?: {
+    status: string;
+    reason: string;
+    lastTransitionTime?: string;
+  } | null;
+  // `lastTransitionTime` is settable because it is the only durable record of HOW
+  // LONG production has been short of replicas, and that is what tells a 60-second
+  // pod replacement from the 24 hours of #180. The spread below puts it after the
+  // default, so passing it overrides.
+  availableCondition?: {
+    status: string;
+    reason: string;
+    lastTransitionTime?: string;
+  } | null;
   progressDeadline?: number | null;
   image?: string;
 } = {}) {
@@ -639,7 +686,15 @@ describe("scripts/check-prod-replicas.sh", () => {
         { match: "pods", body: { items: [] } },
       ],
     });
-    expect(run.status).toBe(0);
+    // **3, not 0**, and the file's own header has said so since !293: "Exit 3 is
+    // distinct for the same reason, and it used to be 0 … `alert-prod-state.sh`
+    // builds its headline from exit codes alone, so `1/2` mid-rollout could render
+    // as ✅ production has recovered, fully replicated." The sibling
+    // `check-prod-drift.sh` was changed to `status=3`; this arm was not, so the
+    // header documented a fix the code never received and the assertion here
+    // pinned the bug in place. Verified against the real scripts: a 0 here makes
+    // the alerter compute `severity=healthy` off a `1/2` count line.
+    expect(run.status).toBe(3);
     expect(run.stdout).not.toContain("🔴");
     // Not a tick either: nothing was verified healthy, it was verified
     // self-limiting. Those are different claims and only one of them is true.
@@ -682,16 +737,284 @@ describe("scripts/check-prod-replicas.sh", () => {
     // that went away and is not coming back on its own — the `1/2` that does not
     // move. No deadline will ever flip for this shape, so deferring to one would
     // mean never alerting at all.
+    //
+    // The shortfall is dated past a full monitoring cycle, which is what makes it
+    // "does not move" rather than a pod being replaced. The freshly-short version
+    // of this exact shape is the measured false positive directly below.
     const run = replicas({
       kubectl: [
         {
           match: "deployment",
-          body: deployment({ available: 1, ready: 1, updated: 2 }),
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            availableCondition: unavailableFor(3700),
+          }),
         },
         { match: "pods", body: { items: [] } },
       ],
     });
     expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+  });
+
+  /**
+   * ── The `NewReplicaSetAvailable` shortfall needs its own discriminator ──────
+   *
+   * MEASURED false positive, 2026-08-11 11:08 UTC. The monitor's first real run
+   * fired, posted to #45, exited 1 and emailed the schedule's owner. Its evidence
+   * was correct in every line — `1/2` available, the pending pod named, its
+   * `seed-allowlist` init container named, and "every pod is on the current spec's
+   * image, so no pod is serving stale code". And the event was an ordinary pod
+   * replacement: `Available` had gone False 29 SECONDS before the note was posted.
+   *
+   * The rollout had finished four days earlier (`Progressing True
+   * (NewReplicaSetAvailable) since 2026-08-07T13:12:07Z`), so the progress-deadline
+   * arm above cannot cover this — and the header is right that it must not, because
+   * for this shape no deadline will ever flip. But the arm that catches the 24-hour
+   * #180 outage was then also catching every routine pod swap, and #191 exists
+   * because a channel that cries wolf gets filtered:
+   *
+   *     a 24-hour condition and a 60-second one produced the same email
+   *
+   * The discriminator is the `Available` condition's own `lastTransitionTime`. It
+   * needs no state of our own — a scheduled job is stateless between runs — and,
+   * unlike the grace !293 review had to rip out, it MOVES on the timescale that
+   * matters: that grace measured the oldest commit production was missing, which on
+   * a merge workflow is 21–38 hours old for a four-minute-old deploy, so it could
+   * never fire. `Available False since` was 29s old for a transient and would have
+   * been 24 hours old throughout #180.
+   */
+  it("holds a replica shortfall younger than one monitoring cycle", () => {
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            // Verbatim from the 11:08 note: the rollout finished days ago.
+            progressing: {
+              status: "True",
+              reason: "NewReplicaSetAvailable",
+              lastTransitionTime: secondsAgo(4 * 24 * 3600),
+            },
+            availableCondition: unavailableFor(29),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    // 3 — in flight, deliberately not concluded from. Not 0: nothing was verified
+    // healthy here, and handing the caller a 0 is what makes it print ✅.
+    expect(run.status).toBe(3);
+    expect(run.stdout).not.toContain("🔴");
+    expect(run.stdout).not.toContain("✅");
+    // The count still has to be in the report — the reader is told it is short,
+    // just not woken for it.
+    expect(run.stdout).toContain("1/2");
+  });
+
+  it("alerts once the shortfall has survived a full monitoring cycle", () => {
+    // The other half, and the one that keeps #180 detectable: the schedule is
+    // hourly, so a shortfall older than one cycle has been observed by a previous
+    // run and did not self-heal. 24 hours of `1/2` trips this on the second run,
+    // one hour in.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            progressing: {
+              status: "True",
+              reason: "NewReplicaSetAvailable",
+              lastTransitionTime: secondsAgo(4 * 24 * 3600),
+            },
+            availableCondition: unavailableFor(3700),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+    expect(run.stdout).not.toContain("✅");
+  });
+
+  it("alerts on the FIRST observation when no replica is available at all", () => {
+    // The site is DOWN. A grace measured in cycles is a bet that the condition will
+    // clear itself, and that bet is only acceptable while production is still
+    // serving. `0/2` is never worth an hour of silence, however fresh.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: null,
+            ready: null,
+            updated: 2,
+            availableCondition: unavailableFor(5),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toMatch(/no available replica at all/);
+  });
+
+  it("never graces a stalled rollout, however fresh the Available condition", () => {
+    // `Progressing: False` is Kubernetes' OWN verdict that the rollout has stopped
+    // making progress. Waiting a cycle on top of a deadline that has already
+    // expired would add an hour of silence to a state that is finished being
+    // ambiguous — and it is the exact signature of the wedged migration in #180.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 1,
+            progressing: {
+              status: "False",
+              reason: "ProgressDeadlineExceeded",
+            },
+            availableCondition: unavailableFor(10),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("ProgressDeadlineExceeded");
+  });
+
+  it("alerts when the shortfall's age cannot be established at all", () => {
+    // No `Available` condition, so there is no record of how long this has been
+    // true. The grace applies ONLY to an age that could be established — the same
+    // rule `check-prod-drift.sh` states for its own grace — because a grace that
+    // fires on an unknown is a monitor switched off by its own helper.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            availableCondition: null,
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+  });
+
+  it("refuses to grace a lastTransitionTime it cannot read as UTC", () => {
+    // Kubernetes' `metav1.Time` always marshals UTC RFC3339, so a numeric offset
+    // cannot come from the API — but the check is fed by whatever the cluster
+    // returns, and guessing at a shape it was not built to read is how the age
+    // silently comes out wrong by the offset. Refuse and alert, which is the safe
+    // direction; do not carry the sibling's offset arithmetic for an input that
+    // provably never needs it.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            availableCondition: {
+              status: "False",
+              reason: "MinimumReplicasUnavailable",
+              lastTransitionTime: new Date(Date.now() - 20_000)
+                .toISOString()
+                .replace("Z", "+00:00"),
+            },
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+  });
+
+  it("alerts rather than grants a grace on a clock skewed into the future", () => {
+    // A negative age would compare as "younger than the threshold" and grace a
+    // shortfall of any duration. Same guard, same reasoning, as the drift check's:
+    // a transition in the future is skew, not a duration.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            availableCondition: unavailableFor(-600),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+  });
+
+  it("rejects a non-numeric REPLICAS_MIN_UNAVAILABLE_SECONDS instead of trusting it", () => {
+    // Every operator-settable number in these scripts is validated, for the reason
+    // Duo review on !293 gave for the deadline beside it: unvalidated, the `-lt`
+    // below is a bash error rather than a comparison, so the quiet arm is skipped
+    // and every routine pod swap alerts again. A typo must degrade to the default.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 2,
+            availableCondition: unavailableFor(29),
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+      env: { REPLICAS_MIN_UNAVAILABLE_SECONDS: "1h" },
+    });
+    expect(run.status).toBe(3);
+    expect(run.stderr).toMatch(/REPLICAS_MIN_UNAVAILABLE_SECONDS/);
+  });
+
+  it("names every environment variable it reads in its own Env header", () => {
+    // The header is what an operator reads instead of the code, and the sibling
+    // alerter already has this guard (!293 review found its header two short).
+    // A new threshold nobody can discover is a threshold nobody can raise.
+    const script = readFileSync(REPLICAS_SCRIPT, "utf8");
+    const header = (script.split(/^# Env \(all optional\):$/m)[1] ?? "").split(
+      /^set -euo pipefail$/m,
+    )[0];
+    expect(header).not.toBe("");
+    const read = [
+      ...new Set(
+        [...script.matchAll(/\$\{(REPLICAS_[A-Z0-9_]*):[-?+]/g)].map(
+          (m) => m[1],
+        ),
+      ),
+    ].sort();
+    expect(read).toContain("REPLICAS_NAMESPACE");
+    const undocumented = read.filter((name) => !header.includes(name));
+    expect(
+      undocumented,
+      `read by the script but absent from its Env header: ${undocumented.join(", ")}`,
+    ).toEqual([]);
   });
 
   it("alerts on a rolling deployment whose deadline is too long to rely on", () => {
@@ -910,8 +1233,9 @@ describe("scripts/check-prod-replicas.sh", () => {
       ],
       env: { REPLICAS_MAX_PROGRESS_DEADLINE: "30m" },
     });
-    // Falls back to the default, so the rollout is still correctly quiet.
-    expect(run.status).toBe(0);
+    // Falls back to the default, so the rollout is still correctly quiet — 3, the
+    // documented in-flight code, not the 0 that means verified healthy.
+    expect(run.status).toBe(3);
     expect(run.stderr).toMatch(/REPLICAS_MAX_PROGRESS_DEADLINE/);
     expect(run.stdout).not.toContain("🔴");
   });
@@ -1476,6 +1800,164 @@ describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
   });
 
   /**
+   * The same unproven green, reached WITHOUT the drift half — and this is the one
+   * that was still live. The test above passes today only because
+   * `check-prod-drift.sh` returns 3 for its graced drift; take that away, leave
+   * production correctly in sync, and `check-prod-replicas.sh`'s in-flight arm
+   * hands back **0** instead of the 3 its own header has documented since !293. Two
+   * zeroes make `severity=healthy`, so the note reads:
+   *
+   *     ### ✅ production has recovered — on `main`, fully replicated
+   *     - `deployment/dlectroflow`: **1/2** replicas available
+   *     - 🔄 a rollout is in progress …
+   *     Nothing to do.
+   *
+   * Exit 0, so no pipeline mail contradicts it. It is reachable by any merge to
+   * `main`: production redeployed eight times on 2026-08-11 alone, so an hourly
+   * probe lands inside a rollout regularly.
+   */
+  it("never words a mid-rollout 1/2 as a recovery when production is in SYNC", () => {
+    const run = alert({
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 1,
+        progressing: { status: "True", reason: "ReplicaSetUpdated" },
+      }),
+      notes: noteWithFingerprint("drift=1 replicas=1"),
+    });
+    const body = run.note?.body ?? "";
+    expect(run.note).not.toBeNull();
+    expect(body).not.toMatch(/recovered/i);
+    expect(body).not.toMatch(/fully replicated/i);
+    expect(body).not.toMatch(/cleared, no action needed/i);
+    expect(body).not.toMatch(/Nothing to do\./);
+    expect(body).toMatch(/not.*all-clear/i);
+    // Still exit 0 — an ordinary rollout must not wake anyone. The defect is the
+    // WORDS, not the quiet.
+    expect(run.status).toBe(0);
+  });
+
+  /**
+   * Duo review on !328, and it is the collapse this file keeps catching in a new
+   * place: the `in_flight` headline was branched on `drift_code` alone, so when BOTH
+   * children return 3 — a merge minutes old inside the drift grace, landing while an
+   * unrelated pod is being replaced — the headline said only "a deploy is in flight"
+   * and never mentioned that the replica count was also being held. Every other
+   * composed string in this script is built from each check's OWN exit code, tested
+   * one value at a time, and the `alert` headline above already spells out all four
+   * combinations; the in-flight one had two arms for three states.
+   *
+   * The reachable version of the miss is that the existing "never words an in-flight
+   * deploy as a recovery" test hits exactly this pair and asserts only the drift
+   * half, so the replica omission passed underneath it.
+   */
+  it("names BOTH halves in the headline when drift and replicas are each held", () => {
+    const run = alert({
+      prodSha: OLD_SHORT,
+      // Inside DRIFT_GRACE_SECONDS (1500), so the drift check returns 3.
+      refMovedAt: new Date(Date.now() - 4 * 60_000)
+        .toISOString()
+        .replace("Z", "+00:00"),
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        progressing: {
+          status: "True",
+          reason: "NewReplicaSetAvailable",
+          lastTransitionTime: secondsAgo(4 * 24 * 3600),
+        },
+        availableCondition: unavailableFor(29),
+      }),
+      notes: noteWithFingerprint("drift=1 replicas=1"),
+    });
+    expect(run.status).toBe(0);
+    const headline = (run.note?.body ?? "").split("\n")[0];
+    expect(headline).toMatch(/deploy/i);
+    expect(headline).toMatch(/replica/i);
+    expect(headline).toMatch(/not.*clean bill of health/i);
+    // And still never a recovery, which is what the severity exists to prevent.
+    expect(run.note?.body ?? "").not.toMatch(/recovered/i);
+  });
+
+  /**
+   * ── The whole point of the change, at the level the schedule actually runs ───
+   *
+   * A monitor made quieter and a monitor broken outright look identical from
+   * outside: both stop emailing. So the two-run behaviour is asserted as a PAIR in
+   * one test, on the real scripts, rather than as two tests either of which could
+   * pass while the other silently regressed.
+   */
+  it("stays silent for one transient run and alerts on the second consecutive one", () => {
+    const rolloutFinishedDaysAgo = {
+      status: "True",
+      reason: "NewReplicaSetAvailable",
+      lastTransitionTime: secondsAgo(4 * 24 * 3600),
+    };
+
+    // Run one, 11:08: the pod replacement is 29s old. Nothing on record, so it
+    // stays quiet — no note, no email.
+    const first = alert({
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        progressing: rolloutFinishedDaysAgo,
+        availableCondition: unavailableFor(29),
+      }),
+    });
+    expect(first.status).toBe(0);
+    expect(first.note).toBeNull();
+    // …but the job log must still say it SAW a shortfall and held it. That log line
+    // is the only record of a run that posts nothing.
+    expect(first.stdout).toMatch(/replica/i);
+
+    // Run two, 12:08: still short. Now it is an hour old, a previous run has
+    // observed it, and it did not self-heal.
+    const second = alert({
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        progressing: rolloutFinishedDaysAgo,
+        availableCondition: unavailableFor(3700),
+      }),
+      notes: noteWithFingerprint("drift=0 replicas=3"),
+    });
+    expect(second.status).toBe(1);
+    expect(second.note).not.toBeNull();
+    expect(second.note?.body ?? "").toMatch(/short of replicas/i);
+    expect(second.note?.body ?? "").toContain("🔴");
+  });
+
+  /**
+   * **Never suppress a drift finding.** Production running the wrong commit is not
+   * transient and gets no grace of its own here — only the replica count does. This
+   * is the composite the grace must not swallow: a real drift standing next to a
+   * shortfall too young to conclude from.
+   */
+  it("still alerts on drift on the first observation while a shortfall is graced", () => {
+    const run = alert({
+      prodSha: OLD_SHORT,
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        progressing: {
+          status: "True",
+          reason: "NewReplicaSetAvailable",
+          lastTransitionTime: secondsAgo(4 * 24 * 3600),
+        },
+        availableCondition: unavailableFor(20),
+      }),
+    });
+    expect(run.status).toBe(1);
+    expect(run.note?.body ?? "").toMatch(/not running `main`/);
+    expect(run.note?.body ?? "").not.toMatch(/recovered/i);
+  });
+
+  /**
    * The other direction, so the fix cannot be read as "never say recovered".
    * Two proven ticks after an alert is exactly when the channel must close its
    * own loop.
@@ -1595,6 +2077,52 @@ describe("scripts/alert-prod-state.sh — delivery", () => {
     expect(run.status).not.toBe(0);
     expect(run.note?.body).not.toContain("/close");
     expect(run.stderr).toContain("ALERT_MENTION");
+  });
+
+  /**
+   * ── The job log's last line is where the email lands the reader ──────────────
+   *
+   * The pipeline notification says only that `alert_prod_state` failed. Whoever
+   * opens the job sees this line, and on 2026-08-11 11:08 it read, in full:
+   *
+   *     alert-prod-state: posted a alert note to issue #45 (`drift=0 replicas=1`)
+   *
+   * Two problems in one sentence. "a alert" — and `severity` is a four-value word
+   * that says a check fired without saying WHICH, so the only thing naming the
+   * tripped condition is a pair of raw exit codes the reader has to decode against
+   * two script headers. The note has a headline that says it in words; the log line
+   * did not.
+   */
+  it("names the tripped condition in the line it leaves in the job log", () => {
+    const short = alert({
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        availableCondition: unavailableFor(3700),
+      }),
+    });
+    expect(short.status).toBe(1);
+    expect(short.stdout).toMatch(/replicas: short of desired/);
+    expect(short.stdout).toMatch(/drift: in sync/);
+
+    const behind = alert({ prodSha: OLD_SHORT });
+    expect(behind.status).toBe(1);
+    expect(behind.stdout).toMatch(/drift: production is not on `?main/);
+    expect(behind.stdout).toMatch(/replicas: every desired replica available/);
+  });
+
+  it("writes a grammatical article on every severity it can report", () => {
+    // `posted a ${severity} note` produced "a alert", "a undetermined" and
+    // "a in_flight". Trivial, and it is the first line a human reads while deciding
+    // whether the monitor itself is trustworthy.
+    for (const run of [
+      alert({ prodSha: OLD_SHORT }),
+      alert({ deploy: false }),
+      alert({ notes: noteWithFingerprint("drift=1 replicas=1") }),
+    ]) {
+      expect(run.stdout).not.toMatch(/\ba (?:a|e|i|o|u)/);
+    }
   });
 
   it("does not repeat an identical alert, but still exits non-zero", () => {

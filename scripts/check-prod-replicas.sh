@@ -37,8 +37,9 @@
 #   1  degraded — fewer available than desired, with what the pods say about why
 #   2  undetermined — the cluster could not be read, or answered without the
 #      fields the question needs
-#   3  in flight — degraded, but a rollout is progressing inside its own deadline,
-#      so deliberately not concluded from
+#   3  in flight — degraded, but self-limiting so far, so deliberately not
+#      concluded from: either a rollout progressing inside its own deadline, or a
+#      shortfall younger than one monitoring cycle (see § "one hourly cycle")
 #
 # Exit 2 is a distinct state on purpose and both collapses are lies: reporting 1
 # when the read simply failed cries wolf, and reporting 0 is the unproven green
@@ -90,6 +91,72 @@
 # holds, silence stops being self-limiting, and one Helm value would have turned
 # this monitor off without saying so. So a too-long deadline is itself an alert.
 #
+# ── One hourly cycle: the OTHER discriminator, for the shape no deadline covers ─
+# The table above is right that `Progressing=True/NewReplicaSetAvailable` with a
+# replica missing has to alert, because no deadline will ever flip for it. What it
+# did not anticipate is that the same shape covers a routine pod replacement.
+#
+# MEASURED, 2026-08-11 11:08 UTC — this monitor's first real run. It fired, posted
+# to #45, exited 1 and emailed the schedule's owner. Every line of its evidence was
+# correct: `1/2` available, the pending pod and its `seed-allowlist` init container
+# named, and "every pod is on the current spec's image, so no pod is serving stale
+# code". The rollout had finished four days earlier — `Progressing True
+# (NewReplicaSetAvailable) since 2026-08-07T13:12:07Z` — so this arm was reached,
+# correctly, and the underlying event was a pod being replaced. `Available` had
+# gone False **29 seconds** before the note was posted.
+#
+# A 24-hour condition and a 60-second one produced the same email, and #191 exists
+# because a channel that cries wolf gets filtered — which puts the 24-hour case
+# back where it started. So the shortfall also has to clear one MONITORING cycle:
+#
+#   Available=False for < REPLICAS_MIN_UNAVAILABLE_SECONDS   → in flight (exit 3)
+#   Available=False for ≥ that, or no age to be had          → alert (exit 1)
+#
+# **Where the state lives: nowhere.** A scheduled CI job is stateless between runs,
+# and the cluster is already keeping this record — `Available`'s own
+# `lastTransitionTime` is the instant availability last dropped below the minimum,
+# and Kubernetes only rewrites it when the STATUS changes, so it does not reset
+# while the shortfall persists. No cache, no note read-back, no second clock.
+#
+# **And it is a clock that actually moves.** !293 review had to remove a grace that
+# could not fire, because it measured the oldest commit production was missing —
+# 21 to 38 hours old on a merge workflow, so a four-minute-old deploy presented as
+# 38 hours of drift. This one read 29s for the transient above and would have read
+# 24 hours throughout #180. That is the property to check before trusting any
+# grace: does the number change on the timescale being discriminated?
+#
+# **`1/2` really does flip the condition here, and that is measured too.** The
+# chart sets no `strategy`, so `maxUnavailable` is 25% of 2 rounded DOWN = 0 and
+# minimum availability is the full 2. The live Deployment confirms
+# `maxUnavailable: 25%`, and the 11:08 note confirms the flip:
+# `Available False (MinimumReplicasUnavailable)`. Raise `maxUnavailable` past 0 and
+# the condition stops flipping at `1/2` — at which point there is no age to read,
+# and the arm below alerts rather than staying quiet. Failing toward the alert is
+# the only acceptable direction for a monitor.
+#
+# **Three states never get this grace**, and each for its own reason:
+#   * `available = 0` — the site is down. A grace is a bet that the condition will
+#     clear itself, and that bet is only acceptable while production is serving.
+#   * `Progressing=False` — Kubernetes' own verdict that the rollout has stopped
+#     making progress. A deadline has already expired; adding an hour of silence on
+#     top is the #180 signature made quieter.
+#   * an age that could not be established — same rule as the sibling's grace. A
+#     grace that fires on an unknown is a monitor switched off by its own helper.
+#
+# Nothing here touches drift. Production running the wrong commit is never
+# transient and alerts on the first observation, in the other script.
+#
+# **Bounded under-alerting, deliberately accepted** — the same trade, and the same
+# wording, as the sibling's grace. A shortfall that FLAPS resets the transition each
+# time it recovers, so a Deployment oscillating short/recovered inside the hour
+# stays quiet while spending most of it at `1/2`. Two things bound it: a pod that
+# never becomes ready does not flap (a crashlooping pod holds `Available` False
+# continuously, which is #180's shape and alerts), and the only shape that does —
+# a readiness probe flapping — needs a recovery window every cycle, which is a
+# different fault with its own signals. Closing it needs cross-run state, which is
+# the thing this arm exists to avoid; the cost of that state is a second clock and
+# a `date` implementation this repo has been bitten by twice.
+#
 # ── Read-only, and careful with what the cluster says ───────────────────────
 # Every kubectl verb here is `get`. Nothing this script can do changes the
 # cluster. Its stdout is spliced into a note on an issue in a **PUBLIC** project,
@@ -116,6 +183,10 @@
 #   REPLICAS_SELECTOR    label selector for its pods
 #   REPLICAS_MAX_PODS    how many not-ready pods to describe in the report
 #   REPLICAS_MAX_PROGRESS_DEADLINE  longest deadline the quiet arm will trust
+#   REPLICAS_MIN_UNAVAILABLE_SECONDS  how long a replica shortfall must have lasted
+#                        before it is alerted on; defaults to 3600, ONE run of the
+#                        hourly schedule. Coupled to that cadence deliberately —
+#                        see the § above. Set it to 0 to alert on first sight.
 set -euo pipefail
 
 NAMESPACE="${REPLICAS_NAMESPACE:-dlectroflow-prod}"
@@ -155,6 +226,19 @@ case "$MAX_DEADLINE" in
     MAX_DEADLINE=1800
     ;;
 esac
+# 3600s = one run of the `0 * * * *` schedule, so a shortfall is alerted on by the
+# SECOND consecutive run at the latest and a self-healing pod replacement is never
+# alerted on at all. Validated like every other operator-settable number here, and
+# for the same measured reason: unvalidated, the `-lt` in the arm below is a bash
+# error rather than a comparison, the quiet path is skipped, and every routine pod
+# swap alerts again.
+MIN_UNAVAILABLE="${REPLICAS_MIN_UNAVAILABLE_SECONDS:-3600}"
+case "$MIN_UNAVAILABLE" in
+  '' | *[!0-9]*)
+    echo "check-prod-replicas: REPLICAS_MIN_UNAVAILABLE_SECONDS is not a number of seconds ('${MIN_UNAVAILABLE}') — using 3600." >&2
+    MIN_UNAVAILABLE=3600
+    ;;
+esac
 # 300 characters holds a Prisma P3009 message with its migration name, which is
 # the longest thing worth reading here, without pasting a whole stack trace into
 # somebody's inbox.
@@ -176,6 +260,51 @@ clean_field() {
     value="${value:0:$MAX_MSG}…"
   fi
   printf '%s' "$value"
+}
+
+# A Kubernetes condition timestamp to a Unix epoch, or failure.
+#
+# **Deliberately NOT check-prod-drift.sh's `iso_to_epoch`, and the difference is a
+# guard rather than a shortcut.** That function exists to handle a NUMERIC OFFSET,
+# because GitLab's API returns `2026-08-07T09:27:36.000+01:00` and reading the
+# remainder as UTC made every age wrong by an hour. This input cannot carry an
+# offset: `metav1.Time` marshals through `time.Time.UTC().Format(time.RFC3339)`, so
+# a condition's `lastTransitionTime` is always UTC with a `Z` — measured on the live
+# Deployment and in the 11:08 note (`since 2026-08-11T11:07:56Z`). So the `Z` is
+# REQUIRED and anything else is refused, which is what makes carrying the offset
+# arithmetic unnecessary instead of merely omitted. A refusal costs an alert that
+# might have been graced; guessing costs an age that is silently wrong, and this
+# grace's whole job is to be trusted with silence.
+#
+# All three `date` implementations are tried for the same reason the sibling tries
+# them, and the third is the one that matters: `alert_prod_state` runs on
+# `dtzar/helm-kubectl`, whose `date` is **busybox**. Measured in that exact image —
+# GNU `-d <iso>` and BSD `-j -f` both fail, `date -u -d "2026-08-11 11:07:56" +%s`
+# returns 1786446476, and the offset from a `date -u +%s` taken alongside it matched
+# the wall clock to the second. `+%s` for "now" works everywhere, which is why only
+# the PARSING side needs a fallback chain.
+k8s_condition_epoch() {
+  local iso="$1" naive epoch=""
+  # The exact RFC3339-with-seconds shape, matched whole rather than sniffed: the
+  # value is interpolated into a `date` argument, and validating on the way IN is
+  # the same discipline check-prod-drift.sh applies to `/api/health`'s `sha`.
+  case "$iso" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+      naive="${iso%Z}"
+      ;;
+    *) return 1 ;;
+  esac
+  epoch="$(date -u -d "${naive}Z" +%s 2> /dev/null || true)" # GNU
+  if [ -z "$epoch" ]; then # BSD (macOS, where `npm test` drives this)
+    epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$naive" +%s 2> /dev/null || true)"
+  fi
+  if [ -z "$epoch" ]; then # busybox (alpine, and the real CI image)
+    epoch="$(date -u -d "${naive/T/ }" +%s 2> /dev/null || true)"
+  fi
+  case "$epoch" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$epoch"
 }
 
 WORK="$(mktemp -d)"
@@ -249,7 +378,10 @@ spec_tag="${spec_image##*:}"
 spec_tag="$(clean_field "$spec_tag")"
 
 # `full` is the only mode that reaches stdout, so it is the only one cleaned:
-# `status` and `reason` are compared against literals below and must stay exact.
+# `status`, `reason` and `since` are compared against literals or parsed below and
+# must stay exact. `since` never reaches stdout raw either — the arm that reads it
+# publishes the DURATION it computed, a number this script owns, and the instant
+# itself is already in the `full` rendering, cleaned.
 cond() {
   jq -r --arg t "$1" --arg f "$2" --argjson maxmsg "$MAX_MSG" \
     'def clean: (. // "") | tostring
@@ -259,6 +391,7 @@ cond() {
      | if . == null then (if $f == "full" then "absent" else "" end)
        elif $f == "status" then (.status // "")
        elif $f == "reason" then (.reason // "")
+       elif $f == "since" then (.lastTransitionTime // "")
        else "\(.status | clean) (\((.reason // "no reason") | clean)) since \((.lastTransitionTime // "an unknown time") | clean)" end' \
     "$WORK/deploy.json" 2> /dev/null || echo ""
 }
@@ -266,6 +399,8 @@ progressing="$(cond Progressing full)"
 progressing_status="$(cond Progressing status)"
 progressing_reason="$(cond Progressing reason)"
 available_cond="$(cond Available full)"
+available_status="$(cond Available status)"
+available_since="$(cond Available since)"
 
 count_line="- \`deployment/${DEPLOYMENT}\`: **${available}/${desired}** replicas available (${ready} ready, ${updated} on the current spec, image \`${spec_tag}\`)"
 cond_line="- conditions: \`Progressing\` ${progressing}; \`Available\` ${available_cond}"
@@ -308,11 +443,60 @@ if [ "$progressing_status" = "True" ] && [ "$progressing_reason" = "ReplicaSetUp
   if [ "$deadline" -le "$MAX_DEADLINE" ]; then
     printf -- '%s\n%s\n- 🔄 a rollout is in progress and has **not** yet exceeded its progress deadline (`progressDeadlineSeconds: %s`), so this is not an alert yet. Kubernetes flips `Progressing` to False within that window if it stops making progress, and the next run of this check alerts on it.\n' \
       "$count_line" "$cond_line" "$deadline"
-    exit 0
+    # 3, not 0 — see the contract. The header has documented this since !293 and the
+    # code kept returning 0 anyway, which is the whole of the bug: the caller builds
+    # its headline from exit codes alone, so `drift=0 replicas=0` composed
+    # "### ✅ production has recovered — on `main`, fully replicated" five lines
+    # above a count line reading `1/2`, and exited 0 so no pipeline mail
+    # contradicted it. The sibling's grace was fixed to `status=3` in the same
+    # review; this arm was missed, and the bullet above already refuses the tick it
+    # was handing over anyway.
+    exit 3
   fi
   printf -- '%s\n%s\n- 🔴 **a rollout has been in progress and its progress deadline is too long to wait for** — `progressDeadlineSeconds: %s` exceeds the %ss this check will stay quiet for. Staying silent would depend on a flip that may not come for hours, which is how a monitor gets switched off without saying so.\n' \
     "$count_line" "$cond_line" "$deadline" "$MAX_DEADLINE"
   exit 1
+fi
+
+# ── 1d. Degraded — but has it lasted longer than one monitoring cycle? ───────
+# The arm the 11:08 false positive needed, and the header § "one hourly cycle" is
+# its reasoning. `Progressing=True/NewReplicaSetAvailable` with a replica missing is
+# both the 24 hours of #180 and a pod being replaced; no deadline distinguishes
+# them, and the cluster's own `Available` transition does.
+#
+# The age is computed first and separately from the decision, so an unreadable or
+# skewed timestamp leaves `unavailable_secs` empty and every guard below simply
+# fails to grace. There is no arm in which an unknown buys silence.
+unavailable_secs=""
+if [ "$available_status" = "False" ] && [ -n "$available_since" ]; then
+  since_epoch="$(k8s_condition_epoch "$available_since" 2> /dev/null || true)"
+  now_epoch="$(date -u +%s 2> /dev/null || true)"
+  case "$since_epoch" in '' | *[!0-9]*) since_epoch="" ;; esac
+  case "$now_epoch" in '' | *[!0-9]*) now_epoch="" ;; esac
+  # `-ge`, so a transition in the FUTURE leaves the age empty rather than negative.
+  # A negative number would compare as younger than any threshold and grace a
+  # shortfall of any duration on nothing but clock skew — the same guard, and the
+  # same reasoning, as the sibling's.
+  if [ -n "$since_epoch" ] && [ -n "$now_epoch" ] &&
+    [ "$now_epoch" -ge "$since_epoch" ]; then
+    unavailable_secs=$((now_epoch - since_epoch))
+  fi
+fi
+
+# `available -gt 0` and `stalled = 0` are the two states that never get the grace:
+# the site being down is not a bet worth taking, and `Progressing=False` is a
+# verdict Kubernetes has already reached. Both are spelled out rather than left to
+# the arms above, because this arm is reached by fall-through and a future edit
+# above it must not be able to widen what stays quiet.
+if [ "$MIN_UNAVAILABLE" -gt 0 ] && [ "$stalled" = "0" ] &&
+  [ "$available" -gt 0 ] && [ -n "$unavailable_secs" ] &&
+  [ "$unavailable_secs" -lt "$MIN_UNAVAILABLE" ]; then
+  # No tick, for the reason the arm above gives: verified self-limiting is not
+  # verified healthy. The duration is this script's own arithmetic, so nothing
+  # cluster-supplied reaches stdout uncleaned here.
+  printf -- '%s\n%s\n- 🔄 production has been short of replicas for **%ss**, less than the %ss this check waits before alerting — a pod being replaced looks exactly like this and clears itself in about a minute (measured: the 2026-08-11 11:08 false alarm was 29s old). Not an alert yet, and **not** a clean bill of health: still short on the next hourly run and it will have outlived the wait, and that run alerts.\n' \
+    "$count_line" "$cond_line" "$unavailable_secs" "$MIN_UNAVAILABLE"
+  exit 3
 fi
 
 # ── 2. Degraded — say which pods, and what they say about why ────────────────

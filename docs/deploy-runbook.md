@@ -824,8 +824,39 @@ image, and `rollout status` returned success 90 seconds later. So the check does
 | `Progressing` condition | Meaning | Alert? |
 | --- | --- | --- |
 | `True` / `ReplicaSetUpdated` | rollout in flight, deadline not blown | no — 🔄, and the next hourly run alerts if it stops progressing. **Except** when `progressDeadlineSeconds` is longer than `REPLICAS_MAX_PROGRESS_DEADLINE` (30 min): staying quiet then depends on a flip that may not come for hours, so that alerts — see below |
-| `False` / `ProgressDeadlineExceeded` | stuck | **yes** |
-| `True` / `NewReplicaSetAvailable` | rollout finished, a replica is still gone | **yes** — the `1/2` that does not move |
+| `False` / `ProgressDeadlineExceeded` | stuck | **yes**, immediately — Kubernetes has already ruled, so no wait is added on top |
+| `True` / `NewReplicaSetAvailable` | rollout finished, a replica is still gone | **yes, once it has lasted a full hour** — see below |
+
+**The `NewReplicaSetAvailable` row needed a second discriminator, and finding that
+out cost one false alarm.** The monitor's first real run, 2026-08-11 11:08, fired
+on exactly this row and emailed the schedule's owner. Its evidence was correct in
+every line — `1/2`, the pending pod and its `seed-allowlist` init container named,
+"every pod is on the current spec's image". The event was a routine pod
+replacement, and `Available` had gone False **29 seconds** earlier. No progress
+deadline covers that row (the rollout finished days before), so the same arm was
+catching both a pod swap and the 24 hours of #180 — and **a 24-hour condition and
+a 60-second one producing the same email is how the channel gets filtered**, which
+puts #180 back where it started.
+
+So a shortfall also has to outlive **`REPLICAS_MIN_UNAVAILABLE_SECONDS` (3600s,
+one run of the hourly schedule)** before it alerts. The clock is the cluster's own
+`Available` condition `lastTransitionTime` — Kubernetes only rewrites it when the
+status flips, so it does not reset while the shortfall persists, and a scheduled
+job needs no state of its own between runs. 24 hours of `1/2` therefore alerts on
+the **second** run, one hour in; a pod swap never alerts at all.
+
+Three states get **no** wait: `0/2` (the site is down — a wait is a bet the
+condition clears itself, and that is only acceptable while production is serving),
+`Progressing: False`, and an age that could not be read. **Drift gets no wait of
+any kind from this** — production running the wrong commit is not transient and
+alerts on the first observation.
+
+To read the clock by hand:
+
+```
+kubectl -n dlectroflow-prod get deployment dlectroflow \
+  -o jsonpath='{range .status.conditions[?(@.type=="Available")]}{.status} since {.lastTransitionTime}{"\n"}{end}'
+```
 
 **A deploy in flight is not drift either, for the same reason.** Production is
 legitimately a commit or two behind for a few minutes after every merge, and an
