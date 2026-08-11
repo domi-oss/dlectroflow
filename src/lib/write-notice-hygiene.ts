@@ -84,9 +84,11 @@
  *     literals, which is what every surface does today (`return
  *     "shopping.errorSaveGone"`). A `` `${prefix}.errorSaveGone` `` would read as
  *     unreferenced — a false failure, which is the safe direction.
- *  3. **A live region introduced by a child component.** Rule D reasons about one
- *     file's JSX tree. A `<Foo />` that renders `role="status"` inside an alert in
- *     this file is invisible to it; the three notice surfaces are plain markup.
+ *  3. **A live region introduced by a child component.** Rules D and E reason
+ *     about one file's JSX tree, so a `<Foo />` that renders `role="status"`
+ *     inside an alert in this file is invisible to both. All three notice
+ *     surfaces are plain markup, which is why that is affordable here — an
+ *     extracted `<WriteNotice />` would need this scope widened along with it.
  *  4. **Focus behaviour.** Which control receives the hand-off when the notice
  *     withdraws its button is per-surface and covered by each surface's specs.
  */
