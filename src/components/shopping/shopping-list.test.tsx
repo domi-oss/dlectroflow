@@ -80,9 +80,10 @@ const renderList = (items: Parameters<typeof ShoppingList>[0]["items"] = []) =>
  * A `screen.*` query walks the whole document and computes an accessible name
  * for every candidate, so its cost scales with the size of the rendered tree,
  * not with how specific the query looks. The two specs that render the list AT
- * its cap put ~1500 buttons in that tree, and there the SAME query costs three
- * orders of magnitude more than when it is scoped to this form. Measured on one
- * 500-row tree:
+ * its cap put ~1500 buttons in that tree, and there the SAME query costs orders
+ * of magnitude more than when it is scoped to this form. Measured on one
+ * 500-row tree — the scoped column is 0 because it lands below the timer's
+ * resolution, so the true ratio is a floor, not a reading:
  *
  *   query                                        unscoped   scoped to the form
  *   getByLabelText(/add to the list/i)             501 ms                 0 ms
@@ -101,8 +102,8 @@ const renderList = (items: Parameters<typeof ShoppingList>[0]["items"] = []) =>
  * fixture stays at the true cap.
  *
  * There is exactly one `<form>` in the component: the capture field and its Add
- * button. Every other spec here renders a handful of rows, where an unscoped
- * query costs ~1 ms, and they are left alone.
+ * button. Every other spec here renders a handful of rows, where the same two
+ * unscoped queries cost 1 ms and 4 ms, so they are left alone.
  */
 const captureForm = (container: HTMLElement): HTMLElement =>
   container.querySelector("form")!;
