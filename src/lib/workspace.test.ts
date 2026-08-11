@@ -621,6 +621,11 @@ describe("currentUser", () => {
       status: true,
       provider: true,
       handle: true,
+      // #252 — the chosen display name rides the SAME query. `accountLabel()`
+      // needs it wherever it needs the handle, and the header calls that on
+      // every page, so a second read would be a per-request round trip for a
+      // column already one join away from nothing.
+      displayName: true,
     });
   });
 

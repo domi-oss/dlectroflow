@@ -31,6 +31,17 @@ export function needsReviewRow(page: Page, label: string) {
 
 export const MOBILE = { width: 390, height: 844 }; // iPhone 14-ish
 export const DESKTOP = { width: 1280, height: 900 };
+/**
+ * The narrowest phone still in real use — iPhone SE (1st/2nd gen) and the
+ * Galaxy S8-class Android that reports 360 CSS px.
+ *
+ * Added by #252, which put up to two more 44px controls in the header's right
+ * cluster. `MOBILE` (390) was the narrowest width anything measured, and 30px is
+ * most of one gap: a bar that fits at 390 tells you nothing about 360, and the
+ * cluster had ~18px of slack at 390 before this change. Anything asserting that
+ * the header fits should assert it here as well.
+ */
+export const NARROW = { width: 360, height: 780 };
 
 export type Theme = "light" | "dark";
 export const THEMES: readonly Theme[] = ["light", "dark"];

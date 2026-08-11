@@ -101,6 +101,10 @@ export type CurrentUser = {
   /** Provider username, lowercased at the boundary; `null` when the provider
    *  withheld one (`AuthProfile.username` is optional). */
   handle: string | null;
+  /** #252 — the name this person chose to be called; `null` until they set one.
+   *  Read here rather than in a second query because `accountLabel()` needs it
+   *  wherever the handle is needed, and the two are one row. */
+  displayName: string | null;
 };
 
 /**
@@ -664,6 +668,9 @@ export async function currentUser(): Promise<CurrentUser | null> {
       status: true,
       provider: true,
       handle: true,
+      // #252 — one more column on the query that was already being made, not a
+      // second query: the header renders `accountLabel(me)` on every page.
+      displayName: true,
     },
   });
   if (!user || user.status !== UserStatus.Active) return null;
@@ -673,6 +680,7 @@ export async function currentUser(): Promise<CurrentUser | null> {
     workspaceId: p.wsId,
     provider: user.provider,
     handle: user.handle,
+    displayName: user.displayName,
   };
 }
 

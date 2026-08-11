@@ -28,6 +28,9 @@ const base = {
   alarmEnabled: true,
   sound: "off",
   pauseTogether: false,
+  // #252 — the header's focus shortcut. `true` in the base fixture because the
+  // column defaults true, so an existing workspace really does render with it on.
+  quickAccess: true,
   voice: "plain" as const,
 };
 
@@ -92,6 +95,11 @@ describe("FocusTimerSection", () => {
         alarmEnabled: true,
         sound: "off",
         pauseTogether: false,
+        // #252 — the FULL set, which is what this spec is for: the action leaves
+        // `focusQuickAccess` alone when the key is absent, so a payload missing
+        // it would make changing the timer style the one path that cannot turn
+        // the header shortcut off.
+        quickAccess: true,
       }),
     );
   });
@@ -332,5 +340,74 @@ describe("FocusTimerSection — the disclosure (#101)", () => {
     )!;
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("radio", { name: /ring/i })).toBeNull();
+  });
+});
+
+/**
+ * #252 — the switch for the header's focus-timer shortcut.
+ *
+ * It lives with the other focus options rather than in its own section: unlike
+ * `Settings.shoppingList`, which gates a whole route and earned a section for it
+ * (#199), this governs one icon's presence and nothing else. Filing it under
+ * "Focus timer" is where somebody looking for it would look.
+ */
+describe("FocusTimerSection — the header shortcut (#252)", () => {
+  const toggle = () =>
+    screen.getByRole("checkbox", { name: /shortcut in the header/i });
+
+  it("seeds from the stored setting", () => {
+    render(<FocusTimerSection {...base} />);
+    expect(toggle()).toBeChecked();
+    cleanup();
+    render(<FocusTimerSection {...base} quickAccess={false} />);
+    expect(toggle()).not.toBeChecked();
+  });
+
+  it("auto-saves both directions, like every other switch here", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    await user.click(toggle());
+    expect(updateFocusTimerSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ quickAccess: false }),
+    );
+    await user.click(toggle());
+    expect(updateFocusTimerSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ quickAccess: true }),
+    );
+  });
+
+  // The action leaves the column alone when the key is absent (#252), so the
+  // section has to send it on EVERY write — otherwise changing the timer style
+  // would be the one path that cannot turn the shortcut off.
+  it("sends the gate alongside an unrelated change", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} quickAccess={false} />);
+    await user.click(screen.getByRole("radio", { name: /^mug$/i }));
+    expect(updateFocusTimerSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ timerStyle: "mug", quickAccess: false }),
+    );
+  });
+
+  // #227 — a refused write both says so and steps back. This is a toggle, not a
+  // free-entry field, so it takes the rollback the three audited sections took.
+  it("puts the switch back and says so when the write fails", async () => {
+    vi.mocked(updateFocusTimerSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    await user.click(toggle());
+    await waitFor(() => expect(toggle()).toBeChecked());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't save/i,
+    );
+  });
+
+  // The hint is the only place a reader learns that turning this off does not
+  // take the focus timer away — from the checkbox alone, "hide the shortcut" and
+  // "disable the timer" look identical, and only one of them is what happens.
+  it("says the timer itself stays in the menu", () => {
+    render(<FocusTimerSection {...base} />);
+    expect(screen.getByText(/still in the menu/i)).toBeInTheDocument();
   });
 });

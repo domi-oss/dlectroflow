@@ -13,6 +13,7 @@ import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
 import { AuthActions } from "@/components/nav/auth-actions";
+import { QuickAccess } from "@/components/nav/quick-access";
 import { BrandMark } from "@/components/brand/brand-mark";
 import { LegalFooter } from "@/components/legal/legal-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -88,9 +89,42 @@ export default async function AppLayout({
             {/* #13/#40 — app-icon brand mark; decorative (aria-hidden) so the
                 link's accessible name stays "dlectroflow". */}
             <BrandMark className="h-6 w-6 shrink-0" />
-            dlectroflow
+            {/* #252 — the MARK alone below `sm`, the mark plus the wordmark above
+                it. Measured, not guessed: at 360px the row has 328px of content
+                width, and the wordmark is 89.6px of unbreakable single word at
+                `text-lg` plus its 8px gap. Even before this change the bar
+                measured 334.4px there and overflowed by 6.4 (by 28 with a handle
+                long enough to hit its cap) — `MOBILE` (390) was the narrowest
+                width anything in the suite asserted on, so nothing could see it.
+                With two more 44px controls it overflowed by 78.4.
+
+                `sr-only sm:not-sr-only` rather than `hidden sm:inline`: `display:
+                none` would take the word out of the accessibility tree, and the
+                mark is `aria-hidden`, so the home link would be left with NO
+                accessible name at exactly the widths where it is the only way
+                back. `sr-only` positions it absolutely instead, which also takes
+                it out of the flex flow — so the gap collapses with it and the
+                link measures 24px. */}
+            <span className="sr-only sm:not-sr-only">dlectroflow</span>
           </Link>
-          <div className="text-muted-foreground flex items-center gap-4 text-sm">
+          {/* `gap-1` below `sm`, the app's only breakpoint (see
+              `section-nav.tsx`'s WIDE). Four gaps at 16px is 64px of a 328px
+              budget — more than one whole control — and the cluster does not fit
+              at 360px with them. Above `sm` there is room to spare, so the
+              original spacing stands. */}
+          <div className="text-muted-foreground flex items-center gap-1 text-sm sm:gap-4">
+            {/* #252 — one-tap access to the two destinations that were behind
+                the hamburger. FIRST in the cluster: these are things you came
+                to press, and the three controls after them are about the app
+                rather than about the work. Both gates are columns on the
+                `settings` row already read above for the voice, so the pair
+                costs no query — and `QuickAccess` is a server component, so it
+                costs no client bundle either. */}
+            <QuickAccess
+              voice={voice}
+              shoppingList={settings.shoppingList}
+              focusQuickAccess={settings.focusQuickAccess}
+            />
             {/* #49 — theme toggle lives in the header, immediately left of the
                 sign-in / account action so it's always reachable (light +
                 dark). It's a self-contained client control; it renders the

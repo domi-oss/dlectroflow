@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { saveOwnLlmKey, removeOwnLlmKey } from "@/app/actions/account";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 import { DeleteAccount } from "@/components/settings/delete-account";
+import { DisplayNameField } from "@/components/settings/display-name-field";
 import { ExportData } from "@/components/settings/export-data";
 import { t, type Voice } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
@@ -97,6 +98,7 @@ function wrongProviderMessage({
 
 export function AccountPanel({
   handle,
+  displayName,
   provider,
   keyPresent,
   activeModelName,
@@ -108,6 +110,9 @@ export function AccountPanel({
   /** Provider username, lowercased at the boundary; `null` when the provider
    *  withheld one (`AuthProfile.username` is optional). */
   handle: string | null;
+  /** #252 — the name this person chose to be called; `null` until they set one.
+   *  Seeds the field below, which is also the only place it can be set. */
+  displayName: string | null;
   /** The provider this account was PROVISIONED under (#74 requires it to be
    *  stated wherever identity is shown) — not the current AUTH_PROVIDER. */
   provider: string;
@@ -226,6 +231,14 @@ export function AccountPanel({
           <span className="font-medium">{handle ?? "your account"}</span>{" "}
           <span className="text-muted-foreground">via {provider}</span>
         </p>
+
+        {/* #252 — directly under the line naming the provider handle, because
+            that sentence is where a reader asks "why is it calling me THAT?" and
+            this is the answer. Deliberately above the API key: it is the only
+            control here that changes something a person sees on every page, and
+            the key is the specialist setting. See display-name-field.tsx for why
+            it auto-saves while the key next to it does not. */}
+        <DisplayNameField displayName={displayName} voice={voice} />
 
         <div className="space-y-2">
           <label htmlFor={fieldId} className="block text-sm font-medium">

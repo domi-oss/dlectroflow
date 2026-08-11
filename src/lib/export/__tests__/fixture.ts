@@ -76,6 +76,10 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,
+    // #252 — at the schema default (on). This fixture is a row an existing
+    // account could have, and the migration leaves every existing row at the
+    // column's default, so `true` is what one of them really holds.
+    focusQuickAccess: true,
     // #199 — held at the schema default. Shopping-list mode is off unless asked
     // for, so "an existing account that never turned it on" is the baseline row,
     // and `makeSnapshot` below still carries shopping items: the export reproduces
@@ -237,6 +241,9 @@ export function makeSnapshot(
       id: "user-1",
       provider: "gitlab",
       handle: "sam",
+      // #252 — null, so the fixture stays a row an account that predates the
+      // column really has: the migration adds it nullable and backfills nothing.
+      displayName: null,
       email: "sam@example.com",
       role: "member",
       aiPolicy: "capped",

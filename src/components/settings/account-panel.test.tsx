@@ -7,10 +7,11 @@ import userEvent from "@testing-library/user-event";
 // tests below keep returning to: the key goes IN and never comes back out. The
 // panel is handed a boolean, the field is cleared on success, and no outcome
 // message ever echoes what was typed.
-const { saveMock, removeMock, refreshMock } = vi.hoisted(() => ({
+const { saveMock, removeMock, refreshMock, saveNameMock } = vi.hoisted(() => ({
   saveMock: vi.fn(),
   removeMock: vi.fn(),
   refreshMock: vi.fn(),
+  saveNameMock: vi.fn(),
 }));
 // `deleteOwnAccount` is here because the panel REACHES it, not because this
 // file exercises it: `AccountPanel` renders `DeleteAccount` whenever `isOwner`
@@ -19,10 +20,15 @@ const { saveMock, removeMock, refreshMock } = vi.hoisted(() => ({
 // real function. Passes either way today; the cost lands on whoever first opens
 // the dialog here and gets "not a function" instead of a failing assertion.
 // Second site of the same miss — see section-headings.test.tsx (!237).
+// #252 added `saveDisplayName`, and the comment above stopped being hypothetical
+// while it did: `DisplayNameField` reaches it, and omitting it broke nineteen
+// specs in this file at import time rather than at the one that exercises the
+// field.
 vi.mock("@/app/actions/account", () => ({
   saveOwnLlmKey: saveMock,
   removeOwnLlmKey: removeMock,
   deleteOwnAccount: vi.fn().mockResolvedValue({ ok: true }),
+  saveDisplayName: saveNameMock,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock }),
@@ -34,11 +40,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   saveMock.mockResolvedValue({ ok: true });
   removeMock.mockResolvedValue({ ok: true });
+  saveNameMock.mockResolvedValue({ ok: true });
 });
 afterEach(cleanup);
 
 const props = {
   handle: "alice",
+  // #252 — null, so these specs keep describing the account they described
+  // before: one that has not chosen a name, which is every account today.
+  displayName: null,
   provider: "gitlab",
   keyPresent: false,
   activeModelName: "claude-sonnet-4-6",
