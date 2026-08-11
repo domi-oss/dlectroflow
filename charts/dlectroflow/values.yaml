@@ -236,7 +236,7 @@ backup:
   # `slim` is a rolling tag, so Renovate tracks the DIGEST here (the customManager
   # in .gitlab/renovate.json bumps it as google/cloud-sdk:slim is rebuilt). (#15)
   # renovate: datasource=docker depName=google/cloud-sdk
-  uploadImage: google/cloud-sdk:slim@sha256:cb08e90df56365a0a0b68e019ca06f90174bc064c4b0a5edfc3a5cf4415b5ec0
+  uploadImage: google/cloud-sdk:slim@sha256:570dc7ce2876a2810dbf80f1d2520c1654aa218a7f1347715243a79c98d166ae
 
   # Second backup destination, written ALONGSIDE GCS rather than instead of it.
   # The GCS bucket sits in the same cloud project as the cluster it backs up, so
