@@ -80,10 +80,17 @@ import { whileItemRowIsLockedWithATask } from "@/lib/__tests__/braindump-row-loc
 const WS = vi.hoisted(() => "itest-244-schedule-single");
 /** A second workspace, so the IDOR spec proves the write's own scope. */
 const OTHER_WS = vi.hoisted(() => "itest-244-schedule-single-other");
+/**
+ * The signed-in user the action resolves. `workspaceId` REFERENCES `WS` rather
+ * than repeating its value (Duo review): `vi.hoisted` factories run in
+ * declaration order, so this one can close over the constant above — and a second
+ * copy of the id is a fixture that goes on passing while describing two different
+ * workspaces, which for an IDOR spec is the failure that matters.
+ */
 const ME = vi.hoisted(() => ({
   id: "itest-244-user",
   role: "owner" as const,
-  workspaceId: "itest-244-schedule-single",
+  workspaceId: WS,
   provider: "gitlab",
   handle: "owner",
 }));
