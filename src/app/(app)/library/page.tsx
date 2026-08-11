@@ -11,6 +11,10 @@ import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { DonePill } from "@/components/completion/done-pill";
 import { LibraryRows } from "@/components/library/library-rows";
+import {
+  LibraryDoneDelete,
+  LIB_PANEL_HEADING_ID,
+} from "@/components/library/library-done-delete";
 import { LibraryMultistep } from "@/components/library/library-multistep";
 import { NoteText } from "@/components/breakdown/note-field";
 import { BackLink } from "@/components/nav/back-link";
@@ -206,8 +210,20 @@ export default async function LibraryPage({
         })}
       </nav>
 
-      <section aria-labelledby="lib-panel-heading" className="space-y-3">
-        <p id="lib-panel-heading" className="text-muted-foreground text-xs">
+      <section aria-labelledby={LIB_PANEL_HEADING_ID} className="space-y-3">
+        {/* #251 — `tabIndex={-1}` makes this the hand-off target for a Done row's
+            delete, without putting a paragraph into the tab order. Deleting a row
+            withdraws the control that was pressed and then the row itself, and
+            the browser drops focus on <body> for both; this is the nearest thing
+            that survives, and being the section's accessible name it tells a
+            screen-reader user which panel they are now standing in.
+            `LibraryDoneDelete` owns the id — see its note on why both halves live
+            in one place. */}
+        <p
+          id={LIB_PANEL_HEADING_ID}
+          tabIndex={-1}
+          className="text-muted-foreground text-xs"
+        >
           {t(activeTab.hintKey, voice)}
         </p>
         {rows.length === 0 ? (
@@ -297,13 +313,30 @@ function LibraryRow({
       ) : (
         body
       )}
-      {/* #44 — READ-ONLY here, and deliberately so. Done is a closure view
-          carrying no other controls, and annotating finished work has no
-          purpose — the same call a done step row makes in <TaskSteps>. Hiding
-          a note the owner wrote would be the worse of the two, so it is shown
-          and simply not editable. Outside the <Link>, or the note would become
-          part of a navigation target's accessible name. */}
+      {/* #44 — the note stays READ-ONLY, and deliberately so: annotating
+          finished work has no purpose, the same call a done step row makes in
+          <TaskSteps>. Hiding a note the owner wrote would be the worse of the
+          two, so it is shown and simply not editable. Outside the <Link>, or the
+          note would become part of a navigation target's accessible name.
+
+          #251 amended the reason rather than the behaviour. This used to read
+          "Done is a closure view carrying no other controls", which is no longer
+          true — the row now carries a delete. The argument never rested on that:
+          a closed to-do's note is not worth editing whether or not the row can be
+          removed, and being able to remove it does not make annotating it useful.
+          The sentence is corrected so the next reader is not told something the
+          line below contradicts. */}
       {item.notes && <NoteText>{item.notes}</NoteText>}
+      {/* #251 — the one control a closure view earns. `LibraryRow` renders on the
+          server and this is a client island, so the row itself stays a server
+          component: the Done pile is uncapped, and making every row a client
+          component to reach one button would ship its markup twice per finished
+          to-do. Below the row body and outside the <Link> — a button inside an
+          anchor is invalid, and the delete is about the row rather than part of
+          the thing the row navigates to. */}
+      <div className="mt-2 flex items-center justify-end">
+        <LibraryDoneDelete id={item.id} voice={voice} />
+      </div>
     </li>
   );
 }

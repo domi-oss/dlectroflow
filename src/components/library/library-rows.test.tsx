@@ -460,3 +460,66 @@ describe("LibraryRows — the note trigger sits in the action group (#44)", () =
     expect(text.closest("li")).not.toBeNull();
   });
 });
+
+// ── #184's rule, applied to the hub's own rows (folded in on #251) ──────────
+//
+// `inbox-view.test.tsx` measures EVERY control in `[data-row-actions]` and says
+// why: !270 checked one control and the buttons either side of it were 24px. This
+// file only ever checked the note trigger, and the 🗑 beside it was one of the
+// ones that got missed — a 24px delete target on a phone, next to a 44px note
+// trigger, on a surface that has shipped. Asserted over the whole group here for
+// the same reason it is there, rather than adding a second single-control check.
+//
+// jsdom computes no layout, so this checks the classes that produce the box.
+describe("LibraryRows — every control in the action group is a 44px target", () => {
+  const expectFullTargets = (scope: HTMLElement) => {
+    const groups = scope.querySelectorAll<HTMLElement>("[data-row-actions]");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of Array.from(groups)) {
+      const controls = group.querySelectorAll<HTMLElement>("button, a");
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of Array.from(controls)) {
+        const name = control.getAttribute("aria-label") ?? control.textContent;
+        expect(control.className, `"${name}" is under 44px tall`).toContain(
+          "min-h-11",
+        );
+        expect(control.className, `"${name}" is under 44px wide`).toContain(
+          "min-w-11",
+        );
+      }
+    }
+  };
+
+  const renderTab = (tab: "plated" | "pantry") =>
+    render(
+      <LibraryRows
+        items={[makeItem({ id: `${tab}-1`, taskId: "t1" })]}
+        tab={tab}
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+
+  it.each(["plated", "pantry"] as const)("%s rows, at rest", (tab) => {
+    const { container } = renderTab(tab);
+    expectFullTargets(container);
+  });
+
+  it("and the armed delete confirm, which replaces a 44px control", async () => {
+    // The pair takes the 🗑's place, so a smaller pair shrinks the action line
+    // under the pointer at exactly the moment a mis-tap deletes something.
+    const user = userEvent.setup();
+    renderTab("plated");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    for (const name of ["Delete", "Cancel"]) {
+      const control = screen.getByRole("button", { name });
+      expect(control.className, `"${name}" is under 44px tall`).toContain(
+        "min-h-11",
+      );
+      expect(control.className, `"${name}" is under 44px wide`).toContain(
+        "min-w-11",
+      );
+    }
+  });
+});

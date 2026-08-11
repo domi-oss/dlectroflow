@@ -147,6 +147,13 @@ export function LibraryRows({
   // Two-step delete confirm — one shared `confirmDeleteId` drives both the
   // end-cluster 🗑 icon and the ▾-menu entry, so confirming/cancelling either
   // keeps the other in sync (matches the Inbox rows).
+  //
+  // #251 — all three controls now carry `touchTarget`, which none of them did.
+  // #184 sized every end-cluster icon in the Inbox and this file's copy of the
+  // same factory was missed, so the hub shipped a 24px 🗑 sitting next to a 44px
+  // note trigger. The armed pair matters for a second reason: it REPLACES the 🗑,
+  // so a smaller pair shrank the action line under the pointer at exactly the
+  // moment a mis-tap deletes something.
   const deleteControl = (
     id: string,
     key: string,
@@ -158,7 +165,10 @@ export function LibraryRows({
     confirmDeleteId === id ? (
       <span key={key} className="flex items-center gap-2">
         <button
-          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          className={cn(
+            touchTarget,
+            "text-destructive rounded-md px-2.5 py-1 font-medium",
+          )}
           onClick={() => {
             setConfirmDeleteId(null);
             run(() => deleteBrainDumpItem(id));
@@ -166,9 +176,14 @@ export function LibraryRows({
         >
           {t("action.delete", voice)}
         </button>
-        <span className="text-muted-foreground">·</span>
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
         <button
-          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          className={cn(
+            touchTarget,
+            "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1",
+          )}
           onClick={() => setConfirmDeleteId(null)}
         >
           {t("action.cancel", voice)}
@@ -179,7 +194,10 @@ export function LibraryRows({
         key={key}
         aria-label={t("action.delete", voice)}
         title={t("action.delete", voice)}
-        className="text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1"
+        className={cn(
+          touchTarget,
+          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+        )}
         onClick={() => setConfirmDeleteId(id)}
       >
         🗑
