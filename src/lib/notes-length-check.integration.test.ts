@@ -77,6 +77,22 @@ function insertTask(id: string, notes: string) {
   );
 }
 
+/**
+ * A fresh `order` per step insert (#245).
+ *
+ * These fixtures all hang off one host `Task`, and `order` used to be hardcoded to
+ * 1 — which `Step_taskId_order_key` now refuses on the second of them. The failure
+ * was worth having: it arrived as `23505` from a file about `23514`, which is
+ * exactly the confusing shape a shared fixture produces, and the notes bound this
+ * file measures has nothing to do with a step's position.
+ *
+ * A counter rather than a per-grain constant, so adding a fourth spec cannot
+ * silently collide again. It advances even for the insert that is meant to be
+ * rejected, which is deliberate: the `over-` case must fail on the CHECK it names
+ * and not on a unique index it would then be masking.
+ */
+let nextStepOrder = 1;
+
 function insertStep(id: string, notes: string) {
   return prisma.$executeRawUnsafe(
     `INSERT INTO "Step" ("id", "taskId", "text", "order", "total", "estMinutes", "notes")
@@ -84,7 +100,7 @@ function insertStep(id: string, notes: string) {
     id,
     hostTaskId,
     "raw insert",
-    1,
+    nextStepOrder++,
     1,
     15,
     notes,

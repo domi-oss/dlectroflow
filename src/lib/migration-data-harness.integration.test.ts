@@ -414,7 +414,17 @@ describe("the migrations applied to a database that already holds rows (#190)", 
       });
 
       // Both estimate floors were repaired rather than left to fail the CHECK.
-      const steps = await prisma.step.findMany({ orderBy: { order: "asc" } });
+      //
+      // Scoped to the task this assertion is about (#245). It read every `Step`
+      // in the schema, so it asserted "the seed corpus contains exactly these two
+      // steps" while claiming to be about `estMinutes` — and the next seed to add
+      // a step for an unrelated migration broke it, which is what happened. An
+      // assertion that fails when a different migration gains coverage is one
+      // people learn to edit rather than read.
+      const steps = await prisma.step.findMany({
+        where: { taskId: "seed-task-1" },
+        orderBy: { order: "asc" },
+      });
       expect(steps.map((s) => s.estMinutes)).toEqual([1, 15]);
       const inbox = await prisma.brainDumpItem.findMany({
         where: { id: "seed-inbox-2" },
@@ -436,6 +446,102 @@ describe("the migrations applied to a database that already holds rows (#190)", 
       // let `SET NOT NULL` succeed rather than abort the migration.
       const google = await prisma.googleAuth.findMany();
       expect(google.map((g) => g.id)).toEqual(["seed-google-linked"]);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  /**
+   * #245 — the duplicate-step repair, asserted rather than merely survived.
+   *
+   * `20260811120000_step_task_order_unique` adds a UNIQUE index over data that may
+   * already hold duplicates, which is the third of the five shapes the docblock at
+   * the top of `migration-data-harness.ts` lists as needing rows. That it APPLIED
+   * is the first test in this file; what it DID is this one, and the difference is
+   * the whole point of #190: a repair pass that quietly deleted the wrong row, or
+   * renumbered into an occupied slot, would have applied just as cleanly against a
+   * seed nobody looked at afterwards.
+   */
+  it("renumbers duplicate steps to the tail and leaves clean tasks alone (#245)", async () => {
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const stepsOf = async (taskId: string) =>
+        (
+          await prisma.step.findMany({
+            where: { taskId },
+            orderBy: { order: "asc" },
+            select: { id: true, order: true, total: true },
+          })
+        ).map((s) => [s.id, s.order, s.total]);
+
+      // Two ▶ Focus presses. Both rows kept — nothing is deleted — the OLDEST
+      // keeps `order` 1, and `total` is repaired to the real count so the
+      // breakdown does not read "step 2 of 1".
+      expect(await stepsOf("seed-task-focus-dupe")).toEqual([
+        ["seed-step-focus-a", 1, 2],
+        ["seed-step-focus-b", 2, 2],
+      ]);
+
+      // Three at one order. The two losers get DISTINCT slots — a repair written
+      // as `max(order) + 1` without the window function passes the pair above and
+      // fails here, by trying to put both at 2.
+      expect(await stepsOf("seed-task-triple")).toEqual([
+        ["seed-step-triple-a", 1, 3],
+        ["seed-step-triple-b", 2, 3],
+        ["seed-step-triple-c", 3, 3],
+      ]);
+
+      // A collision at order 2 where order 3 is already taken. The loser goes to
+      // 4, not to 3: renumbering into the first FREE-looking slot would violate
+      // the very index the statement is preparing for.
+      expect(await stepsOf("seed-task-mid-collision")).toEqual([
+        ["seed-step-mid-1", 1, 4],
+        ["seed-step-mid-2a", 2, 4],
+        ["seed-step-mid-3", 3, 4],
+        ["seed-step-mid-2b", 4, 4],
+      ]);
+
+      // The control, and the reason the repair is scoped to tasks that actually
+      // hold a duplicate: a clean breakdown comes out byte-identical. Without
+      // this, a repair that rewrote every row in the table would look exactly
+      // like one that touched only what it had to.
+      expect(await stepsOf("seed-task-clean")).toEqual([
+        ["seed-step-clean-1", 1, 3],
+        ["seed-step-clean-2", 2, 3],
+        ["seed-step-clean-3", 3, 3],
+      ]);
+
+      // And the constraint is actually there. Every assertion above describes
+      // data that would also be correct if the CREATE INDEX had been dropped from
+      // the file, so this is what says the guard exists rather than that the
+      // repair ran.
+      //
+      // `schemaname = current_schema()` is not decoration. `pg_indexes` is a
+      // database-wide view, and this Postgres holds a schema per worktree plus a
+      // second scratch schema created by the test below — so the unfiltered query
+      // returned 2 on the first run and would have counted somebody else's index
+      // as evidence about this one.
+      const indexes = await prisma.$queryRaw<{ indexdef: string }[]>`
+        SELECT indexdef FROM pg_indexes
+        WHERE schemaname = current_schema()
+          AND tablename = 'Step'
+          AND indexname = 'Step_taskId_order_key'`;
+      expect(indexes).toHaveLength(1);
+      expect(indexes[0].indexdef).toContain("UNIQUE");
+
+      // The proof that it BITES, on the same connection that just read it — an
+      // index that exists and is not enforced is the shape a green scan hides.
+      await expect(
+        prisma.step.create({
+          data: {
+            taskId: "seed-task-clean",
+            text: "duplicate of step 1",
+            order: 1,
+            total: 3,
+            estMinutes: 5,
+          },
+        }),
+      ).rejects.toThrow();
     } finally {
       await prisma.$disconnect();
     }
