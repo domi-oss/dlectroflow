@@ -155,6 +155,14 @@ describe("relativeImportTargets — synthetic", () => {
     ).toEqual([]);
   });
 
+  it("resolves against `.` when the file has no directory part", () => {
+    // `lastIndexOf("/")` returns -1 here, and `slice(0, -1)` would drop the
+    // filename's last character and resolve one directory too deep.
+    expect(
+      relativeImportTargets("x.spec.ts", `import "./axe-helpers";`),
+    ).toEqual(["axe-helpers"]);
+  });
+
   it("catches every import form that can pull a module in", () => {
     // Under-reporting is the dangerous direction: a form this misses is an
     // assertion the guard cannot see.

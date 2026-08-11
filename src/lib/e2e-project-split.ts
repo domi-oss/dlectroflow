@@ -164,12 +164,18 @@ export function filesFor(routing: Routing, project: string): string[] {
  * above match against, so the two halves of this module cannot disagree about
  * what a file is called.
  *
- * Bare-package specifiers (`@playwright/test`) are dropped rather than resolved.
- * Nothing outside `e2e/` can reach the a11y helpers without going through a
- * relative path, because the helpers are not a published module.
+ * Bare-package specifiers (`@playwright/test`) are dropped rather than resolved,
+ * and so is the `@/` alias — it maps to `src/` (see tsconfig's `paths`), and the
+ * a11y helpers live under `e2e/`, so no aliased specifier can name them. A
+ * relative path is the only route, which is what makes relative-only complete
+ * here rather than merely convenient.
  */
 export function relativeImportTargets(file: string, source: string): string[] {
-  const dir = file.slice(0, file.lastIndexOf("/"));
+  const lastSlash = file.lastIndexOf("/");
+  // A bare filename has no directory to resolve against; `slice(0, -1)` would
+  // silently lop off its last character and resolve every specifier one
+  // directory too deep.
+  const dir = lastSlash === -1 ? "." : file.slice(0, lastSlash);
   const targets = new Set<string>();
   for (const match of source.matchAll(IMPORT_SPECIFIER)) {
     const specifier = match[1];
