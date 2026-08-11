@@ -22,7 +22,12 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       },
       task: {
         create: vi.fn().mockResolvedValue({ id: "t-new" }),
+        // #245 (Duo review) — the loser's discard is a scoped `deleteMany` now,
+        // not a `delete` by id. `delete` stays on the mock: nothing in this module
+        // uses it, and removing it would make a regression to the unscoped form
+        // fail with `is not a function` instead of with this file's assertion.
         delete: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       step: {
         // #245 — `createManyAndReturn` + `skipDuplicates`, the `ON CONFLICT DO
@@ -226,9 +231,14 @@ describe("ensureFocusStep — losing the race for the row (#225)", () => {
 
     const stepId = await ensureFocusStep("i1");
 
-    expect(prismaMock.task.delete).toHaveBeenCalledWith({
-      where: { id: "t-new" },
+    // #245 (Duo review on `!324`, same shape here) — the discard is a
+    // workspace-scoped `deleteMany` now. Asserted as the WHOLE call, so dropping
+    // `workspaceId` fails here rather than only in a cross-tenant scenario nobody
+    // has written a test for.
+    expect(prismaMock.task.deleteMany).toHaveBeenCalledWith({
+      where: { id: "t-new", workspaceId: "owner" },
     });
+    expect(prismaMock.task.delete).not.toHaveBeenCalled();
     // The winner's step, and no second one built beside it.
     expect(stepId).toBe("s-winner");
     expect(prismaMock.step.createManyAndReturn).not.toHaveBeenCalled();

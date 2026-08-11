@@ -138,6 +138,32 @@ JOIN (
 ) AS t ON t."taskId" = d."taskId"
 WHERE s."id" = d."id";
 
+-- ── The index is built with a lock, and NOT `CONCURRENTLY` (Duo review) ────
+--
+-- Both halves of that were measured on Postgres 16 rather than reasoned about,
+-- because the review that raised it asserted a lock level this does not take:
+--
+--   * A plain `CREATE UNIQUE INDEX` takes a **ShareLock** on "Step", not
+--     ACCESS EXCLUSIVE. Probed with `pg_locks` filtered to `pg_backend_pid()`
+--     inside the building transaction, which reported exactly `ShareLock`. That
+--     blocks writers for the build and lets readers through.
+--   * `CONCURRENTLY` is **not available here at all**. Prisma wraps every
+--     migration file in a transaction, and Postgres refuses:
+--     `ERROR: CREATE INDEX CONCURRENTLY cannot run inside a transaction block`
+--     (SQLSTATE 25001), reproduced against this schema.
+--
+-- It would be the wrong tool even if it were available. The two repair statements
+-- above have to commit atomically WITH this index: a duplicate inserted between
+-- the renumbering and a non-transactional index build is one the build then
+-- refuses, which is #180's `P3009` with extra steps. `CONCURRENTLY` also cannot
+-- roll back — a failed build leaves an INVALID index behind for somebody to find.
+--
+-- What the write pause actually costs: migrations run at container start, before
+-- the new pods serve traffic, so the writers being blocked are the OLD pods still
+-- serving. Production holds 52 `Step` rows, where this is microseconds. A
+-- self-hoster with a very large table would see a brief pause on step writes
+-- during their own upgrade, and reads stay up throughout.
+--
 -- 3. The constraint itself. `Step_taskId_idx` is left in place: it is now
 --    redundant as a prefix of this index, but dropping an index is a performance
 --    change with its own justification and does not belong in a correctness fix.

@@ -549,7 +549,16 @@ export async function ensureFocusStep(id: string): Promise<string | null> {
         // — a duplicate press is a no-op, not an error to raise at somebody
         // who pressed a button twice. The re-read is a new statement, so it
         // sees the commit whose lock this transaction just waited on.
-        await tx.task.delete({ where: { id: task.id } });
+        //
+        // `deleteMany` with `workspaceId` rather than `delete` by id (Duo review
+        // on `!326`). Unexploitable as it stood — `task.id` came from a
+        // `tx.task.create` twelve lines up, in this transaction, carrying this
+        // workspace — but it was the one write in the block whose scope was
+        // inherited from the read above rather than carried on the operation,
+        // which is the exact sentence the `updateMany` beside it is commented
+        // with. `deleteBrainDumpItem` in this same file already uses the scoped
+        // form, so this was the outlier, not the convention.
+        await tx.task.deleteMany({ where: { id: task.id, workspaceId } });
         const winner = await tx.brainDumpItem.findFirst({
           where: { id, workspaceId },
           include: {
