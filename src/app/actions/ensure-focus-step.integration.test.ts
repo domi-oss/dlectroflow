@@ -229,6 +229,21 @@ const commitAStepFor = (taskId: string, text = "Water the plants") =>
  * The arrangement IS the proof. Both parties have decided there is no step: the
  * action from the snapshot its `findFirst` took before the park, and this file
  * from having just looked. On the unfixed action both then insert.
+ *
+ * ## It races the park against the action, and says which won (Duo review)
+ *
+ * A bare `await parked` hangs forever whenever `act()` never reaches the parked
+ * write — because it threw, or because it took the `steps.length > 0` branch, or
+ * because the item resolved to nothing. Nothing resolves or rejects `parked` in
+ * those cases, so the spec sat until Vitest's 30 s `testTimeout` and reported a
+ * timeout: the one diagnostic that says nothing about the cause. On a barrier whose
+ * whole job is to arrange an interleaving, "it never happened" is the failure most
+ * worth naming precisely.
+ *
+ * So the two outcomes are raced. If the action wins, `await running` re-throws its
+ * real error — which is the message somebody can act on — and an action that
+ * merely FINISHED without parking raises the fact that this spec arranged nothing.
+ * A green from an unarranged run would be the worse outcome by far.
  */
 async function whileParkedBeforeItsStepWrite<T>(
   taskId: string,
@@ -239,13 +254,30 @@ async function whileParkedBeforeItsStepWrite<T>(
   const parked = new Promise<void>((resolve) => (barrier.onPark = resolve));
 
   const running = act();
+  // Settled BEFORE the race, so a rejection cannot escape as an unhandled one
+  // while the park is still being waited on.
+  const finished = running.then(
+    () => "finished" as const,
+    () => "threw" as const,
+  );
+
   try {
-    await parked;
+    const winner = await Promise.race([
+      parked.then(() => "parked" as const),
+      finished,
+    ]);
+    if (winner !== "parked") {
+      // Re-throws whatever the action threw; that is strictly the better message.
+      const value = await running;
+      throw new Error(
+        "the action under test finished without ever reaching its step write " +
+          `(returned ${JSON.stringify(value)}), so this spec arranged nothing`,
+      );
+    }
     await commitAStepFor(taskId);
   } finally {
     // Always, even if the park never fired — otherwise a failure here leaves the
-    // action waiting on a promise nobody resolves and the spec times out at 30 s
-    // instead of saying what went wrong.
+    // action waiting on a promise nobody resolves.
     release();
     barrier.wait = null;
     barrier.onPark = null;
@@ -323,6 +355,38 @@ describe("ensureFocusStep (real Postgres) — one ▶ Focus, one step (#245)", (
     // And it answers with the step that actually exists, not one it rolled back.
     // A timer opened on an unreachable step id is the user-visible half of this.
     expect(stepId).toBe(steps[0].id);
+  });
+
+  /**
+   * The barrier's own self-test (Duo review).
+   *
+   * An action that never reaches its step write must make the harness SAY so, not
+   * sit until Vitest's 30 s timeout — and certainly not pass. Here the task already
+   * has a step, so `ensureFocusStep` takes the `steps.length > 0` branch and never
+   * touches the parked delegate.
+   *
+   * This is the spec that keeps the contended one above honest: if some future edit
+   * stops the action from reaching that write, THIS fails with a sentence instead of
+   * the other one going quietly green on an interleaving that never happened.
+   */
+  it("reports it arranged nothing when the action never reaches its step write", async () => {
+    const { item, task } = await seedTriagedItemWithNoSteps();
+    await prisma.step.createMany({
+      data: [
+        {
+          taskId: task.id,
+          text: "already here",
+          order: 1,
+          total: 1,
+          estMinutes: 5,
+        },
+      ],
+    });
+    const { ensureFocusStep } = await import("./braindump");
+
+    await expect(
+      whileParkedBeforeItsStepWrite(task.id, () => ensureFocusStep(item.id)),
+    ).rejects.toThrow(/arranged nothing/);
   });
 
   /**
