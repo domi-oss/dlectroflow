@@ -909,6 +909,84 @@ export const STRINGS = {
   // capture typed while an older failure's notice is still on screen.
   "capture.error.saving": { plain: "Saving…", playful: "Saving…" },
 
+  // ── A ROW write that did not land (#225) ───────────────────────────────────
+  // The other half of the same defect. `capture.error.*` above covers the one
+  // write whose failure destroys words that exist nowhere else; these cover the
+  // ones that operate on a row the server already has — rename, complete, delete,
+  // snooze, keep-as-task, freshen, dismiss, reopen, the bucket move, a breakdown
+  // and ▶ Focus. No count: it was written as "the twenty" and the number moved in
+  // the same MR that wrote it.
+  //
+  // A separate family rather than a reuse of `capture.error.*`, for the reason
+  // `shopping.errorSave*` gives for the same choice: the prefix has to name the
+  // surface, or re-tuning one surface's copy silently re-words another's. The
+  // wordings differ already — a capture's notice can promise "your words are
+  // still here" because it is holding them, and nothing here can, because the
+  // words were never at risk. What is at risk is the change.
+  //
+  // Every one of these ENDS on a colon: the item the write was about is rendered,
+  // quoted, immediately after, so the notice names the row without the row having
+  // to be on screen. That is the whole reason one notice can serve a list that
+  // scrolls. Phrased without a count on purpose — this said "all four" while five
+  // sat below it, the fifth added by the same MR (!306, substitute review).
+  "inbox.errorSaveFailed": {
+    plain: "Couldn't save that just now:",
+    playful: "Couldn't save that just now:",
+  },
+  "inbox.errorSaveStale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot
+  // be aborted from the client, so the timeout bounds how long the UI waits, not
+  // the write — it may still land, and "couldn't save that" would be a claim the
+  // client cannot support. Says what it knows and names the thing that resolves
+  // the ambiguity, which for a row write is the list itself.
+  "inbox.errorSaveTimeout": {
+    plain:
+      "No answer from the server, so this may already have gone through. Check your inbox before trying again:",
+    playful:
+      "No answer from the server, so this may already have gone through. Check your inbox before trying again:",
+  },
+  // The rendered list no longer holds the row the write was aimed at, so every
+  // one of these actions would match nothing again, every time. Said rather than
+  // left implicit, because a notice with no button and no explanation is a dead
+  // end — the withdrawn Retry has to be accounted for.
+  "inbox.errorSaveGone": {
+    plain: "That's not in your inbox any more, so nothing changed:",
+    playful: "That's not in your inbox any more, so nothing changed:",
+  },
+  // !306, Duo review — the two facts above arriving together, which neither of
+  // them says honestly on its own. The timeout copy sends the user to check the
+  // inbox "before trying again", and by the time the row has left the rendered
+  // list the page has already done that check AND withdrawn the Retry, because a
+  // row missing from `initialItems` is deleted or archived server-side and every
+  // one of these writes would match nothing for good.
+  //
+  // So it reports the check rather than asking for it, and stops offering a
+  // "trying again" that is not on the screen. What it must NOT do is collapse
+  // into `errorSaveGone`: "nothing changed" is the one claim a timeout can never
+  // support — the row may be absent precisely BECAUSE the write landed.
+  "inbox.errorSaveTimeoutGone": {
+    plain:
+      "No answer from the server, and that's not in your inbox any more — so it may already have gone through:",
+    playful:
+      "No answer from the server, and that's not in your inbox any more — so it may already have gone through:",
+  },
+  "inbox.errorRetry": { plain: "Try again", playful: "Try again" },
+  "inbox.errorReload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Shown while a retry is in flight, so the wait is not silent and Retry can
+  // keep focus instead of being `disabled`. Rendered TWICE by the notice, and the
+  // split is the point: a visible `aria-hidden` line inside the alert, and a
+  // polite `sr-only` live region beside it that does the announcing. See
+  // inbox-view.tsx — a description is not re-read under held focus.
+  "inbox.errorSaving": { plain: "Saving…", playful: "Saving…" },
+
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded": {
     plain: "This has been sitting a while — still needed?",

@@ -276,3 +276,32 @@ export const Typeface = {
   System: "system",
 } as const;
 export type Typeface = (typeof Typeface)[keyof typeof Typeface];
+
+/**
+ * #225 — how long a brain-dump→Task write may spend, including time spent
+ * WAITING for another caller's row lock.
+ *
+ * Explicit rather than Prisma's default, and the default is what makes it
+ * necessary: at `timeout: 5000` a loser that waits longer than five seconds for
+ * the lock is killed with `P2028 Transaction already closed` and rolled back
+ * (measured, !306 substitute review — a lock held 6.5s produced exactly that).
+ * That turns the no-op these guards promise into an error raised at somebody who
+ * pressed a button twice, which is the sentence the guards are documented by.
+ *
+ * Deliberately LONGER than `inbox-view.tsx`'s `INBOX_ACTION_TIMEOUT_MS` (10s),
+ * the point at which the client stops waiting and offers a Retry. A server
+ * action cannot be aborted from the client, so the choice is between a write that
+ * lands late and one that is thrown away — and landing late is strictly better
+ * here, because every one of these writes is now idempotent: the late arrival
+ * adopts whatever exists rather than duplicating it, and the notice's copy for a
+ * timeout already says "this may already have gone through". Cutting the budget
+ * to match the client would discard work for no benefit.
+ *
+ * `maxWait` is time to acquire a CONNECTION from the pool, which is a different
+ * failure (the app is saturated) and stays short: waiting longer for a connection
+ * only deepens the queue.
+ */
+export const TASK_WRITER_TX_BUDGET = {
+  timeout: 15_000,
+  maxWait: 5_000,
+} as const;

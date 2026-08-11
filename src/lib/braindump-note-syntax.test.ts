@@ -3,6 +3,7 @@ import {
   splitInlineNote,
   inlineNoteSource,
   inlineNoteInsertion,
+  inlineNoteTyping,
   resolveInlineNoteEdit,
   type InlineNoteSplit,
 } from "@/lib/braindump-note-syntax";
@@ -823,5 +824,229 @@ describe("inlineNoteInsertion (#186)", () => {
       expect(value[caret]).toBe("}");
       expect(value.slice(caret)).toBe("}");
     }
+  });
+});
+
+describe("inlineNoteTyping (#201)", () => {
+  /** The shape the handler wants back: a value and a collapsed caret, or
+   *  `null` meaning "leave the keystroke alone". */
+  const type = (value: string, key: string, start: number, end = start) =>
+    inlineNoteTyping({ value, key, start, end });
+
+  describe("typing `{` closes the pair", () => {
+    it("inserts both braces and leaves the caret between them", () => {
+      expect(type("water the plants ", "{", 17)).toEqual({
+        value: "water the plants {}",
+        caret: 18,
+      });
+    });
+
+    it("inserts mid-string too — the caret decides, not the end of the field", () => {
+      expect(type("ab", "{", 1)).toEqual({ value: "a{}b", caret: 2 });
+    });
+
+    it("wraps a selection rather than replacing it", () => {
+      // Replacing would destroy what the user had selected, which is the one
+      // outcome an auto-close must never produce.
+      expect(type("water the plants", "{", 6, 16)).toEqual({
+        value: "water {the plants}",
+        caret: 17,
+      });
+    });
+  });
+
+  /**
+   * #179 Decision 1: only the LAST group is the note, so silently creating a
+   * second one reassigns which text becomes the note. The same constraint
+   * `inlineNoteInsertion` respects for the button — and the reason the two live
+   * in one module.
+   */
+  describe("refuses when the field already ends in a brace group", () => {
+    it("declines a collapsed caret", () => {
+      expect(type("fix {foo}", "{", 9)).toBeNull();
+    });
+
+    it("declines trailing whitespace after the group too", () => {
+      // The rule is end-anchored on the TRIMMED string, which is what the parser
+      // reads, so a trailing space must not smuggle a second group past it.
+      expect(type("fix {foo}  ", "{", 11)).toBeNull();
+    });
+
+    /**
+     * !306, substitute review — this spec used to assert the opposite, and the
+     * assertion it made was the module's own documented invariant being broken.
+     *
+     * Returning `null` does not mean "nothing happens": it means the caller does
+     * not call `preventDefault`, so the BROWSER inserts the `{` and replaces the
+     * selection with it. The header three sections up calls destroying a
+     * deliberate selection "the one outcome an auto-close must never produce",
+     * and the refusal was producing it.
+     *
+     * The refusal's stated reason does not reach this case either. It exists to
+     * stop a SECOND group silently reassigning which text is the note, and under
+     * #179 Decision 1 only the LAST group is the note — so a wrap that lands
+     * wholly before the existing group leaves that group exactly where it was.
+     * Asserted here on the parse, not just the string, because the string alone
+     * would not show it.
+     */
+    it("wraps a selection that lies before the group, leaving the note alone", () => {
+      expect(type("water the plants {can under sink}", "{", 10, 16)).toEqual({
+        value: "water the {plants} {can under sink}",
+        caret: 17,
+      });
+      expect(splitInlineNote("water the {plants} {can under sink}")).toEqual({
+        text: "water the {plants}",
+        note: "can under sink",
+      });
+    });
+
+    it("still declines a selection that reaches into the group", () => {
+      // `end` is inside the trailing group, so wrapping WOULD change which text
+      // the parser reads as the note. Left to the browser, as before.
+      expect(type("fix {foo}", "{", 2, 6)).toBeNull();
+    });
+
+    it("declines inside the group as well — the braces are already there", () => {
+      expect(type("fix {foo}", "{", 6)).toBeNull();
+    });
+
+    it("still fires when the trailing `}` has no opener", () => {
+      // Unbalanced braces are literal (see the module header), so there is no
+      // group to protect and nothing to reassign.
+      expect(type("count the brace}", "{", 16)).toEqual({
+        value: "count the brace}{}",
+        caret: 17,
+      });
+    });
+  });
+
+  describe("typing `}` types over the one that is already there", () => {
+    it("steps past it instead of producing `}}`", () => {
+      expect(type("buy milk {}", "}", 10)).toEqual({
+        value: "buy milk {}",
+        caret: 11,
+      });
+    });
+
+    it("leaves a `}` typed anywhere else to the browser", () => {
+      expect(type("buy milk {oat", "}", 13)).toBeNull();
+    });
+
+    it("does not step over with a selection open — that is a replacement", () => {
+      expect(type("buy milk {ab}", "}", 10, 12)).toBeNull();
+    });
+  });
+
+  describe("backspacing the opening brace takes its partner", () => {
+    it("removes both when the caret is between them", () => {
+      expect(type("buy milk {}", "Backspace", 10)).toEqual({
+        value: "buy milk ",
+        caret: 9,
+      });
+    });
+
+    it("leaves an ordinary backspace alone", () => {
+      expect(type("buy milk {oat}", "Backspace", 13)).toBeNull();
+    });
+
+    it("leaves a backspace over a selection alone", () => {
+      expect(type("buy milk {}", "Backspace", 9, 11)).toBeNull();
+    });
+  });
+
+  it("ignores every other key", () => {
+    for (const key of ["a", "Enter", "Escape", "ArrowLeft", "[", "Delete"]) {
+      expect(type("buy milk", key, 8)).toBeNull();
+    }
+  });
+});
+
+/**
+ * !306, substitute review — the contract at the edges.
+ *
+ * `inlineNoteTyping` is exported and pure, so it can be called with a selection
+ * no DOM node would ever report. It used to trust the numbers: a caret past the
+ * end returned a caret past the end of its own result, and a REVERSED selection
+ * duplicated the text between the two indices. Neither is reachable from
+ * `handleNoteBraceKey`, which reads both off the same live input — so this is the
+ * exported function's contract rather than a live bug, and it is pinned here so
+ * a second caller cannot discover it the hard way.
+ */
+describe("inlineNoteTyping — a selection the DOM would never report (#201)", () => {
+  it("clamps a caret past the end of the value", () => {
+    expect(
+      inlineNoteTyping({ value: "ab", key: "{", start: 5, end: 5 }),
+    ).toEqual({ value: "ab{}", caret: 3 });
+  });
+
+  it("clamps a negative caret", () => {
+    expect(
+      inlineNoteTyping({ value: "ab", key: "{", start: -1, end: -1 }),
+    ).toEqual({ value: "{}ab", caret: 1 });
+  });
+
+  it("orders a reversed selection rather than duplicating what it spans", () => {
+    expect(
+      inlineNoteTyping({ value: "abcd", key: "{", start: 3, end: 1 }),
+    ).toEqual({ value: "a{bc}d", caret: 4 });
+  });
+
+  it("never returns a caret outside its own value", () => {
+    const keys = ["{", "}", "Backspace"] as const;
+    const values = ["", " ", "{}", "a{}b", "fix {foo}", "a\nb", "{{}}"];
+    for (const value of values)
+      for (const key of keys)
+        for (let start = -2; start <= value.length + 2; start += 1)
+          for (let end = -2; end <= value.length + 2; end += 1) {
+            const out = inlineNoteTyping({ value, key, start, end });
+            if (out === null) continue;
+            expect(out.caret).toBeGreaterThanOrEqual(0);
+            expect(out.caret).toBeLessThanOrEqual(out.value.length);
+          }
+  });
+});
+
+/**
+ * !306, substitute review — the two affordances agree on an empty field.
+ *
+ * The module header justifies keeping the keyboard rule beside the button
+ * because "the two affordances have to agree about a field that may already
+ * contain a trailing group". They disagreed about the EMPTY field, which is the
+ * one case the button spells out: `add-note-button.tsx` disables itself on
+ * `value.trim() === ""` because "a note is a note ABOUT something, and the
+ * syntax needs text in front of the group or the parser refuses it outright".
+ * `splitInlineNote("{urgent}")` does refuse it — the whole string stays text — so
+ * auto-closing there helped the user build the one thing the parser will not
+ * read, in the exact case the button declines to build.
+ */
+describe("inlineNoteTyping — nothing to be a note about (#201)", () => {
+  it("declines an empty field, as the button does", () => {
+    expect(
+      inlineNoteTyping({ value: "", key: "{", start: 0, end: 0 }),
+    ).toBeNull();
+  });
+
+  it("declines a whitespace-only field", () => {
+    expect(
+      inlineNoteTyping({ value: "   ", key: "{", start: 3, end: 3 }),
+    ).toBeNull();
+  });
+
+  it("fires as soon as there is something for the note to be about", () => {
+    expect(
+      inlineNoteTyping({ value: "a", key: "{", start: 1, end: 1 }),
+    ).toEqual({
+      value: "a{}",
+      caret: 2,
+    });
+  });
+
+  it("still removes the pair on Backspace in a field that is otherwise empty", () => {
+    // The auto-close cannot have produced this, but a paste or the button can,
+    // and a Backspace between the braces must still undo the pair rather than
+    // being refused by a rule about creating one.
+    expect(
+      inlineNoteTyping({ value: "{}", key: "Backspace", start: 1, end: 1 }),
+    ).toEqual({ value: "", caret: 0 });
   });
 });

@@ -16,13 +16,25 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       brainDumpItem: {
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
+        // #225 — the guarded link write. `count: 1` is "this caller won the row
+        // and the link landed"; `0` is the lost-race path.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       task: {
         create: vi.fn().mockResolvedValue({ id: "t-new" }),
+        delete: vi.fn().mockResolvedValue({}),
       },
       step: {
         create: vi.fn().mockResolvedValue({ id: "s-new" }),
       },
+      // Pass-through, matching `request-breakdown.test.ts`: the callback gets
+      // the same delegates, so the shape assertions below read the same mocks
+      // whether the write is inside a transaction or not. What a mock cannot
+      // show is the row lock the #225 guard depends on — that is
+      // `braindump-task-writers.integration.test.ts`, against real Postgres.
+      $transaction: vi.fn(<T>(fn: (tx: unknown) => Promise<T>) =>
+        fn(prismaMock),
+      ),
     };
     return {
       prismaMock,
@@ -51,6 +63,7 @@ beforeEach(() => {
   currentWorkspaceIdMock.mockResolvedValue("owner");
   prismaMock.task.create.mockResolvedValue({ id: "t-new" });
   prismaMock.step.create.mockResolvedValue({ id: "s-new" });
+  prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("ensureFocusStep", () => {
@@ -104,8 +117,14 @@ describe("ensureFocusStep", () => {
     const stepId = await ensureFocusStep("i1");
 
     expect(prismaMock.task.create).toHaveBeenCalledTimes(1);
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalledWith({
-      where: { id: "i1" },
+    // #225 — the link is a GUARDED write now, and the two terms in its `where`
+    // are the point: `taskId: null` is what makes a second caller match zero
+    // rows instead of repointing the item at a duplicate Task, and
+    // `workspaceId` keeps the scope on the write rather than inherited from the
+    // read above it. Asserted as the whole call so dropping either term fails
+    // here rather than only against real Postgres.
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "i1", workspaceId: "owner", taskId: null },
       data: { taskId: "t-new" },
     });
     expect(prismaMock.step.create).toHaveBeenCalledWith({
@@ -160,5 +179,91 @@ describe("ensureFocusStep", () => {
     expect(await ensureFocusStep("i1")).toBe("s2");
     expect(prismaMock.step.create).not.toHaveBeenCalled();
     expect(prismaMock.task.create).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #225 — the lost-race arm, at the shape level.
+ *
+ * The behavioural proof is `braindump-task-writers.integration.test.ts`, which
+ * holds a real row lock. What a mock CAN pin is that a link matching zero rows
+ * makes the action discard the Task it had speculatively built and adopt the
+ * winner's, rather than carrying on with a row nothing points at — a `count: 0`
+ * treated as success is the whole defect wearing a guard.
+ */
+describe("ensureFocusStep — losing the race for the row (#225)", () => {
+  it("discards its own Task and adopts the winner's", async () => {
+    prismaMock.brainDumpItem.findFirst
+      .mockResolvedValueOnce({
+        id: "i1",
+        text: "call the bank",
+        taskId: null,
+        task: null,
+      })
+      // The re-read after the guard refused: by now the winner has committed.
+      .mockResolvedValueOnce({
+        id: "i1",
+        text: "call the bank",
+        taskId: "t-winner",
+        task: { steps: [{ id: "s-winner", done: false }] },
+      });
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    const { ensureFocusStep } = await import("./braindump");
+
+    const stepId = await ensureFocusStep("i1");
+
+    expect(prismaMock.task.delete).toHaveBeenCalledWith({
+      where: { id: "t-new" },
+    });
+    // The winner's step, and no second one built beside it.
+    expect(stepId).toBe("s-winner");
+    expect(prismaMock.step.create).not.toHaveBeenCalled();
+  });
+
+  it("creates the step when the winner's Task has none yet", async () => {
+    prismaMock.brainDumpItem.findFirst
+      .mockResolvedValueOnce({
+        id: "i1",
+        text: "call the bank",
+        taskId: null,
+        task: null,
+      })
+      .mockResolvedValueOnce({
+        id: "i1",
+        text: "call the bank",
+        taskId: "t-winner",
+        task: { steps: [] },
+      });
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    const { ensureFocusStep } = await import("./braindump");
+
+    expect(await ensureFocusStep("i1")).toBe("s-new");
+    // On the ADOPTED task, never on the discarded one.
+    expect(prismaMock.step.create).toHaveBeenCalledWith({
+      data: {
+        taskId: "t-winner",
+        text: "call the bank",
+        order: 1,
+        total: 1,
+        estMinutes: 10,
+      },
+    });
+  });
+
+  it("returns null rather than guessing when the row has gone entirely", async () => {
+    prismaMock.brainDumpItem.findFirst
+      .mockResolvedValueOnce({
+        id: "i1",
+        text: "call the bank",
+        taskId: null,
+        task: null,
+      })
+      .mockResolvedValueOnce(null);
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    const { ensureFocusStep } = await import("./braindump");
+
+    expect(await ensureFocusStep("i1")).toBeNull();
+    expect(prismaMock.step.create).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 });

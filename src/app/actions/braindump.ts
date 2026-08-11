@@ -16,6 +16,7 @@ import {
   TaskStatus,
   RewardType,
   BadgeKey,
+  TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 import {
@@ -293,33 +294,139 @@ export async function dismissPrompt(id: string) {
 
 /**
  * "Keep as task" — promote an inbox item into a Task without breaking it down.
- * (Step 5 will add the conversational-breakdown launch.)
+ *
+ * ## At most one Task per item, however many times this is called (#225)
+ *
+ * This used to be `findFirst`-then-`task.create` with no precondition on the
+ * create at all. A second call therefore built a second `Task` and repointed the
+ * item at it, leaving the first reachable from no inbox row while the focus
+ * lanes, the ICS feed and the data export all still counted it — and taking its
+ * steps out of reach with it.
+ *
+ * **A correction to what stood here** (!306, substitute review). This paragraph
+ * used to call it "the only one of the four brain-dump→task writers without one
+ * (`startBreakdown` and `ensureFocusStep` both return the item's existing
+ * `taskId` before creating)", and that was wrong twice over. Those two *check*
+ * `taskId` — with a `findFirst` outside any transaction, which is the unlocked
+ * check-then-act the paragraph below describes as the defect, not a precondition
+ * against it; measured on real Postgres, each of them produced two Tasks and an
+ * orphan under contention, as did one of them racing this one. And the fourth
+ * writer is `scheduleSingleTask` (`src/lib/braindump-to-task.ts` names all four),
+ * which was left out of the count entirely. `startBreakdown` and
+ * `ensureFocusStep` are guarded now, each in the shape its own columns allow;
+ * `scheduleSingleTask` still has the unlocked check and is recorded as
+ * outstanding rather than quietly counted as safe.
+ *
+ * Three ways to reach that, none of them exotic:
+ *
+ * 1. **Retry after a timeout** (!306, Duo review round 13). `inbox-view.tsx`
+ *    bounds how long the UI waits at `INBOX_ACTION_TIMEOUT_MS`, not how long the
+ *    request runs — a server action cannot be aborted from the client. The
+ *    notice says so honestly ("this may already have gone through") and offers a
+ *    Retry, and the client's `inFlight` guard has already been released by then,
+ *    so taking that Retry sends a second `keepAsTask` at a row whose first one
+ *    may have landed. The client guard is per-press and cannot see this; nothing
+ *    but the write itself can.
+ * 2. **▶ Focus first.** `ensureFocusStep` gives an item a Task without triaging
+ *    it, so "Add to-do" afterwards met a row that already had one.
+ * 3. **Re-triage.** `moveToReview` un-triages an item and deliberately keeps its
+ *    Task, "so re-triaging reuses the same breakdown" — which is precisely what
+ *    a second create stopped it from doing.
+ *
+ * So the precondition moves INTO the write. Related to the guarded shape
+ * `reopenItem`, `uncompleteStep` and `reverseLatestReward` use, but deliberately
+ * NOT the same one, and the difference matters enough to say (!306, substitute
+ * review): those three put the precondition in the `where` and gate on `count`.
+ * This one carries no precondition in its `where` and branches in JS on the row
+ * it gets back, **because it must still stamp the triage columns on the adopt
+ * path** — a `taskId: null` term in the `where` would refuse the very press that
+ * is asking for a triage the item has not had. `ensureFocusStep` can use the
+ * `where`-precondition form precisely because it has no stamp to land.
+ *
+ * The triage stamp is the first write in the transaction and takes the row lock,
+ * and `updateManyAndReturn` hands back the row AS UPDATED. A second caller
+ * blocks on that lock, and
+ * Postgres re-evaluates a blocked `UPDATE` against the committed version, so the
+ * `taskId` it reads back is the winner's. Zero rows means the row is gone or
+ * belongs to somebody else — a no-op, not an error to raise at someone who
+ * pressed a button twice.
+ *
+ * The link write has to be inside the same transaction rather than after it:
+ * autocommit would release the lock the moment the stamp landed, and the second
+ * caller would read `taskId` as NULL because the first has not created its Task
+ * yet. That window is the whole defect.
+ *
+ * Guarded on `taskId`, NOT on `status`. `triageBrainDumpItem` and
+ * `requestBreakdown` both set `Triaged` without creating a Task, so a
+ * status-shaped guard would refuse the one press that still owes those items a
+ * Task. What must not happen twice is the CREATE; re-stamping the triage columns
+ * is what the caller asked for either way.
+ *
+ * Re-stamping is *nearly* idempotent rather than idempotent, and the exception is
+ * worth naming (!306, substitute review): `status` and `breakdownRequestedAt` are
+ * written by value, but `triagedAt: new Date()` moves forward on every call. No
+ * bucket rule reads it — `bucket.ts` declares it and never branches on it — and
+ * its one reader is the CSV export (`src/lib/export/csv-files.ts`), so a retry
+ * shifts an exported triage timestamp and nothing else. Accepted rather than
+ * fixed: pinning the original would mean reading it back before writing it, which
+ * is the extra round trip the guard exists to avoid.
+ *
+ * The item is read through the guarded write instead of ahead of it, so the
+ * columns `brainDumpItemToTaskData` copies come from the same locked row version
+ * the decision was made on rather than from a snapshot a concurrent rename could
+ * already have superseded.
  */
 export async function keepAsTask(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({
-    where: { id, workspaceId },
-  });
-  if (!item) return;
-  // #179 — the ONE conversion, so the item's note and its three schedule-intent
-  // columns cross with it. Triage is a routine action and must not silently drop
-  // content somebody typed; `braindump-to-task-hygiene` fails the build if a
-  // writer stops going through here.
-  const task = await prisma.task.create({
-    data: brainDumpItemToTaskData(item, workspaceId),
-  });
-  await prisma.brainDumpItem.update({
-    where: { id },
-    data: {
-      status: BrainDumpStatus.Triaged,
-      triagedAt: new Date(),
-      taskId: task.id,
-      breakdownRequestedAt: null,
-    },
-  });
+
+  const taskId = await prisma.$transaction(async (tx) => {
+    const [item] = await tx.brainDumpItem.updateManyAndReturn({
+      where: { id, workspaceId },
+      data: {
+        status: BrainDumpStatus.Triaged,
+        triagedAt: new Date(),
+        breakdownRequestedAt: null,
+      },
+      // Exactly `BrainDumpItemForTask` plus the guard column. A `select` rather
+      // than the whole row because the conversion helper is typed structurally
+      // for this, and naming the five columns is what makes a sixth one being
+      // added to the conversion a compile error here rather than a silent drop.
+      select: {
+        taskId: true,
+        text: true,
+        notes: true,
+        scheduleDueAt: true,
+        schedulePriority: true,
+        scheduleHours: true,
+      },
+    });
+    // The row is gone, or is not this workspace's. Same no-op the `findFirst`
+    // guard used to give, now decided by the write's own `where` — so the scope
+    // travels with the operation instead of being inherited from a read above it.
+    if (!item) return null;
+    // Somebody already gave this item a Task: the winner of a race, an earlier
+    // call this one is a retry of, or ▶ Focus. Adopt it. Returning it rather
+    // than `null` keeps the action honestly idempotent — two calls answer with
+    // the same task id, which is what every caller of the first one assumed.
+    if (item.taskId) return item.taskId;
+    // #179 — the ONE conversion, so the item's note and its three schedule-intent
+    // columns cross with it. Triage is a routine action and must not silently drop
+    // content somebody typed; `braindump-to-task-hygiene` fails the build if a
+    // writer stops going through here.
+    const task = await tx.task.create({
+      data: brainDumpItemToTaskData(item, workspaceId),
+    });
+    await tx.brainDumpItem.update({
+      where: { id },
+      data: { taskId: task.id },
+    });
+    return task.id;
+  }, TASK_WRITER_TX_BUDGET);
+
+  if (taskId === null) return;
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
-  return task.id;
+  return taskId;
 }
 
 /**
@@ -329,38 +436,137 @@ export async function keepAsTask(id: string) {
  * A one-step task still counts as a single to-do (bucket.ts: multi-step
  * needs 2+ steps), so the item stays in its bucket.
  */
+/**
+ * ▶ Focus on a single to-do: make sure the item has a Task with at least one
+ * Step, and answer with the step to open the timer on.
+ *
+ * ## At most one Task, however many times this is called (#225)
+ *
+ * This used to be `findFirst` → `if (!taskId)` → `task.create` → link, with no
+ * transaction and no precondition on either write. `keepAsTask`'s docblock above
+ * excused it as already safe — "`startBreakdown` and `ensureFocusStep` both
+ * return the item's existing `taskId` before creating" — and that is the one
+ * sentence in this file that was wrong. They *check* it. An unlocked
+ * check-then-act is precisely the shape the paragraph above describes as the
+ * defect: the read is served from a snapshot taken before the winner committed,
+ * so both callers see NULL, both create, and the second link repoints the item
+ * at its own Task — leaving the first reachable from no inbox row while
+ * `focus/page.tsx`, `calendar-feed.ts` and `export/collect.ts` all still count
+ * it, and taking any steps it had out of reach with it.
+ *
+ * Measured on real Postgres before the fix (!306, substitute review): two
+ * overlapping presses produced two Tasks and one orphan, and so did one press
+ * of ▶ Focus overlapping one of "Add to-do".
+ *
+ * !306 makes that materially worse rather than merely latent, because it puts
+ * this write behind the failure notice's **Retry**: `withActionTimeout` bounds
+ * how long the UI waits, not how long the request runs, so the Retry can fire a
+ * second press at a row whose first one is still going.
+ *
+ * ## Why the guard is shaped differently from `keepAsTask`'s
+ *
+ * `keepAsTask` takes the row lock with its triage stamp, because it has one to
+ * write. **▶ Focus must not triage** — it deliberately leaves the item in the
+ * review queue, which is the very reason that guard is on `taskId` rather than
+ * on `status` — so there is no column here to stamp and no lock to take up
+ * front. The precondition therefore goes on the LINK, which is the write that
+ * must not happen twice: `taskId: null` in the `where`, gated on `count`, the
+ * shape `reopenItem` and `uncompleteStep` use. A loser's `UPDATE` blocks on the
+ * winner's row lock, Postgres re-qualifies it against the committed row, the
+ * `taskId IS NULL` term no longer holds and it matches zero rows — which is how
+ * it learns it lost, deterministically rather than by comparing reads.
+ *
+ * The Task it had already built is then discarded inside the same transaction,
+ * so nothing outside it ever sees the speculative row, and the winner's Task is
+ * adopted instead.
+ *
+ * ## What is NOT guarded, said plainly rather than left to be assumed
+ *
+ * **The STEP create.** Two concurrent calls against an item that ALREADY has a
+ * Task with no steps take no lock at all — neither enters the block above — so
+ * both read `steps: []` from their own snapshot and both create one, leaving two
+ * steps at `order: 1, total: 1`. Pre-existing rather than introduced here (the
+ * unguarded shape is on `main` too), and less harmful than the duplicate Task it
+ * sits next to: a stray step is visible in the breakdown and deletable, where an
+ * orphaned Task was reachable from nothing. But !306 does make it easier to reach,
+ * by putting this write behind the notice's Retry, so it is written down instead
+ * of being covered by the heading above.
+ *
+ * It is not fixed here because there is no cheap instrument. `Step` has no unique
+ * constraint, so `createMany({ skipDuplicates: true })` — the `ON CONFLICT DO
+ * NOTHING` shape `src/lib/db.ts` recommends — has nothing to conflict on, and
+ * neither `Step` nor `Task` carries an `updatedAt` to write by value and take a
+ * lock with. The real options are a unique index on `(taskId, order)` or an
+ * explicit lock on the Task row, and both are their own change with their own
+ * migration and review rather than a fourth guard bolted onto this one.
+ */
 export async function ensureFocusStep(id: string): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({
-    where: { id, workspaceId },
-    include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
-  });
-  if (!item) return null;
 
-  let taskId = item.taskId;
-  let steps = item.task?.steps ?? [];
-
-  if (!taskId) {
-    // #179 — same conversion as `keepAsTask`. Pressing ▶ Focus is a triage in
-    // everything but name, so it has to carry the note across too.
-    const task = await prisma.task.create({
-      data: brainDumpItemToTaskData(item, workspaceId),
+  /** Whether anything was actually written, so the revalidation below matches
+   *  the pre-#225 behaviour of firing only when a Step was created. */
+  let wrote = false;
+  const stepId = await prisma.$transaction(async (tx) => {
+    const item = await tx.brainDumpItem.findFirst({
+      where: { id, workspaceId },
+      include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
     });
-    taskId = task.id;
-    await prisma.brainDumpItem.update({ where: { id }, data: { taskId } });
-    steps = [];
-  }
+    if (!item) return null;
 
-  if (steps.length === 0) {
-    const step = await prisma.step.create({
-      data: { taskId, text: item.text, order: 1, total: 1, estMinutes: 10 },
-    });
-    revalidatePath(INBOX_PATH);
-    return step.id;
-  }
+    let taskId = item.taskId;
+    let steps = item.task?.steps ?? [];
 
-  const next = steps.find((s) => !s.done) ?? steps[0];
-  return next.id;
+    if (!taskId) {
+      // #179 — same conversion as `keepAsTask`. Pressing ▶ Focus is a triage
+      // in everything but name, so it has to carry the note across too.
+      const task = await tx.task.create({
+        data: brainDumpItemToTaskData(item, workspaceId),
+      });
+      const linked = await tx.brainDumpItem.updateMany({
+        // `taskId: null` is the guard, and `workspaceId` keeps the scope on
+        // the write itself rather than inherited from the read above it.
+        where: { id, workspaceId, taskId: null },
+        data: { taskId: task.id },
+      });
+      if (linked.count === 0) {
+        // Lost the race. Drop the Task nobody has seen and adopt the winner's
+        // — a duplicate press is a no-op, not an error to raise at somebody
+        // who pressed a button twice. The re-read is a new statement, so it
+        // sees the commit whose lock this transaction just waited on.
+        await tx.task.delete({ where: { id: task.id } });
+        const winner = await tx.brainDumpItem.findFirst({
+          where: { id, workspaceId },
+          include: {
+            task: { include: { steps: { orderBy: { order: "asc" } } } },
+          },
+        });
+        if (!winner?.taskId) return null;
+        taskId = winner.taskId;
+        steps = winner.task?.steps ?? [];
+      } else {
+        taskId = task.id;
+        steps = [];
+      }
+    }
+
+    if (steps.length === 0) {
+      const step = await tx.step.create({
+        data: { taskId, text: item.text, order: 1, total: 1, estMinutes: 10 },
+      });
+      wrote = true;
+      return step.id;
+    }
+
+    const next = steps.find((s) => !s.done) ?? steps[0];
+    return next.id;
+  }, TASK_WRITER_TX_BUDGET);
+
+  // Outside the transaction, and only when a Step was actually created — which
+  // is exactly when it fired before #225 moved the body into a transaction. A
+  // revalidation is a consequence of the write; one that threw inside would roll
+  // back a Task that had been created correctly.
+  if (wrote) revalidatePath(INBOX_PATH);
+  return stepId;
 }
 
 export async function completeItem(id: string) {

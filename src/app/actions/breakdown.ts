@@ -8,6 +8,7 @@ import {
   TaskStatus,
   RewardType,
   BadgeKey,
+  TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
@@ -17,32 +18,96 @@ import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
 /**
  * Launch a breakdown from a brain-dump item: create (or reuse) its Task and
  * triage the item. Returns the task id to navigate to.
+ *
+ * ## At most one Task per item, however many times this is called (#225)
+ *
+ * This used to be `findFirst` → `if (item.taskId) return item.taskId` →
+ * `task.create` → link, outside any transaction. `keepAsTask`'s docblock in
+ * `braindump.ts` excused it as already guarded on the strength of that check,
+ * and the check is the problem: an unlocked check-then-act is the exact shape
+ * that docblock's own reasoning describes as the defect. The read is served from
+ * a snapshot taken before a concurrent winner committed, so both callers see
+ * `taskId` as NULL, both create, and the second link repoints the item at its
+ * own Task — leaving the first reachable from no inbox row while
+ * `focus/page.tsx`, `calendar-feed.ts` and `export/collect.ts` all still count
+ * it, and stranding any steps it carried.
+ *
+ * Measured on real Postgres before the fix (!306, substitute review): two
+ * overlapping presses produced two Tasks and one orphan. !306 also puts this
+ * write behind the failure notice's **Retry**, and `withActionTimeout` bounds how
+ * long the UI waits rather than how long the request runs, so a Retry can fire a
+ * second press at a row whose first one is still going.
+ *
+ * The fix is `keepAsTask`'s, because this action has what that one has and
+ * `ensureFocusStep` does not: a triage stamp to write. That stamp becomes the
+ * FIRST write in an interactive transaction and takes the row lock;
+ * `updateManyAndReturn` scoped `{ id, workspaceId }` hands the row back AS
+ * UPDATED, and Postgres re-evaluates a blocked `UPDATE` against the committed
+ * version, so the `taskId` a loser reads back is the winner's. Zero rows means
+ * the row is gone or belongs to somebody else — a no-op, not an error to raise at
+ * someone who pressed a button twice.
+ *
+ * The link write is inside the same transaction rather than after it: autocommit
+ * would release the lock the moment the stamp landed, and a second caller would
+ * then read `taskId` as NULL because the first has not created its Task yet.
+ * That window is the whole defect.
+ *
+ * The guard is on `taskId`, NOT on `status`: `triageBrainDumpItem` and
+ * `requestBreakdown` both set `Triaged` without creating a Task, so a
+ * status-shaped guard would refuse the one press that still owes those items one.
  */
 export async function startBreakdown(itemId: string): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({
-    where: { id: itemId, workspaceId },
-  });
-  if (!item) return null;
-  if (item.taskId) return item.taskId;
 
-  // #179 — the ONE conversion, so the note and the schedule intent cross with
-  // the item. This path is the one a breakdown reads from, which makes a dropped
-  // note here a worse failure than elsewhere: the AI would plan the task without
-  // the detail that most often makes the steps sensible.
-  const task = await prisma.task.create({
-    data: brainDumpItemToTaskData(item, workspaceId),
-  });
-  await prisma.brainDumpItem.update({
-    where: { id: itemId },
-    data: {
-      status: BrainDumpStatus.Triaged,
-      triagedAt: new Date(),
-      taskId: task.id,
-    },
-  });
+  const taskId = await prisma.$transaction(async (tx) => {
+    const [item] = await tx.brainDumpItem.updateManyAndReturn({
+      where: { id: itemId, workspaceId },
+      data: {
+        status: BrainDumpStatus.Triaged,
+        triagedAt: new Date(),
+      },
+      // Exactly `BrainDumpItemForTask` plus the guard column, for the reason
+      // `keepAsTask` names: a `select` rather than the whole row is what makes a
+      // sixth column being added to the conversion a compile error here rather
+      // than a silent drop.
+      select: {
+        taskId: true,
+        text: true,
+        notes: true,
+        scheduleDueAt: true,
+        schedulePriority: true,
+        scheduleHours: true,
+      },
+    });
+    // The row is gone, or is not this workspace's — the same no-op the
+    // `findFirst` guard gave, now decided by the write's own `where`, so the
+    // scope travels with the operation instead of being inherited from a read.
+    if (!item) return null;
+    // Somebody already gave this item a Task: the winner of a race, an earlier
+    // call this one is a retry of, ▶ Focus, or a re-triage after `moveToReview`
+    // (which keeps the Task on purpose, "so re-triaging reuses the same
+    // breakdown"). Adopt it — and returning it rather than null is what keeps
+    // this action honestly idempotent, since the caller navigates to whatever
+    // comes back.
+    if (item.taskId) return item.taskId;
+
+    // #179 — the ONE conversion, so the note and the schedule intent cross with
+    // the item. This path is the one a breakdown reads from, which makes a dropped
+    // note here a worse failure than elsewhere: the AI would plan the task without
+    // the detail that most often makes the steps sensible.
+    const task = await tx.task.create({
+      data: brainDumpItemToTaskData(item, workspaceId),
+    });
+    await tx.brainDumpItem.update({
+      where: { id: itemId },
+      data: { taskId: task.id },
+    });
+    return task.id;
+  }, TASK_WRITER_TX_BUDGET);
+
+  if (taskId === null) return null;
   revalidatePath("/");
-  return task.id;
+  return taskId;
 }
 
 /** Create a standalone task (not from the inbox) and return its id. */

@@ -4366,3 +4366,262 @@ describe("InboxView — the captured inline note (#179/#186)", () => {
     expect(shown).not.toContain("stale item copy");
   });
 });
+
+/**
+ * #201 — auto-closing the note brace as it is typed.
+ *
+ * The rule itself is unit-tested in `braindump-note-syntax.test.ts`; these are
+ * the wiring: that the two fields carrying note syntax are bound to it, that the
+ * caret ends up where the rule said, and that a capture is never intercepted.
+ *
+ * `fireEvent.keyDown` rather than `userEvent.type`: jsdom performs no default
+ * text insertion for a key event, so this exercises exactly the handler's own
+ * output — which is what a controlled input renders in a real browser too, since
+ * the handler calls `preventDefault`.
+ */
+describe("InboxView — auto-closing the note brace (#201)", () => {
+  /**
+   * Press `key` and report whether the handler CLAIMED the keystroke.
+   *
+   * `fireEvent.keyDown` returns `!defaultPrevented`, and that return value is the
+   * only thing separating "the rule declined" from "the rule is not wired up at
+   * all" (!306, substitute review). jsdom performs no default text insertion for
+   * a key event, so on the negative branches an unchanged value is exactly what a
+   * MISSING handler produces too — three specs below passed with
+   * `handleNoteBraceKey` deleted. Asserting `claimed` is what makes them discriminate.
+   */
+  async function typeBrace(
+    el: HTMLInputElement,
+    key: string,
+    init: Record<string, unknown> = {},
+  ): Promise<{ claimed: boolean }> {
+    let notPrevented = true;
+    await act(async () => {
+      notPrevented = fireEvent.keyDown(el, { key, ...init });
+      await Promise.resolve();
+    });
+    return { claimed: !notPrevented };
+  }
+
+  function captureField() {
+    return screen.getByPlaceholderText(/Brain dump/i) as HTMLInputElement;
+  }
+
+  it("inserts the closing brace and leaves the caret between the pair", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "water the plants " } });
+    input.setSelectionRange(17, 17);
+
+    await typeBrace(input, "{");
+
+    expect(input).toHaveValue("water the plants {}");
+    expect(input.selectionStart).toBe(18);
+    expect(input.selectionEnd).toBe(18);
+  });
+
+  it("wraps a selection instead of replacing it", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "water the plants" } });
+    input.setSelectionRange(6, 16);
+
+    await typeBrace(input, "{");
+
+    expect(input).toHaveValue("water {the plants}");
+  });
+
+  it("types over the closing brace rather than producing `}}`", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "buy milk {oat}" } });
+    input.setSelectionRange(13, 13);
+
+    await typeBrace(input, "}");
+
+    expect(input).toHaveValue("buy milk {oat}");
+    expect(input.selectionStart).toBe(14);
+  });
+
+  it("backspacing the opening brace takes the pair with it", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "buy milk {}" } });
+    input.setSelectionRange(10, 10);
+
+    await typeBrace(input, "Backspace");
+
+    expect(input).toHaveValue("buy milk ");
+    expect(input.selectionStart).toBe(9);
+  });
+
+  // #179 Decision 1: only the LAST group is the note, so a second one would
+  // silently reassign which text becomes the note.
+  it("refuses when the field already ends in a brace group", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "fix {foo}" } });
+    input.setSelectionRange(9, 9);
+
+    const { claimed } = await typeBrace(input, "{");
+
+    // Unchanged: the browser is left to type the `{` literally, which is what
+    // the parser expects of a group that is not the last one. `claimed` is what
+    // distinguishes that from the handler being absent — see `typeBrace`.
+    expect(claimed).toBe(false);
+    expect(input).toHaveValue("fix {foo}");
+  });
+
+  it("never intercepts the Enter that captures", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+
+    await user.type(input, "buy milk{enter}");
+
+    expect(createBrainDumpItem).toHaveBeenCalledWith("buy milk");
+  });
+
+  it("leaves an IME composition alone", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "note " } });
+    input.setSelectionRange(5, 5);
+
+    const { claimed } = await typeBrace(input, "{", { isComposing: true });
+
+    // Not merely "the value did not change" — that is also what no handler at
+    // all looks like in jsdom. The handler must have let the keystroke through.
+    expect(claimed).toBe(false);
+    expect(input).toHaveValue("note ");
+  });
+
+  it("leaves a Cmd/Ctrl chord alone, so undo still reaches the browser", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "buy milk {}" } });
+    input.setSelectionRange(10, 10);
+
+    const { claimed } = await typeBrace(input, "Backspace", { metaKey: true });
+
+    expect(claimed).toBe(false);
+    expect(input).toHaveValue("buy milk {}");
+  });
+
+  /**
+   * The positive counterpart to the three `claimed: false` assertions above, and
+   * the reason they mean anything: the same channel reads `true` when the rule
+   * fires (!306, substitute review). Without this, "claimed is false" could be a
+   * `fireEvent` return value that is always false and nobody would know.
+   */
+  it("claims the keystroke when the rule does fire", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "buy milk " } });
+    input.setSelectionRange(9, 9);
+
+    const { claimed } = await typeBrace(input, "{");
+
+    expect(claimed).toBe(true);
+    expect(input).toHaveValue("buy milk {}");
+  });
+
+  // The ✎ editor is the other field the parser reads, so it gets the same rule.
+  // Its pre-fill is the reconstruction (`text {note}`), which already ends in a
+  // group — so the interesting case is a row with NO note.
+  it("applies to the ✎ row title editor too", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeItem({ text: "water the plants" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /edit water the plants/i }),
+    );
+    const editor = screen.getByDisplayValue(
+      "water the plants",
+    ) as HTMLInputElement;
+    editor.setSelectionRange(16, 16);
+
+    await typeBrace(editor, "{");
+
+    expect(editor).toHaveValue("water the plants{}");
+  });
+});

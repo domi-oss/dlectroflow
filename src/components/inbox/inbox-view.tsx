@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   useTransition,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -65,7 +66,10 @@ import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskNoteRow } from "@/components/breakdown/task-note";
-import { inlineNoteSource } from "@/lib/braindump-note-syntax";
+import {
+  inlineNoteSource,
+  inlineNoteTyping,
+} from "@/lib/braindump-note-syntax";
 import { liveNote } from "@/lib/braindump-to-task";
 import {
   bucketItems,
@@ -131,6 +135,25 @@ const DROP_BUCKET_KEY = "inboxBucketId";
  * rather than a copy of it.
  */
 export const CAPTURE_TIMEOUT_MS = 10_000;
+
+/**
+ * #225 — how long a ROW write is willing to wait before it is called a failure.
+ *
+ * Same reasoning and same value as `CAPTURE_TIMEOUT_MS` above,
+ * `SHOPPING_ACTION_TIMEOUT_MS` and `focus-timer.tsx`'s `ACTION_TIMEOUT_MS`: the
+ * third failure mode is silence rather than a rejection, and from the user's
+ * side an un-timed-out `await` is indistinguishable from the silent no-op this
+ * whole notice exists to kill. Every action behind `run()` is a handful of short
+ * Prisma statements, so ten seconds is already pathological. The request itself
+ * carries on — a server action cannot be aborted from the client — so a write
+ * that lands late still lands, and the next `router.refresh()` picks it up.
+ * Exported so the test advances the real value rather than a copy of it.
+ *
+ * A separate constant from `CAPTURE_TIMEOUT_MS` despite the identical value:
+ * they bound two different calls, and welding them together would mean re-tuning
+ * one silently re-tuned the other.
+ */
+export const INBOX_ACTION_TIMEOUT_MS = 10_000;
 
 /** How long "captured ✓" stays on screen after a write resolves. */
 const CAPTURE_CONFIRM_MS = 1500;
@@ -213,6 +236,380 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
   if (failure.stale) return "capture.error.stale";
   if (failure.timedOut) return "capture.error.timeout";
   return "capture.error.failed";
+}
+
+/**
+ * #225 — WHICH write a row failure is about.
+ *
+ * Not the closure that performed it. !294 spent a review round on that exact
+ * mistake: the shopping notice recognised "the write this record is about has
+ * now succeeded" by comparing a held `fn` by REFERENCE, and only the notice's own
+ * Retry ever hands the same closure back — every ordinary control builds a fresh
+ * one on every render. So a user who simply pressed the row's button again could
+ * never match, the banner from the earlier attempt stayed up beside the write
+ * that had just landed, and its Retry then re-posted the OLD call with the OLD
+ * arguments. A failure belongs to a logical target, so that is what it is keyed
+ * by; `fn` is still held, but only to re-run.
+ *
+ * **Row AND field, not row alone.** A failed rename is not answered by a
+ * successful tick of the same row — the words still did not save, and re-posting
+ * them is still exactly right. Keying by row alone would throw away a failure the
+ * user has not been told about, which is this issue's own bug from the other side.
+ *
+ * `completeItem` and `reopenItem` deliberately SHARE `"done"`: they write the
+ * same column in opposite directions, so serialising them is correct rather than
+ * incidental, and the guard below is what stops a double-press of Complete
+ * becoming two writes.
+ *
+ * ## `"move"` reaches three of these actions again, and that is accepted
+ *
+ * A drop and a row button can address the SAME action under two different
+ * labels: dragging to Done is `"move"` and runs `completeItem`, while the row's
+ * own tick is `"done"` and runs it too. `snoozeBrainDumpItem` (drop on Snoozed
+ * vs. the row's Snooze) and `reopenItem` (a drop's `reopenFirst` vs. the row's
+ * Undo) overlap the same way. Different keys, so the guard lets both through —
+ * raised on !306 and accepted rather than fixed, for three reasons that have to
+ * hold together:
+ *
+ * 1. **They cannot actually overlap from one client.** Next serialises server
+ *    actions — see {@link writeGuardKey} for the mechanism — so the second call
+ *    is dispatched only once the first has finished. It then meets that action's
+ *    own early return (`if (!item || item.completedAt) return`), and the other
+ *    two write absolute values rather than accumulating, so the repeat is a
+ *    no-op rather than a second effect.
+ * 2. **A shared key would break something that works.** Collapsing `"move"` into
+ *    the field its `plan` happens to pick is what the note on `moveItemToBucket`
+ *    argues against: a failed drop onto Done has to be retried as that drop,
+ *    reopen included, not as a bare `completeItem` that would drop half of it.
+ * 3. **The residual race is not the client's to hold.** Genuine concurrency here
+ *    needs two router instances — two tabs, or two devices — which no in-memory
+ *    guard can span, so a guard widened to cover it would buy nothing and read
+ *    as though it had. That is why the defence lives in the actions, and
+ *    `reopenItem` says so in as many words ("the same Done row open in two
+ *    tabs"): see its reversal counted off what the writes CHANGED,
+ *    `touchStreakOnCompletion`'s interactive-transaction row lock (proved
+ *    against a real database in `rewards.integration.test.ts`) and
+ *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *
+ *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
+ *    two truly simultaneous completions of one to-do could bank twice. It is
+ *    real, it is server-side, it predates this MR, and it is reachable without
+ *    going near a `WriteField` at all — so it is neither this guard's to fix nor
+ *    #225's, and it is recorded here rather than left for the next reader to
+ *    rediscover from the same comment.
+ *
+ * The contrast with `"text"` is the whole point, and it is not that a rename is
+ * more dangerous: it is that these three are the same request twice, and two
+ * renames are two different requests.
+ */
+type WriteField =
+  /** `renameItem` — and, through it, the inline note (#179). */
+  | "text"
+  /** `deleteBrainDumpItem`. */
+  | "delete"
+  /** `keepAsTask`. The one write here that CREATES a row, hence the guard. */
+  | "triage"
+  /** `snoozeBrainDumpItem`. */
+  | "snooze"
+  /** `completeItem` and `reopenItem` — the same column, both directions. */
+  | "done"
+  /** `freshenItem`. */
+  | "freshen"
+  /** `dismissPrompt`. */
+  | "prompt"
+  /** `moveItemToBucket`'s composite: an optional reopen plus one bucket write. */
+  | "move"
+  /**
+   * `startBreakdown`. Like `"triage"` it CREATES a Task, and like `"triage"` it
+   * navigates away on success rather than refreshing — see `onLanded`.
+   *
+   * Its own field rather than a share of `"triage"`, even though the two write
+   * the same three columns. Sharing would absorb "Break into steps" pressed
+   * after "Add to-do", and that second press asks for something the first one
+   * does not do: it asks to be TAKEN somewhere. Absorbing it would leave the
+   * user on the inbox with no navigation and no explanation, which is the silent
+   * no-op this issue removes rather than one to add. Two presses of the SAME
+   * control are still absorbed, which is the case that fires twice in practice.
+   */
+  | "breakdown"
+  /** `ensureFocusStep`. Creates a Task AND a Step, and navigates. Its own field
+   *  for the reason `"breakdown"` has one. */
+  | "focus";
+
+type WriteTarget = { id: string; field: WriteField };
+
+const writeTargetKey = ({ id, field }: WriteTarget): string => `${id}:${field}`;
+
+const sameWriteTarget = (a: WriteTarget, b: WriteTarget): boolean =>
+  a.id === b.id && a.field === b.field;
+
+/**
+ * #225 (!306, Duo review) — what the double-press guard absorbs on, which is
+ * NOT always the target.
+ *
+ * The guard's premise, argued in full beside `inFlight` below, is that "the
+ * identical write to the identical target is already running, so pressing again
+ * asks for something that is already happening". That holds for seven of the
+ * eight fields because their target IS the whole request: `completeItem(id)`
+ * closes the row whichever control asked, so a second press really is the same
+ * ask and absorbing it is right.
+ *
+ * `"text"` is the one field that carries words. `renameItem(id, value)` means
+ * two submissions of the ✎ editor against one row are two DIFFERENT requests,
+ * and the guard was dropping the second while the editor closed as though it
+ * had saved — a silent write failure wearing a success, which is the class this
+ * issue exists to remove rather than to add to. So a rename is guarded on the
+ * words as well as the row: the same words twice are still a double-press and
+ * still absorbed, different words are a new request and go.
+ *
+ * Letting the second one through is safe rather than a race. Next serialises
+ * server actions: `callServer` dispatches every one into the app router's action
+ * queue, and `dispatchAction` appends to the queue whenever something is already
+ * pending, so `runRemainingActions` starts it only once the previous action has
+ * finished (`next/dist/client/components/app-router-instance.js`). The two
+ * renames therefore reach the server in submission order and the row is left
+ * holding the last words the user typed, which is what they asked for. The
+ * `seq` machinery already handles the rest: the NEWEST attempt to settle owns
+ * the notice whichever way it went, so an earlier failure is cleared by the
+ * later edit that superseded it and — !306's Duo review, since letting the
+ * second rename through is what put two writes at one target in the first place
+ * — an earlier failure cannot overwrite the later edit's notice either.
+ *
+ * Deliberately separate from {@link writeTargetKey}, which stays keyed by target
+ * alone — `writeSettledAt`'s "has a newer write at this row settled?" question
+ * is about the row, not about the words.
+ */
+const writeGuardKey = (target: WriteTarget, subject: string): string =>
+  target.field === "text"
+    ? `${writeTargetKey(target)}:${subject}`
+    : writeTargetKey(target);
+
+/**
+ * #225 — a row write that did not land.
+ *
+ * ONE slot, not a queue: a second failure displaces the first. That boundary is
+ * #210's, argued there at length and deliberately not re-opened here — and it
+ * costs less on this path than it does on the capture path, because nothing a row
+ * write can lose is unrecoverable. The row is still in the list and the press is
+ * still repeatable; what was lost is one change, not the only copy of a thought.
+ */
+type WriteFailure = {
+  /**
+   * The words the failed write was about — the NEW text for a rename, the item's
+   * own text for everything else. Held here rather than looked up at render, so a
+   * rename's notice quotes what did not save rather than the title still on screen.
+   */
+  subject: string;
+  /** @see WriteTarget — the identity every "is this record about that?" test uses. */
+  target: WriteTarget;
+  /**
+   * Which attempt produced this record, from the component's own monotonic
+   * counter. Held so an OLDER attempt settling late cannot rewrite a newer record
+   * for the same target: a success only clears a notice it is strictly newer than.
+   */
+  seq: number;
+  /**
+   * The browser is running a different deployment than the server. Next
+   * regenerates server-action ids on every build, so a retry re-posts the same
+   * dead id — the only thing that can work is a reload.
+   */
+  stale: boolean;
+  /**
+   * The write never answered, so **whether it landed is unknown**. The timeout
+   * bounds how long the UI waits, not the request. Kept distinct from the generic
+   * failure because "nothing changed" would then be a claim the client cannot
+   * support.
+   */
+  timedOut: boolean;
+  /** A retry of THIS write is in flight. */
+  retrying: boolean;
+  /** The exact call that failed, so Retry re-runs *that* rather than a rebuilt
+   *  guess at it. Deliberately not an identity — see {@link WriteTarget}. */
+  fn: () => Promise<unknown>;
+  /**
+   * #225 — what success does, when `router.refresh()` is not it.
+   *
+   * Two of the writes NAVIGATE: a breakdown and ▶ Focus create the row they are
+   * about and then go to its page, so the default refresh would be a second
+   * fetch of a route the push has already left. Held beside `fn` for exactly the
+   * reason `fn` is held — Retry has to reproduce the whole write, and the outcome
+   * is part of the write rather than a decoration on it. A retry that saved the
+   * row and then stayed on the inbox would be the press vanishing again.
+   *
+   * Takes the resolved value because that is where the id to navigate to is, and
+   * because a falsy one means the action declined: the callback is the only place
+   * that knows which of those two happened.
+   */
+  onLanded?: (result: unknown) => void;
+  /**
+   * The control the press came from, so focus can be handed back when the notice
+   * goes away (WCAG 2.4.3).
+   *
+   * A live element rather than an id, because the 20 call sites have no shared
+   * registry to look one up in and adding one to all of them is exactly the
+   * per-call-site work this fix exists to avoid. `isConnected` is checked before
+   * it is used: a row removed by the refresh cannot be focused, and the capture
+   * field is the fallback.
+   */
+  origin: HTMLElement | null;
+};
+
+/**
+ * #225 — is the write that just landed the one the notice on screen is waiting
+ * on?
+ *
+ * Both halves were learned the expensive way. The TARGET test is !294's round-6
+ * finding: identity is the row and the field, never the closure, because every
+ * ordinary control builds a fresh closure on every render. The SEQUENCE test
+ * stops a late success clearing a FRESHER failure at the same target, which
+ * would be a silent no-op of exactly the kind this issue removes.
+ *
+ * One predicate rather than two copies of it, because the notice's removal and
+ * the focus hand-off that goes with it have to agree about what is happening:
+ * arming a hand-off for a notice that is NOT going away is how focus lands on a
+ * control the user was never sent away from (!306, Duo review).
+ */
+function answersFailure(
+  failure: WriteFailure | null,
+  target: WriteTarget,
+  seq: number,
+): failure is WriteFailure {
+  return (
+    failure !== null &&
+    sameWriteTarget(failure.target, target) &&
+    failure.seq < seq
+  );
+}
+
+/**
+ * #225 — which of the four messages a row failure gets, ordered by how much the
+ * user can be told, most-certain first. Mirrors `captureMessageKey` above,
+ * `writeFailureKey` in `shopping-list.tsx` and `failureMessageKey` in
+ * `focus-timer.tsx`.
+ */
+function writeFailureKey(failure: WriteFailure, rowGone: boolean): StringKey {
+  if (failure.stale) return "inbox.errorSaveStale";
+  // !306, Duo review — the two facts together, and neither of the messages below
+  // is honest about the pair. `writeFailureRemedy` has already withdrawn every
+  // control by the time this is true, so the timeout's "before trying again"
+  // promises a button that is not on the screen; and the user is being sent to
+  // check a list the page has itself just checked. Kept ABOVE `timedOut` for that
+  // reason, and separate from `errorSaveGone` because it must not inherit
+  // "nothing changed" — see the note below, which applies to this arm too.
+  if (failure.timedOut && rowGone) return "inbox.errorSaveTimeoutGone";
+  // Stays ABOVE `rowGone`: a timeout's verdict is genuinely unknown, and "nothing
+  // changed" would be a claim the client cannot support — the row may be absent
+  // BECAUSE the write it is unsure about landed. While the row is still on the
+  // list, "check your inbox" is the honest instruction, the inbox is exactly
+  // where the answer is, and a Retry is offered to act on what is found.
+  if (failure.timedOut) return "inbox.errorSaveTimeout";
+  if (rowGone) return "inbox.errorSaveGone";
+  return "inbox.errorSaveFailed";
+}
+
+/**
+ * #225 — what, if anything, the notice can offer that could actually work.
+ *
+ * A button whose only possible outcome is the message already on screen is worse
+ * than no button (!294, Duo review round 5), so the two cases where a retry is
+ * known to be futile get no control at all.
+ */
+function writeFailureRemedy(
+  failure: WriteFailure,
+  rowGone: boolean,
+): "reload" | "retry" | "none" {
+  // Retrying re-posts an action id the running deployment has forgotten.
+  if (failure.stale) return "reload";
+  // Every one of these actions is `findFirst`-then-write against a row id, so a
+  // row the list no longer holds makes each of them a no-op again, every time.
+  // The page queries everything except archived rows, so "not in `initialItems`"
+  // is deleted or archived on the server, not merely filtered off this view.
+  //
+  // !306, Duo review — this arm swallows `timedOut`, and that is the decision
+  // rather than the oversight. A timeout does not weaken the case for withdrawing
+  // the button, it strengthens it: retrying either re-posts a write that already
+  // landed or matches nothing, and BOTH settle as a silent success that clears
+  // the notice. A false "saved this time" is worse than the dead end it would
+  // replace. `writeFailureKey` carries the other half — a message that no longer
+  // offers a "trying again" this function is about to take away.
+  if (rowGone) return "none";
+  return "retry";
+}
+
+/**
+ * #201 — bind {@link inlineNoteTyping} to a controlled input's `keydown`.
+ *
+ * The rule itself is pure and lives next to the parser; this is the DOM half —
+ * reading the live selection, suppressing the browser's own insertion, and
+ * putting the caret back once React has committed.
+ *
+ * ## Which fields get it, and which deliberately do not
+ *
+ * The two that already carry an `AddNoteButton`: the capture bar and the ✎ row
+ * title editor. Those are exactly the fields whose value `splitInlineNote` reads,
+ * so they are the fields where a brace MEANS something — and a `{` that
+ * auto-closes in one and not the other would be the inconsistency, not the
+ * coverage. Everything else on the page (the note textarea itself, the step
+ * editor, the estimate input) is plain text to the parser, and auto-closing a
+ * brace there would be a surprise with no payoff.
+ *
+ * ## `keydown`, and what it costs
+ *
+ * Predictive text, swipe input and autocorrect rewrite a field without emitting
+ * a `keydown`, which is the standard argument for `beforeinput`. `keydown` is
+ * chosen anyway, and the reason is the FAILURE MODE rather than a claim that the
+ * gap cannot be reached (!306, substitute review — this used to assert that "no
+ * IME, swipe path or autocorrect produces a bare `{`", which is not defensible as
+ * an absolute and is least defensible on Android, where GBoard routes
+ * soft-keyboard input through the IME and can report `key: "Unidentified"`).
+ *
+ * A keystroke this handler never sees types a literal `{`. The parser accepts
+ * that — it is exactly what the field held before #201 — so the worst case is the
+ * convenience not firing, never a wrong value or a lost character. `beforeinput`
+ * would trade that for a mechanism whose `preventDefault` semantics on a
+ * controlled React input are considerably harder to get right, to buy a case that
+ * degrades gracefully. Dictation and paste produce no `keydown` at all and are
+ * out of reach for the same reason and with the same consequence.
+ *
+ * A composition in progress is skipped, because a `{` typed mid-composition
+ * belongs to the IME.
+ */
+function handleNoteBraceKey(
+  e: ReactKeyboardEvent<HTMLInputElement>,
+  setValue: (next: string) => void,
+): void {
+  if (e.nativeEvent.isComposing) return;
+  // Cmd/Ctrl chords are shortcuts rather than text entry: Cmd+Backspace deletes
+  // to the line start and Ctrl+`{` is a binding, and neither should auto-close
+  // anything. This used to cite "the browser's own undo among them", which it
+  // cannot be protecting — Cmd+Z reports `key: "z"`, which the rule declines on
+  // its first line anyway, and `inlineNoteTyping`'s own header records that a
+  // controlled React input sits outside the native undo stack regardless
+  // (!306, substitute review). AltGr is NOT excluded: on several European
+  // layouts it is how `{` is produced at all, and it reports as ctrl and alt
+  // together.
+  if (e.metaKey || (e.ctrlKey && !e.altKey)) return;
+  // A modified Backspace is a word or line delete, which must stay one.
+  if (e.key === "Backspace" && (e.altKey || e.ctrlKey)) return;
+
+  // Read now: React resets `currentTarget` once the handler returns, and the
+  // caret has to be placed from a microtask.
+  const el = e.currentTarget;
+  const next = inlineNoteTyping({
+    value: el.value,
+    key: e.key,
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.value.length,
+  });
+  if (next === null) return;
+
+  e.preventDefault();
+  setValue(next.value);
+  // AFTER React has committed the new value. Setting the range now would aim at
+  // the OLD string, and the browser clamps a range past the current length — on
+  // an appended `{}` that parks the caret outside the braces. Same dialect
+  // `AddNoteButton` uses, for the same reason.
+  queueMicrotask(() => el.setSelectionRange(next.caret, next.caret));
 }
 
 /** True when a native drag was started by one of our rows rather than by an
@@ -603,11 +1000,474 @@ export function InboxView({
     })();
   }, [needsReview, permission, settings, router, notifyAging]);
 
-  const run = (fn: () => Promise<unknown>) =>
-    startTransition(async () => {
-      await fn();
-      router.refresh();
+  /**
+   * ── #225: every row write, and one place that says when one did not land ────
+   *
+   * `run()` used to be four lines with no `try`: a rejected server action
+   * surfaced as an unhandled rejection inside the transition and the user was
+   * told nothing — the row simply did not change. There is no `error.tsx`
+   * anywhere in `src/` to catch it at the framework level either. Twenty call
+   * sites across eight actions, all silent.
+   *
+   * The fix is #210's capture notice and !294's shopping notice applied here
+   * rather than reinvented: the same three-way split from
+   * `server-action-failure.ts`, the same `role="alert"` notice quoting the
+   * subject, the same `aria-disabled`-not-`disabled` Retry. Three surfaces
+   * failing in three different shapes would be worse than any one of them.
+   *
+   * ## One notice slot, at the top, rather than one per row
+   *
+   * The decision #225 asks for, and the inbox is genuinely harder than the
+   * shopping list here: it is a long, bucketed list, its sections truncate behind
+   * "See all", and the Done bucket shows a window rather than everything. So a
+   * per-row message would be **silent exactly when the row is not rendered** —
+   * which includes the case a delete's failure is most likely to arrive in — and
+   * it would need injecting at five separate row renderers, when the whole point
+   * of hardening `run()` is that a new call site inherits the behaviour.
+   *
+   * One slot works because the notice **quotes the item's own text**: "which row"
+   * is answered without the row being on screen. What one slot does NOT solve on
+   * its own is the notice itself being off screen, and that is what the focus
+   * move below is for — a focused control is scrolled into view by the browser,
+   * so the message and the focus ring arrive together. Leaving focus on a control
+   * that has just scrolled away would fail WCAG 2.4.7 as well as hiding the error.
+   *
+   * Deliberately NOT a per-row `aria-invalid` pointing at a shared message node,
+   * which is the WCAG 3.3.1 failure !294 found one level down: row B's field
+   * describing row A's error.
+   *
+   * ## The double-press guard
+   *
+   * A failed write is indistinguishable from a press that did not register, so
+   * the natural response is to press again — which, unguarded, fires the write a
+   * second time. `inFlight` keys that per logical target, the same lesson
+   * `schedulingIds` applies per row to the 📅 controls (#169). The one exception
+   * is a rename, whose words are part of what makes it a repeat — see
+   * {@link writeGuardKey}, which is what the entries below are actually keyed by.
+   *
+   * The second press is absorbed rather than discarded, and the distinction
+   * matters because #169's other harm is a press that vanishes with no
+   * explanation: the identical write to the identical target is already running,
+   * so pressing again asks for something that is already happening, and
+   * `refreshing` is already dimming the list while it does. #210's capture path
+   * makes the same call for the same reason.
+   *
+   * The three Task-CREATING writes are why this is not merely tidy — `keepAsTask`,
+   * `startBreakdown` and `ensureFocusStep` each make a Task and then point the
+   * item at it, so two in flight left an orphaned Task row that nothing could
+   * reach. **This guard is not what closes that**, and saying so is the point:
+   * it is per-press and per-client, so it cannot see the Retry this notice offers
+   * after a ten-second timeout, and it cannot span two tabs at all. All three are
+   * guarded in the write itself now (see their doc comments in
+   * `src/app/actions/braindump.ts` and `breakdown.ts`); the guard here just stops
+   * the ordinary double-tap ever getting that far.
+   *
+   * ## What this still cannot see
+   *
+   * **All eight actions can decline without throwing** — each returns early when
+   * the row is gone, whether from a `findFirst` in front of the write or, for the
+   * three above, from the guarded write's own zero-row answer; and
+   * `freshenItem`/`dismissPrompt` are bare `updateMany`s that report nothing when
+   * they match zero rows. On the wire a decline is identical to a success, so
+   * `run()` cannot tell them apart; closing that properly means the eight actions
+   * returning a result the way `shopping.ts` does, which is a signature change to
+   * `src/app/actions/braindump.ts` consumed by `library-rows.tsx`,
+   * `focus-lanes.tsx`, `focus-timer.tsx`, `google-schedule.ts` and
+   * `focus-launcher.ts`. That is its own change, not this one.
+   *
+   * What IS closed here is the only decline reachable in production: the row is
+   * gone. `initialItems` comes from the dynamic page, so the rendered list losing
+   * a row IS the server saying so — see `writeFailureRowGone`, which withdraws a
+   * Retry that could only be refused again.
+   */
+  const [writeFailure, setWriteFailure] = useState<WriteFailure | null>(null);
+  // Declared here rather than beside the drag dispatcher that also reads it: the
+  // notice's `rowGone` test needs it, and that test has to be in scope before the
+  // focus effect below can depend on the remedy it decides.
+  const itemsById = new Map(initialItems.map((i) => [i.id, i]));
+  /**
+   * #225 — a failure aimed at a row the rendered list no longer holds.
+   *
+   * Derived from `initialItems` rather than tracked, because a second copy of a
+   * fact is how the page ends up disagreeing with itself. The inbox page is
+   * dynamic, so its losing a row IS the server saying the row has gone — which is
+   * the one silent decline `run()` can see without the eight actions returning a
+   * result. It changes both the message and whether a control is offered at all.
+   */
+  const writeFailureRowGone =
+    writeFailure !== null && !itemsById.has(writeFailure.target.id);
+  /** `null` when there is no notice; otherwise which control it offers. A
+   *  dependency of the focus effect below, because the control being withdrawn is
+   *  one of the two things that can strand focus on <body>. */
+  const writeRemedy = writeFailure
+    ? writeFailureRemedy(writeFailure, writeFailureRowGone)
+    : null;
+  // Ties the failure message to the notice's control, so the reason is announced
+  // with the remedy however the announcement races.
+  const writeErrorId = useId();
+  // The retry's wait. It sits on the visually hidden live region BESIDE the
+  // notice, not on the visible line inside it, so the one node a screen reader
+  // can reach is also the one the CTA's `aria-describedby` points at (!306, Duo
+  // review; the same correction #218 made to the capture notice above).
+  const writeSavingId = useId();
+  const writeCtaRef = useRef<HTMLButtonElement | null>(null);
+  /** The notice's message, and the focus target of last resort — see the effect
+   *  below and `writeFailureRemedy`'s `"none"` arm. */
+  const writeNoticeRef = useRef<HTMLParagraphElement | null>(null);
+  /**
+   * Which targets have a write outstanding, how many writes have been started,
+   * how many are still running, and the newest attempt at each target that
+   * SETTLED — landed or failed, both, because the question it answers is "has
+   * this target moved on since my attempt started?" and either answer means yes.
+   *
+   * Refs, not state: nothing renders any of them, and a counter that triggered a
+   * render would re-run the very effects below that move focus. That is the one
+   * deliberate difference from `schedulingIds`, which is state precisely because
+   * `row-actions.tsx` renders it as `pending`.
+   *
+   * `settledAt` exists because two writes at the same target where the older one
+   * loses the race would otherwise end with a notice about a write that
+   * succeeded — and, once it was told about failures too (!306, Duo review),
+   * with the older of two failures overwriting the newer one's notice. It is
+   * emptied whenever nothing is outstanding, because at that instant nothing can
+   * read it — otherwise a long session accumulates one entry per row ever
+   * touched.
+   */
+  const inFlight = useRef(new Set<string>());
+  const writeAttempts = useRef(0);
+  const writesOutstanding = useRef(0);
+  const writeSettledAt = useRef(new Map<string, number>());
+  /**
+   * What the notice on screen is currently about, readable from the async write
+   * paths. Their closure holds the `writeFailure` from the press that started
+   * them, which is by definition not the record a LATER failure put on screen.
+   *
+   * Not a one-shot instruction like the two refs below it — a mirror, kept in an
+   * effect rather than assigned during render so a render React discards leaves
+   * no fact behind. It can therefore LAG the state by a commit, which is safe in
+   * the one place that reads it: that reader also requires the notice's control
+   * to be holding focus, and a notice that has not been committed has no control
+   * to hold it.
+   */
+  const displayedFailure = useRef<WriteFailure | null>(null);
+  useEffect(() => {
+    displayedFailure.current = writeFailure;
+  }, [writeFailure]);
+  /**
+   * One-shot instructions to the two effects below. Refs rather than state for
+   * the reason `returnFocusToInput` gives: they are messages to an effect, not
+   * something anything renders, and putting them in state would schedule a render
+   * just to say "no focus move needed".
+   */
+  const takeFocusForWrite = useRef(false);
+  /**
+   * Where focus goes when the notice unmounts; `null` when no hand-off is
+   * pending.
+   *
+   * A BOX rather than a bare element, because "armed, with nowhere in particular
+   * to go" is a real state and has to be distinguishable from "not armed". A
+   * press whose control the browser never focused leaves no origin — and that is
+   * every mouse press in WebKit, which blurs whatever held focus and puts it on
+   * `<body>` rather than on the button (measured; Chromium reports the button for
+   * the same gesture). Collapsing the two states left that user on `<body>` when
+   * the notice they had been sent to unmounted, which is the WCAG 2.4.3 fault
+   * this hand-off exists to avoid rather than to create.
+   */
+  const returnFocusAfterWrite = useRef<{ origin: HTMLElement | null } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!writeFailure) return;
+    // Two reasons to move focus here, and the second is not a duplicate of the
+    // first. **Taking** it is the one-shot instruction the failure path leaves.
+    // **Repairing** it is what happens when the control the user was standing on
+    // is withdrawn — the row goes away mid-notice, the Retry is removed because
+    // it could only be refused again, and the browser drops them to <body>
+    // (WCAG 2.4.3). The dependency list is what keeps the second from being
+    // grabby: it re-runs when the remedy changes, not on every render, so
+    // clicking the page background does not pull focus back.
+    if (!takeFocusForWrite.current && document.activeElement !== document.body)
+      return;
+    takeFocusForWrite.current = false;
+    // In an effect rather than beside the state update: the notice does not exist
+    // yet at that point — it is what this state update renders. The message is
+    // the fallback target for exactly the withdrawn-control case, which is why it
+    // carries `tabIndex={-1}`: a notice with nothing focusable in it cannot
+    // receive the hand-off at all.
+    (writeCtaRef.current ?? writeNoticeRef.current)?.focus();
+  }, [writeFailure, writeRemedy]);
+  useEffect(() => {
+    const handOff = returnFocusAfterWrite.current;
+    // A notice REPLACED rather than removed voids the hand-off armed for the one
+    // it displaced: React re-uses the control the user is standing on instead of
+    // unmounting it, so nothing was stranded, and moving focus now would be a
+    // steal rather than a repair (!306, Duo review).
+    if (writeFailure) {
+      returnFocusAfterWrite.current = null;
+      return;
+    }
+    if (!handOff) return;
+    returnFocusAfterWrite.current = null;
+    // Two ways to have nowhere to go back to, and dropping the user on <body> is
+    // the WCAG 2.4.3 fault in both: a row removed by the refresh cannot be
+    // focused, and a press the browser never focused left no origin at all. The
+    // capture field is the notice's nearest surviving neighbour.
+    if (handOff.origin?.isConnected) handOff.origin.focus();
+    else inputRef.current?.focus();
+  }, [writeFailure]);
+
+  /**
+   * The element the press came from, or null when there is nothing worth
+   * returning to. `<body>` is excluded on purpose: it is what `activeElement`
+   * reports when focus is nowhere, and "return focus to the document" is not a
+   * hand-off.
+   */
+  const focusOrigin = (): HTMLElement | null => {
+    const el = document.activeElement;
+    return el instanceof HTMLElement && el !== document.body ? el : null;
+  };
+
+  /**
+   * Raise or drop `retrying`, and only on a record about this attempt's own
+   * write — an older attempt settling must not rewrite a record about something
+   * else.
+   *
+   * Keyed on {@link writeGuardKey} rather than the target, which is !306's Duo
+   * review and a correction to what stood here. The old comment argued that no
+   * sequence test was needed because "a record for this target can only be
+   * showing `retrying` because THIS retry raised it" — true only while one write
+   * per target can be in flight, and `writeGuardKey` is the line that stopped
+   * that being so. Two retries of one row to DIFFERENT words are two writes at
+   * the same `{ id, field: "text" }` target, and on a target match the older
+   * one's cleanup put the newer one's notice back to idle underneath it. A Retry
+   * that reads idle invites a press, and the guard then absorbs that press
+   * because the words really are still in flight — a silent no-op handed out by
+   * a control that had just said it was free, which is the class #225 exists to
+   * remove. The guard key is the identity of an in-flight write, so matching on
+   * it keeps this in step with whatever that function decides.
+   *
+   * Still no sequence test, and now that is sound: an entry is held in
+   * `inFlight` for exactly the life of its attempt, so one guard key cannot have
+   * two attempts running at once to be confused about.
+   */
+  const markWriteRetrying = (guardKey: string, retrying: boolean) =>
+    setWriteFailure((prev) =>
+      prev &&
+      writeGuardKey(prev.target, prev.subject) === guardKey &&
+      prev.retrying !== retrying
+        ? { ...prev, retrying }
+        : prev,
+    );
+
+  /** Drop the notice, if this write is the one it was waiting on.
+   *  @see answersFailure — the same predicate the focus hand-off is gated on, so
+   *  the removal and the hand-off cannot disagree about what is happening. */
+  const clearWriteFailureFor = (target: WriteTarget, seq: number) =>
+    setWriteFailure((prev) =>
+      answersFailure(prev, target, seq) ? null : prev,
+    );
+
+  const attemptWrite = (
+    fn: () => Promise<unknown>,
+    target: WriteTarget,
+    subject: string,
+    {
+      fromRetry,
+      origin,
+      onLanded,
+    }: {
+      fromRetry: boolean;
+      origin: HTMLElement | null;
+      onLanded?: (result: unknown) => void;
+    },
+  ) => {
+    const key = writeTargetKey(target);
+    // @see writeGuardKey — the same target for everything except a rename, which
+    // is guarded on its words too because they are what makes it a new request.
+    const guardKey = writeGuardKey(target, subject);
+    // Both of these are URGENT and deliberately outside the transition — see
+    // runSchedule (#169): React 19 holds an async transition's own state updates
+    // until the action settles, so a guard raised inside one would first paint at
+    // the moment it stopped being true. A ref needs no paint at all, which is why
+    // the guard is one; the retry flag is state and so must be raised here.
+    if (inFlight.current.has(guardKey)) return;
+    inFlight.current.add(guardKey);
+    if (fromRetry) markWriteRetrying(guardKey, true);
+    return startTransition(async () => {
+      const seq = (writeAttempts.current += 1);
+      writesOutstanding.current += 1;
+      /** A newer write at this same target has already settled — landed OR
+       *  failed — so whatever this one has to say about it is out of date. */
+      const overtaken = () => (writeSettledAt.current.get(key) ?? 0) > seq;
+      /**
+       * This attempt is now the newest one to have settled at this target.
+       *
+       * `max`, because an attempt that started earlier can still settle later —
+       * and on the failure path below `overtaken()` has already established that
+       * nothing newer is recorded, so the `max` is a statement of the invariant
+       * rather than a live comparison.
+       */
+      const markSettled = () =>
+        writeSettledAt.current.set(
+          key,
+          Math.max(writeSettledAt.current.get(key) ?? 0, seq),
+        );
+      try {
+        let landed = false;
+        let result: unknown;
+        try {
+          result = await withActionTimeout(fn(), INBOX_ACTION_TIMEOUT_MS);
+          landed = true;
+        } catch (error) {
+          if (overtaken()) return;
+          // !306, Duo review — the failure path has to claim the target just as
+          // the success path does, and this line is the whole fix. `overtaken`
+          // used to be told about landings only, so it stopped a stale SUCCESS
+          // clearing a fresher failure notice while letting a stale FAILURE
+          // overwrite one: two edits of one row to different words are two
+          // writes in flight at the same target (see `writeGuardKey`), and when
+          // the older lost the race the user was left reading the wrong words
+          // and the wrong reason, with Retry armed to re-post an edit they had
+          // already superseded. Claiming it HERE rather than testing the notice
+          // in `setWriteFailure` is what makes the guard hold when both failures
+          // settle before React commits: `displayedFailure` is a mirror kept in
+          // an effect and has not caught up yet at that point, whereas this map
+          // is written synchronously. It also drops the attempt whole, so
+          // `takeFocusForWrite` below is never raised for a record that is not
+          // going to be shown.
+          markSettled();
+          // Only take focus when the user has not moved it since the press. They
+          // may have gone to the capture field during a ten-second hang, and
+          // interrupting them mid-sentence is #210's argument for why the capture
+          // notice never steals focus at all.
+          //
+          // There used to be a second arm here — `!origin.isConnected &&
+          // document.activeElement === document.body`, for the case the pressed
+          // control was removed under them. It is gone, and removing it changes
+          // no behaviour (!306, substitute review, which found that mutating it
+          // away left the whole suite green and then found out why). The effect
+          // that consumes this flag already treats `activeElement ===
+          // document.body` as sufficient on its own, so the arm was redundant
+          // wherever it agreed — and actively wrong where it did not. It was
+          // evaluated HERE, at settle time, while the effect runs after the
+          // commit: a user who moved focus in between would have had it taken
+          // anyway, by a flag whose stated purpose is to leave them alone.
+          // Deciding it once, at the later moment, is both simpler and correct.
+          takeFocusForWrite.current =
+            origin !== null && document.activeElement === origin;
+          setWriteFailure({
+            fn,
+            target,
+            subject,
+            seq,
+            origin,
+            onLanded,
+            stale: isStaleActionError(error),
+            timedOut: error instanceof ActionTimeoutError,
+            // A fresh record, so the retry flag starts down: this attempt is
+            // over, whatever it was.
+            retrying: false,
+          });
+        }
+        if (!landed) return;
+        markSettled();
+        // Read while the notice still exists: its unmount is about to drop focus
+        // to <body> if the user is standing on it, which they are if they pressed
+        // Retry. Two conditions, and the second is !306's review finding — the
+        // control has to be holding focus AND this write has to be the one the
+        // notice is waiting on. Twenty independent row controls means writes to
+        // different rows overlap routinely, and a success at ANOTHER target
+        // leaves the notice up: arming on it pointed the hand-off at a control
+        // the user was never sent away from, and spent it on whatever cleared the
+        // notice later.
+        const displayed = displayedFailure.current;
+        if (
+          answersFailure(displayed, target, seq) &&
+          writeCtaRef.current !== null &&
+          writeCtaRef.current === document.activeElement
+        ) {
+          // The notice's OWN record rather than this call's `origin`: the same
+          // object on the retry path, and where the user was standing before the
+          // notice pulled them in is the thing the hand-off is for.
+          returnFocusAfterWrite.current = { origin: displayed.origin };
+        }
+        // Any notice about THIS target, not just the one this closure raised: a
+        // fresh press of the row's own control is how a user actually retries,
+        // and a banner outliving the write it is about is !294's round-6 finding.
+        clearWriteFailureFor(target, seq);
+        // Deliberately not on the failure path: the write did not happen, so
+        // there is nothing new to fetch, and a refresh that itself failed would be
+        // a second unreported error. Outside the inner `try` for the reason !290
+        // round 8 found — the row is written, so a refresh that throws is a stale
+        // list, not a lost write, and must never be reported as one. The same
+        // reasoning covers `onLanded`, which stands in for the refresh on the two
+        // writes that navigate instead (see {@link WriteFailure.onLanded}).
+        //
+        // Its OWN `catch`, and swallowing on purpose (!306, substitute review).
+        // Being outside the inner `try` made "never reported as a lost write"
+        // true, but it made it true by letting the throw leave the transition
+        // entirely — an unhandled rejection with no `error.tsx` anywhere in
+        // `src/` to catch it, which is the precise failure mode this issue
+        // exists to remove, arriving from the code removing it. There is nothing
+        // to tell the user that would be both true and useful: the write landed,
+        // so "couldn't save" is a lie, and the only casualty is a list that is
+        // one fetch stale and re-fetches on the next interaction. So it is
+        // swallowed where a reader can see the decision instead of inferring it
+        // from a missing `catch`.
+        try {
+          if (onLanded) onLanded(result);
+          else router.refresh();
+        } catch {
+          // Intentionally empty — see above.
+        }
+      } finally {
+        // Must run on every exit including a throw: a target left in `inFlight`
+        // is a control that silently does nothing for the rest of the session,
+        // and a retry flag left up is a Retry button that reads permanently busy.
+        inFlight.current.delete(guardKey);
+        if (fromRetry) markWriteRetrying(guardKey, false);
+        writesOutstanding.current -= 1;
+        if (writesOutstanding.current === 0) writeSettledAt.current.clear();
+      }
     });
+  };
+
+  /**
+   * Every row write goes through here. `target` and `subject` are required rather
+   * than optional so a new call site cannot inherit the machinery while silently
+   * opting out of the part that makes the notice mean something.
+   */
+  const run = (
+    fn: () => Promise<unknown>,
+    target: WriteTarget,
+    subject: string,
+    onLanded?: (result: unknown) => void,
+  ) =>
+    attemptWrite(fn, target, subject, {
+      fromRetry: false,
+      origin: focusOrigin(),
+      onLanded,
+    });
+
+  const retryWrite = () => {
+    if (!writeFailure || writeFailure.retrying) return;
+    attemptWrite(
+      writeFailure.fn,
+      writeFailure.target,
+      writeFailure.subject,
+      // The origin is the control the ORIGINAL press came from, not the Retry
+      // button: the Retry is about to unmount, and handing focus back to it would
+      // be handing it to nothing.
+      {
+        fromRetry: true,
+        origin: writeFailure.origin,
+        // Carried through, so a retry that lands navigates exactly as the first
+        // press would have. Dropping it here would save the row and leave the
+        // user on the inbox with no sign anything had happened.
+        onLanded: writeFailure.onLanded,
+      },
+    );
+  };
 
   // Per-row 📅 error text (cleared on the row's next attempt); reconnect_required
   // is a workspace-wide condition, so it swaps every row's control to the
@@ -749,19 +1609,49 @@ export function InboxView({
     pending: schedulingIds.has(item.id),
   });
 
-  const breakdown = (id: string) =>
-    startTransition(async () => {
-      const taskId = await startBreakdown(id);
-      if (taskId) router.push(`/tasks/${taskId}`);
-    });
+  /**
+   * #225 — the two row writes that were still outside the notice.
+   *
+   * Both were `startTransition(async () => { await action(); router.push(…) })`
+   * with no `try`, which is the exact four-line shape this issue was filed
+   * about — and between them they are seven more call sites (five here, two for
+   * ▶ Focus) across two more actions, so "every inbox row write says so when it
+   * does not land" was not true of the component while they stayed out. The
+   * issue's table counts the `run()` sites only, which is why these were missed
+   * rather than excluded.
+   *
+   * They are also the two the guard matters most for: each CREATES a Task, so a
+   * second press is the duplicate-row class `keepAsTask` is guarded against
+   * server-side in this same change.
+   *
+   * `onLanded` is what lets them through the shared machinery without the
+   * navigation becoming a refresh — see {@link WriteFailure.onLanded}. A falsy
+   * id means the action declined because the row has gone, so the fall-back is a
+   * refresh: the list is what is now wrong, and refreshing it is what says so.
+   */
+  const breakdown = (id: string, subject: string) =>
+    run(
+      () => startBreakdown(id),
+      { id, field: "breakdown" },
+      subject,
+      (taskId) => {
+        if (typeof taskId === "string") router.push(`/tasks/${taskId}`);
+        else router.refresh();
+      },
+    );
 
   // ▶ Focus on a single to-do — ensures its one-step task exists, then opens
   // the step-based focus timer.
-  const focusOnItem = (id: string) =>
-    startTransition(async () => {
-      const stepId = await ensureFocusStep(id);
-      if (stepId) router.push(`/focus/${stepId}`);
-    });
+  const focusOnItem = (id: string, subject: string) =>
+    run(
+      () => ensureFocusStep(id),
+      { id, field: "focus" },
+      subject,
+      (stepId) => {
+        if (typeof stepId === "string") router.push(`/focus/${stepId}`);
+        else router.refresh();
+      },
+    );
 
   // ▶ Focus a multi-step row: jump straight into the next unfinished step's
   // timer (mirrors the single-task ▶ Focus). Steps already exist, so there's
@@ -834,14 +1724,19 @@ export function InboxView({
           setEditingId(null);
           // Compared against what the field was GIVEN, not against `item.text` —
           // otherwise every row carrying a note posts a rename on open-and-close.
-          if (value && value !== source) run(() => renameItem(item.id, value));
+          if (value && value !== source)
+            run(
+              () => renameItem(item.id, value),
+              { id: item.id, field: "text" },
+              // The NEW words are what is at stake: the row still shows the old
+              // title, and quoting that would name the thing that did not change.
+              value,
+            );
         }}
         onCancel={() => setEditingId(null)}
       />
     );
   };
-
-  const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
   // #163 — every move outcome, spoken once.
   //
@@ -867,28 +1762,53 @@ export function InboxView({
       setAnnouncement(notMovedAnnouncement(item.text, source, voice));
       return;
     }
-    setAnnouncement(movedAnnouncement(item.text, source, plan.target, voice));
-
-    run(async () => {
-      if (plan.reopenFirst) await reopenItem(itemId, undefined);
-      switch (plan.action) {
-        case "moveToReview":
-          await moveToReview(itemId);
-          break;
-        case "triage":
-          await triageBrainDumpItem(itemId);
-          break;
-        case "requestBreakdown":
-          await requestBreakdown(itemId);
-          break;
-        case "snooze":
-          await snoozeBrainDumpItem(itemId, 60);
-          break;
-        case "complete":
-          await completeItem(itemId);
-          break;
-      }
-    });
+    run(
+      async () => {
+        if (plan.reopenFirst) await reopenItem(itemId, undefined);
+        switch (plan.action) {
+          case "moveToReview":
+            await moveToReview(itemId);
+            break;
+          case "triage":
+            await triageBrainDumpItem(itemId);
+            break;
+          case "requestBreakdown":
+            await requestBreakdown(itemId);
+            break;
+          case "snooze":
+            await snoozeBrainDumpItem(itemId, 60);
+            break;
+          case "complete":
+            await completeItem(itemId);
+            break;
+        }
+        // #225 — announced HERE, after the writes, and that placement is the
+        // fix rather than a tidy-up. `movedAnnouncement` is documented as "a
+        // move that actually happened", and the rule three lines above is that
+        // announcing the INTENT "would tell a screen reader an item had moved
+        // when it had not" — which is precisely what announcing it ahead of the
+        // write did. While every failure here was silent that was one wrong
+        // sentence; now that a failure is an assertive `role="alert"`, it is two
+        // live regions contradicting each other about one gesture, which is the
+        // pair #210 clears `justCaptured` to avoid on the capture path.
+        //
+        // Inside `fn` rather than in a success callback, because the failure
+        // record carries `fn` and nothing else about the write: a successful
+        // RETRY has to announce too, and this is what makes that free. A write
+        // that lands after the client stopped waiting announces late, which is
+        // the honest outcome — the move did happen, and the timeout's message
+        // says only that it could not tell.
+        setAnnouncement(
+          movedAnnouncement(item.text, source, plan.target, voice),
+        );
+      },
+      // #225 — its own field rather than the field of whichever action `plan`
+      // picked. A move is ONE user intent and the notice reports on it as one, so
+      // a failed drop onto Done is retried as that drop (reopen included) rather
+      // than as a bare `completeItem` that would drop the first half.
+      { id: itemId, field: "move" },
+      item.text,
+    );
   };
 
   // Row dimming (#26): rows compare their id against activeDragId to dim
@@ -1110,8 +2030,15 @@ export function InboxView({
       }
       // Outside the try/catch on purpose (round 8): the row is written, so a
       // refresh that throws is a stale list, not a lost capture, and must never
-      // be reported as one.
-      if (landed) router.refresh();
+      // be reported as one. Its own `catch` for the reason the row-write path
+      // gives at length (!306, substitute review): outside the try made that
+      // claim true by letting the throw leave the transition unhandled, which is
+      // #210's own defect wearing the fix. Swallowed where it can be read.
+      try {
+        if (landed) router.refresh();
+      } catch {
+        // Intentionally empty — a stale list, and the next interaction re-fetches.
+      }
     });
   };
 
@@ -1182,7 +2109,15 @@ export function InboxView({
   const cancelDelete = () => setConfirmDeleteId(null);
   const confirmDelete = (id: string) => {
     setConfirmDeleteId(null);
-    run(() => deleteBrainDumpItem(id));
+    // #225 — the subject is read here, while the row is still in the list. A
+    // delete that fails leaves the row, but a delete that TIMES OUT may not, and
+    // a notice that could not name what it was about would be no better than the
+    // silence this replaces.
+    run(
+      () => deleteBrainDumpItem(id),
+      { id, field: "delete" },
+      itemsById.get(id)?.text ?? "",
+    );
   };
 
   // v5: 🗑 delete lives inline in every row's end cluster AND (per the "▾
@@ -1303,7 +2238,11 @@ export function InboxView({
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 submit();
+                return;
               }
+              // #201 — after Enter, so a capture is never intercepted, and
+              // before nothing else: every other key falls through untouched.
+              handleNoteBraceKey(e, setText);
             }}
             placeholder="Brain dump anything… (Enter to save)"
             // #183 — the app's most-used control had NO accessible name: a
@@ -1507,6 +2446,165 @@ export function InboxView({
         )}
       </div>
 
+      {/* ── #225: the row write that did not land ──────────────────────────────
+          Outside the capture bar and above the board, because it reports on any
+          of the twenty row writes rather than on the capture field — but next to
+          that field, which is the fallback focus target when the row it was about
+          has gone.
+
+          Its own slot rather than a share of the capture notice's: the two can be
+          outstanding at once and report different writes, and merging them would
+          mean one of the two goes unannounced. Two `role="alert"`s adjacent is the
+          honest rendering of two independent pieces of news.
+
+          Colour: the failure is carried by the icon and the words, never by the
+          red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40` /
+          `bg-destructive/5` is the token pairing globals.css documents as AA in
+          both themes and the one the capture notice, focus-timer.tsx and
+          shopping-list.tsx already use — not a raw palette shade, which is what
+          dropped a confirmation below 4.5:1 in #40. Neither control sets
+          `outline-none`, so the UA focus ring draws and WCAG 2.4.11 is satisfied
+          without a bespoke indicator. */}
+      {writeFailure && (
+        <>
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+          >
+            <p
+              ref={writeNoticeRef}
+              id={writeErrorId}
+              // Focusable programmatically but not in the tab order: the notice
+              // has to be able to RECEIVE the hand-off even when it offers no
+              // control, and adding a stop for a paragraph nobody can act on
+              // would be noise.
+              //
+              // No `outline-none` here, and `a11y-class-hygiene` is why the first
+              // draft had one and this does not: the moment an element can hold
+              // focus, suppressing the UA outline leaves it with no visible focus
+              // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
+              // is the whole reason it exists — axe cannot see 2.4.11.
+              tabIndex={-1}
+              className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+            >
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="break-words">
+                {t(writeFailureKey(writeFailure, writeFailureRowGone), voice)}{" "}
+                <strong>&ldquo;{writeFailure.subject}&rdquo;</strong>
+              </span>
+            </p>
+            {/* No control at all when nothing could work — see writeFailureRemedy. */}
+            {writeRemedy !== "none" && (
+              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                {writeRemedy === "reload" ? (
+                  <button
+                    ref={writeCtaRef}
+                    type="button"
+                    aria-describedby={writeErrorId}
+                    onClick={() => window.location.reload()}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("inbox.errorReload", voice)}
+                  </button>
+                ) : (
+                  // `aria-disabled`, not `disabled`: a disabled element cannot
+                  // hold focus, so the browser would drop it to <body> the moment
+                  // the retry starts — and this notice takes focus on purpose, so
+                  // that would be the WCAG 2.4.3 fault built in rather than
+                  // avoided. The press is guarded in `attemptWrite` instead, per
+                  // target, so a double-tap still cannot fire two writes.
+                  <button
+                    ref={writeCtaRef}
+                    type="button"
+                    // The SECOND channel for the wait, not the only one (!306,
+                    // Duo review). A description is computed when focus LANDS on
+                    // a control, so this covers the notice mounting with a retry
+                    // already in flight — the effect above then moves focus here
+                    // and the description is read on arrival. It cannot cover the
+                    // press itself, because that happens on a control that
+                    // already holds focus and keeps it by design; the live region
+                    // below is what covers that.
+                    aria-describedby={
+                      writeFailure.retrying
+                        ? `${writeErrorId} ${writeSavingId}`
+                        : writeErrorId
+                    }
+                    aria-disabled={writeFailure.retrying}
+                    onClick={retryWrite}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("inbox.errorRetry", voice)}
+                  </button>
+                )}
+                {/* The SIGHTED copy of the wait, and only that. `aria-hidden`
+                    because the announcement is the sibling region below, and one
+                    sentence in two nodes is how it gets said twice. Hiding it
+                    also stops the insertion mutating this `role="alert"`: an
+                    alert is assertive AND atomic, so a visible child appearing
+                    inside it mid-retry re-reads the whole notice over the polite
+                    announcement. Nothing changes on screen. */}
+                {writeFailure.retrying && (
+                  <p
+                    data-testid="write-saving-visible"
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t("inbox.errorSaving", voice)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          {/* !306, Duo review — where the wait is actually ANNOUNCED.
+              This notice shipped `!290`'s shape, which `!303` had already found
+              to be half a fix (#218, its own round 16). Not nesting a polite
+              region inside this assertive one was right — the outer `aria-live`
+              applies to the whole subtree — but leaving `aria-describedby` to
+              carry the wait alone only moved the hole onto the button: a
+              description is read when focus LANDS on a control, and Retry is
+              pressed on a control that already holds focus and keeps it by
+              design, so the value gaining `writeSavingId` mid-flight is a change
+              nothing goes back to re-read. A live region is the one channel
+              defined for content that changes while the user is stationary.
+              A SIBLING of the alert, never a descendant: nesting one level in is
+              the original bug, not a fix for it.
+              Rendered whenever the notice is, and EMPTY until there is something
+              to say, because assistive technology announces a CHANGE to a region
+              already in the accessibility tree and one arriving with its first
+              message is silent — the move announcer at the foot of this file
+              documents the same thing. `sr-only` rather than `hidden` for the
+              same reason: a live region has to be rendered to be observed.
+              Outside the `writeRemedy !== "none"` gate above on purpose. A row
+              can vanish mid-retry, which withdraws the control and the sighted
+              line with it; the write is still running and the region is still the
+              honest place to say so.
+              Kept identical to the capture notice above and to
+              `focus-timer.tsx` — these have drifted apart once already, which is
+              what produced #218. */}
+          <p
+            id={writeSavingId}
+            data-testid="write-saving-announcer"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {writeFailure.retrying && t("inbox.errorSaving", voice)}
+          </p>
+        </>
+      )}
+
       {/* #163 — the drag surface. There is no provider to wrap it in any more:
           pragmatic-drag-and-drop registers draggables, drop targets and the
           monitor imperatively against real elements, so the board is plain
@@ -1576,22 +2674,48 @@ export function InboxView({
                           settings={settings}
                           voice={voice}
                           now={now}
-                          onBreakdown={() => breakdown(item.id)}
-                          onKeep={() => run(() => keepAsTask(item.id))}
+                          onBreakdown={() => breakdown(item.id, item.text)}
+                          onKeep={() =>
+                            run(
+                              () => keepAsTask(item.id),
+                              { id: item.id, field: "triage" },
+                              item.text,
+                            )
+                          }
                           onSaveForLater={() =>
                             moveItemToBucket(item.id, "savedLater")
                           }
                           onSnooze={() =>
-                            run(() => snoozeBrainDumpItem(item.id, 60))
+                            run(
+                              () => snoozeBrainDumpItem(item.id, 60),
+                              { id: item.id, field: "snooze" },
+                              item.text,
+                            )
                           }
-                          onComplete={() => run(() => completeItem(item.id))}
+                          onComplete={() =>
+                            run(
+                              () => completeItem(item.id),
+                              { id: item.id, field: "done" },
+                              item.text,
+                            )
+                          }
                           confirmingDelete={confirmDeleteId === item.id}
                           onRequestDelete={() => requestDelete(item.id)}
                           onConfirmDelete={() => confirmDelete(item.id)}
                           onCancelDelete={cancelDelete}
-                          onFreshen={() => run(() => freshenItem(item.id))}
+                          onFreshen={() =>
+                            run(
+                              () => freshenItem(item.id),
+                              { id: item.id, field: "freshen" },
+                              item.text,
+                            )
+                          }
                           onDismissPrompt={() =>
-                            run(() => dismissPrompt(item.id))
+                            run(
+                              () => dismissPrompt(item.id),
+                              { id: item.id, field: "prompt" },
+                              item.text,
+                            )
                           }
                           schedule={schedule}
                           scheduled={item.scheduledAt != null}
@@ -1818,7 +2942,9 @@ export function InboxView({
                                         <button
                                           key="break-now"
                                           type="button"
-                                          onClick={() => breakdown(item.id)}
+                                          onClick={() =>
+                                            breakdown(item.id, item.text)
+                                          }
                                           className={cn(
                                             touchTarget,
                                             "bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -1845,7 +2971,11 @@ export function InboxView({
                                           key="complete"
                                           voice={voice}
                                           onClick={() =>
-                                            run(() => completeItem(item.id))
+                                            run(
+                                              () => completeItem(item.id),
+                                              { id: item.id, field: "done" },
+                                              item.text,
+                                            )
                                           }
                                         />,
                                         trigger,
@@ -1912,7 +3042,9 @@ export function InboxView({
                                       key="break-now-m"
                                       type="button"
                                       className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      onClick={() => breakdown(item.id)}
+                                      onClick={() =>
+                                        breakdown(item.id, item.text)
+                                      }
                                     >
                                       {t("prompt.breakNow", voice)}
                                     </button>
@@ -1922,7 +3054,11 @@ export function InboxView({
                                       type="button"
                                       className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                       onClick={() =>
-                                        run(() => completeItem(item.id))
+                                        run(
+                                          () => completeItem(item.id),
+                                          { id: item.id, field: "done" },
+                                          item.text,
+                                        )
                                       }
                                     >
                                       {t("action.completeFull", voice)}
@@ -2074,7 +3210,9 @@ export function InboxView({
                                   <button
                                     key="focus"
                                     type="button"
-                                    onClick={() => focusOnItem(item.id)}
+                                    onClick={() =>
+                                      focusOnItem(item.id, item.text)
+                                    }
                                     className={cn(
                                       touchTarget,
                                       "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -2086,7 +3224,11 @@ export function InboxView({
                                     key="complete"
                                     voice={voice}
                                     onClick={() =>
-                                      run(() => completeItem(item.id))
+                                      run(
+                                        () => completeItem(item.id),
+                                        { id: item.id, field: "done" },
+                                        item.text,
+                                      )
                                     }
                                   />,
                                   trigger,
@@ -2120,7 +3262,9 @@ export function InboxView({
                                     key="focus-m"
                                     type="button"
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() => focusOnItem(item.id)}
+                                    onClick={() =>
+                                      focusOnItem(item.id, item.text)
+                                    }
                                   >
                                     Start visual focus timer
                                   </button>,
@@ -2129,7 +3273,11 @@ export function InboxView({
                                     type="button"
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                     onClick={() =>
-                                      run(() => completeItem(item.id))
+                                      run(
+                                        () => completeItem(item.id),
+                                        { id: item.id, field: "done" },
+                                        item.text,
+                                      )
                                     }
                                   >
                                     {t("action.completeFull", voice)}
@@ -2262,7 +3410,9 @@ export function InboxView({
                                 inline={[
                                   <button
                                     key="breakdown"
-                                    onClick={() => breakdown(item.id)}
+                                    onClick={() =>
+                                      breakdown(item.id, item.text)
+                                    }
                                     className={cn(
                                       touchTarget,
                                       "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -2277,7 +3427,11 @@ export function InboxView({
                                       "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
                                     )}
                                     onClick={() =>
-                                      run(() => keepAsTask(item.id))
+                                      run(
+                                        () => keepAsTask(item.id),
+                                        { id: item.id, field: "triage" },
+                                        item.text,
+                                      )
                                     }
                                   >
                                     {t("action.addTodo", voice)}
@@ -2290,8 +3444,10 @@ export function InboxView({
                                     )}
                                     onClick={() => {
                                       setSavedOptionsId(null);
-                                      run(() =>
-                                        snoozeBrainDumpItem(item.id, 60),
+                                      run(
+                                        () => snoozeBrainDumpItem(item.id, 60),
+                                        { id: item.id, field: "snooze" },
+                                        item.text,
                                       );
                                     }}
                                   >
@@ -2301,7 +3457,11 @@ export function InboxView({
                                     key="complete"
                                     voice={voice}
                                     onClick={() =>
-                                      run(() => completeItem(item.id))
+                                      run(
+                                        () => completeItem(item.id),
+                                        { id: item.id, field: "done" },
+                                        item.text,
+                                      )
                                     }
                                   />,
                                   // #186 — beside Complete, the placement !270
@@ -2334,7 +3494,9 @@ export function InboxView({
                                   />,
                                   <button
                                     key="breakdown-m"
-                                    onClick={() => breakdown(item.id)}
+                                    onClick={() =>
+                                      breakdown(item.id, item.text)
+                                    }
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                   >
                                     {t("action.breakdownFull", voice)}
@@ -2342,7 +3504,11 @@ export function InboxView({
                                   <button
                                     key="keep-m"
                                     onClick={() =>
-                                      run(() => keepAsTask(item.id))
+                                      run(
+                                        () => keepAsTask(item.id),
+                                        { id: item.id, field: "triage" },
+                                        item.text,
+                                      )
                                     }
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                   >
@@ -2352,8 +3518,10 @@ export function InboxView({
                                     key="save-m"
                                     onClick={() => {
                                       setSavedOptionsId(null);
-                                      run(() =>
-                                        snoozeBrainDumpItem(item.id, 60),
+                                      run(
+                                        () => snoozeBrainDumpItem(item.id, 60),
+                                        { id: item.id, field: "snooze" },
+                                        item.text,
                                       );
                                     }}
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
@@ -2363,7 +3531,11 @@ export function InboxView({
                                   <button
                                     key="complete-m"
                                     onClick={() =>
-                                      run(() => completeItem(item.id))
+                                      run(
+                                        () => completeItem(item.id),
+                                        { id: item.id, field: "done" },
+                                        item.text,
+                                      )
                                     }
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                   >
@@ -2498,7 +3670,11 @@ export function InboxView({
                                 ? setReopenPickerId(
                                     pickingSteps ? null : item.id,
                                   )
-                                : run(() => reopenItem(item.id, undefined))
+                                : run(
+                                    () => reopenItem(item.id, undefined),
+                                    { id: item.id, field: "done" },
+                                    item.text,
+                                  )
                             }
                           >
                             {t("action.reopen", voice)}
@@ -2520,7 +3696,11 @@ export function InboxView({
                             voice={voice}
                             onConfirm={(stepIds) => {
                               setReopenPickerId(null);
-                              run(() => reopenItem(item.id, stepIds));
+                              run(
+                                () => reopenItem(item.id, stepIds),
+                                { id: item.id, field: "done" },
+                                item.text,
+                              );
                             }}
                             onCancel={() => setReopenPickerId(null)}
                           />
@@ -2609,8 +3789,21 @@ function EditTitleInput({
           if (e.key === "Enter") {
             e.preventDefault();
             onSave(value.trim());
+            return;
           }
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Escape") {
+            onCancel();
+            return;
+          }
+          // #201 — the same auto-close as the capture bar. This field holds the
+          // reconstruction (`text {note}`), so a row WITH a note pre-fills as a
+          // value already ending in a group and a `{` typed at the end is
+          // declined — the correct outcome, not a gap. No claim about how often
+          // that happens: notes are opt-in, so most rows pre-fill as bare text
+          // and the rule fires normally (!306, substitute review, which found the
+          // frequency claim that used to be here unmeasurable and probably
+          // backwards).
+          handleNoteBraceKey(e, setValue);
         }}
         className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
       />
