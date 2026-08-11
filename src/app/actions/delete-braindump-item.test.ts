@@ -76,17 +76,24 @@ beforeEach(async () => {
   prismaMock.brainDumpItem.deleteMany.mockResolvedValue({ count: 1 });
   prismaMock.brainDumpItem.count.mockResolvedValue(0);
   prismaMock.step.count.mockResolvedValue(0);
-  // `vi.clearAllMocks()` clears recorded calls but NOT implementations, and it
-  // DOES clear a `mockResolvedValue` set at declaration — so the two reward
-  // mocks have to be re-armed here or the second spec onward reads `undefined`
-  // and destructures it.
+  // #168's rule, not `clearAllMocks`'s: two specs below queue a
+  // `mockResolvedValueOnce` on these, and `clearAllMocks` drops recorded calls
+  // while leaving the ONCE QUEUE in place — so a spec that fails before
+  // consuming its queued value hands it to the next one, which then asserts
+  // against a reversal it never set up. `mockReset` is the part that drops the
+  // queue, and it clears the default with it, so the default is restored here.
+  // (`clearAllMocks` alone does NOT clear a `mockResolvedValue` set in the
+  // factory — measured, not assumed, by removing this block and watching all 15
+  // specs still pass.)
   const rewards = await import("@/lib/rewards");
-  (
-    rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
-  ).mockResolvedValue({ stepDone: 0, taskComplete: false });
-  (
-    rewards.revokeUnqualifiedBadges as ReturnType<typeof vi.fn>
-  ).mockResolvedValue([]);
+  const reverse = rewards.reverseItemCompletionRewards as ReturnType<
+    typeof vi.fn
+  >;
+  const revoke = rewards.revokeUnqualifiedBadges as ReturnType<typeof vi.fn>;
+  reverse.mockReset();
+  reverse.mockResolvedValue({ stepDone: 0, taskComplete: false });
+  revoke.mockReset();
+  revoke.mockResolvedValue([]);
 });
 
 describe("deleteBrainDumpItem", () => {

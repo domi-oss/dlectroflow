@@ -83,15 +83,10 @@ beforeEach(async () => {
   currentWorkspaceIdMock.mockResolvedValue("ws1");
   prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.step.count.mockResolvedValue(0);
-  // `vi.clearAllMocks()` drops a resolved value armed at declaration, so the
-  // reversal stub has to be re-armed or the action destructures `undefined`.
-  const rewards = await import("@/lib/rewards");
-  (
-    rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
-  ).mockResolvedValue({ stepDone: 0, taskComplete: false });
-  (
-    rewards.revokeUnqualifiedBadges as ReturnType<typeof vi.fn>
-  ).mockResolvedValue([]);
+  // Nothing re-arms the two reward stubs: `clearAllMocks` leaves a
+  // `mockResolvedValue` set in the mock factory intact, and no spec in this file
+  // queues a `mockResolvedValueOnce` on them. Stated because the sibling file
+  // DOES re-arm, and for a different reason (#168's once-queue leak).
   // Each per-item action re-fetches the item by id (defense in depth beyond
   // bulkBrainDumpAction's own workspace filter) — keep it "found" by default.
   prismaMock.brainDumpItem.findFirst.mockImplementation(
