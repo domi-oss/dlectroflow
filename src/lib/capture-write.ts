@@ -116,8 +116,8 @@ export async function writeCapture({
   });
   if (!created) return "duplicate";
 
-  // A capture is a qualifying engagement (#61 Decision 1) — advances the streak
-  // at most once per working day.
+  // A capture is a qualifying engagement (Decision 1, #8 Phase 7) — advances the
+  // streak at most once per working day.
   await touchStreakOnEngagement(workspaceId);
   return "created";
 }

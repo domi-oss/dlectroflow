@@ -36,10 +36,12 @@ import {
  *
  * That comparison is what closes an expired-cookie hole without touching
  * middleware. A queued OWNER capture flushed after the cookie lapsed arrives with
- * a freshly minted GUEST sandbox (`src/proxy.ts` mints one for any path outside
- * `AUTHENTICATED_PREFIXES`, and this is one), so without the check it would land
- * in a sandbox the person will never look at again and be deleted with it inside
- * a day. Silently, having been told it was saved.
+ * a freshly minted GUEST sandbox — `src/proxy.ts` mints one for any request with
+ * no signed-in session on a path that is neither public nor gated, and this route
+ * is deliberately one of those, because a guest sandbox must be able to capture
+ * too. So without the check the capture would land in a sandbox the person will
+ * never look at again and be deleted with it inside a day. Silently, having been
+ * told it was saved.
  *
  * ## 409 and 403 are different answers to different questions
  *
