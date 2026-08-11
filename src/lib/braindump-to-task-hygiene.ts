@@ -353,22 +353,62 @@ function isTransactionCall(node: ts.Node): node is ts.CallExpression {
 }
 
 /**
+ * The shared budget `src/lib/constants.ts` declares for these writers.
+ *
+ * Accepted BY NAME, because it is imported and therefore unresolvable in a module
+ * that takes source text rather than a `Program` — the same boundary
+ * `resolveShorthandData` documents. Naming it is what lets the identifier branch
+ * below resolve everything else instead of waving it through.
+ */
+const BUDGET_CONSTANT = "TASK_WRITER_TX_BUDGET";
+
+/** Does this options literal name a `timeout`? */
+function namesTimeout(literal: ts.ObjectLiteralExpression): boolean {
+  return literal.properties.some(
+    (p) =>
+      (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+      p.name.getText() === "timeout",
+  );
+}
+
+/**
  * Was this `$transaction` given a budget?
  *
- * Either the shared constant by name, or any options object that names
- * `timeout`. A bare `$transaction(cb)` is the finding: it inherits Prisma's 5 s
- * default, which is shorter than these transactions are designed to WAIT.
+ * A bare `$transaction(cb)` is the finding: it inherits Prisma's 5 s default,
+ * which is shorter than these transactions are designed to WAIT.
+ *
+ * ## An identifier is RESOLVED, not trusted (Duo review on `!324`)
+ *
+ * The first version returned `true` for any bare identifier in the options
+ * position, which made the guard defeatable by passing an unrelated or empty
+ * options object — `$transaction(cb, opts)` with `const opts = {}` reported a
+ * budget that does not exist. That is worse than not checking, because it reads as
+ * a guard.
+ *
+ * It was also inconsistent with this module's own two sibling helpers, which
+ * already resolve an identifier to its declaration in the call site's scope rather
+ * than guessing from its presence. Same scope walk, same stop-at-the-nearest rule,
+ * and the same conservative answer when it cannot resolve.
+ *
+ * So, in order: the shared constant by name; an inline literal naming `timeout`;
+ * an identifier resolving in this file to such a literal, or to the constant
+ * itself one hop away. Anything else is a finding — and here that is the
+ * conservative side, unlike the rule above where a false POSITIVE is the danger.
+ * This one is a build gate on four known writers, so an unresolvable options
+ * argument should make somebody look.
  */
 function hasExplicitBudget(call: ts.CallExpression): boolean {
   const options = call.arguments[1];
   if (!options) return false;
-  if (ts.isIdentifier(options)) return true;
-  if (ts.isObjectLiteralExpression(options)) {
-    return options.properties.some(
-      (p) =>
-        (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
-        p.name.getText() === "timeout",
-    );
+  if (ts.isObjectLiteralExpression(options)) return namesTimeout(options);
+  if (ts.isIdentifier(options)) {
+    if (options.text === BUDGET_CONSTANT) return true;
+    const resolved = resolveDataExpression(options, options.text);
+    if (!resolved) return false;
+    // `const budget = TASK_WRITER_TX_BUDGET;` — one hop, the obvious spelling and
+    // the one whose absence would be a false positive rather than a hole.
+    if (ts.isIdentifier(resolved)) return resolved.text === BUDGET_CONSTANT;
+    return ts.isObjectLiteralExpression(resolved) && namesTimeout(resolved);
   }
   return false;
 }

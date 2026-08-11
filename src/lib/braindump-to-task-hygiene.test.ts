@@ -375,6 +375,71 @@ describe("findUnbudgetedBrainDumpTaskWrites — the parser, on synthetic input",
     ).toEqual([]);
   });
 
+  /**
+   * Duo review on `!324`. The first version of `hasExplicitBudget` returned true
+   * for ANY bare identifier in the options position, so the guard was defeatable
+   * by passing an unrelated or empty options object — worse than not checking,
+   * because it reads as a guard. These five specs are that hole, closed and pinned
+   * from both directions.
+   */
+  it("flags an identifier that resolves to an options object with NO timeout", () => {
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = { maxWait: 5_000 };
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags an identifier that resolves to an EMPTY options object", () => {
+    // The cheapest possible defeat, and the one the old code waved through.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = {};
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags an identifier it cannot resolve at all", () => {
+    // Imported, or a parameter. Unlike the hand-built rule above, the conservative
+    // answer HERE is to flag: this is a build gate on four known writers, so an
+    // options argument nobody can read should make somebody look. The shared
+    // constant is exempt by name, which is the next spec.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "someImportedOptions"),
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does NOT flag an identifier resolving to an options object WITH a timeout", () => {
+    // A writer that deliberately chose its own budget and said so, via a local
+    // constant. Still a decision, so still silent.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = { timeout: 20_000, maxWait: 5_000 };
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a one-hop local alias of the shared constant", () => {
+    // The spelling whose absence would be a FALSE POSITIVE rather than a hole,
+    // which is the only reason the identifier branch follows an alias at all.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const budget = TASK_WRITER_TX_BUDGET;
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "budget")}`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("flags an options object that sets maxWait but no timeout", () => {
     // `maxWait` is time to acquire a CONNECTION, a different failure (the app is
     // saturated). Passing it looks like a budget and is not one, so an options
