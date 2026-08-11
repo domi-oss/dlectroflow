@@ -51,7 +51,8 @@
  * `role="status"` inside the notice's assertive `role="alert"` inherits the
  * container's politeness across the whole subtree, so "will it announce" has no
  * answer. The fix is a *sibling* region, which is a structural property and
- * therefore checkable. {@link nestedLiveRegions}.
+ * therefore checkable. Fails closed on a `{...spread}` it cannot resolve — see
+ * the note at the foot of this comment. {@link nestedLiveRegions}.
  *
  * **E — the in-flight wait is announced by a live region, not by a description.**
  * The half of #218 that rule D cannot see, and the one `shopping-list.tsx` still
@@ -89,15 +90,28 @@
  *     inside an alert in this file is invisible to both. All three notice
  *     surfaces are plain markup, which is why that is affordable here — an
  *     extracted `<WriteNotice />` would need this scope widened along with it.
- *  4. **A role or `aria-live` arriving through a JSX spread.** `{...props}` is
- *     read as an attribute nobody can evaluate statically, so `<p {...live}>` is
- *     neither reported by rule D nor counted by rule E. Stated because a guard
- *     that advertises a closed set and quietly has a bypass is the failure mode
- *     this whole module exists to remove — and pinned by a spec, so the day it
- *     stops being true somebody is told. Nothing in the tree does it today: every
- *     live region on all three surfaces spells its attributes out literally.
- *  5. **Focus behaviour.** Which control receives the hand-off when the notice
+ *  4. **Focus behaviour.** Which control receives the hand-off when the notice
  *     withdraws its button is per-surface and covered by each surface's specs.
+ *
+ * ## The ambiguity it does NOT let itself off: `{...spread}`
+ *
+ * A role or `aria-live` can arrive through a spread, and `{...props}` cannot be
+ * evaluated statically. The first version of this module read that as "not a live
+ * region" and said nothing, which made a guard advertising a closed set quietly
+ * have a bypass — the exact failure mode it exists to remove.
+ *
+ * **It fails closed instead.** An element carrying a spread and no literal live
+ * attribute is a *candidate*, reported by rule D whenever it sits inside a live
+ * region or has one inside it, and refused by rule E as an announcer because a
+ * spread can overwrite `aria-live="polite"` with anything, `"off"` included. "I
+ * could not determine this, so I am flagging it" is a correct guard; "I could not
+ * determine this, so I am silent" is the bug. The trade is explicit: false
+ * positives are acceptable here and false negatives are not, because a missed
+ * nesting is #218 and a flagged spread is one comment in review.
+ *
+ * All three surfaces pass, and not vacuously — `inbox-view.tsx` has six real
+ * spread-bearing elements that go through this branch and clear it, which a spec
+ * asserts so a future clean scan cannot come from the branch never running.
  */
 
 import ts from "typescript";
@@ -400,14 +414,25 @@ export interface NestedLiveRegion {
   outer: string;
 }
 
-/** One live region, nested or not — rule D's non-zero control. */
+/** One live region — or one element that might be one — nested or not. */
 export interface LiveRegion {
   /** 1-based line, so the finding is navigable. */
   line: number;
-  /** How it declares itself, e.g. `aria-live="polite"`. */
+  /**
+   * How it declares itself, e.g. `aria-live="polite"` — or `"{...spread}"` when
+   * the only thing known is that attributes arrive from somewhere unresolvable.
+   */
   declared: string;
-  /** How each live-region ancestor declares itself, outermost first. */
+  /** How each candidate ancestor declares itself, outermost first. */
   ancestors: string[];
+  /**
+   * Whether this element carries a JSX spread.
+   *
+   * Rule E's pessimism lives here: JSX resolves later attributes last, so a spread
+   * can overwrite `aria-live="polite"` with anything at all — including `"off"` —
+   * and an announcer that cannot be *proved* to announce does not count as one.
+   */
+  spread: boolean;
   /**
    * String literals anywhere in this element's subtree.
    *
@@ -442,7 +467,16 @@ export function nestedLiveRegions(
 }
 
 /**
- * Every live region in `source`, with the live-region ancestors of each.
+ * Every live region in `source` — **and every element that might be one** — each
+ * with its candidate ancestors.
+ *
+ * A `{...spread}` cannot be resolved statically, so an element carrying one is a
+ * candidate rather than a decided answer. It is included **because** the answer is
+ * unknown: an unresolvable element treated as "not a live region" is a hole in a
+ * guard that claims to be a closed set, which is the defect this module exists to
+ * remove. Deciding the ambiguity the pessimistic way costs a false positive at
+ * worst; deciding it the optimistic way costs a missed nesting, and #218 is what
+ * that costs in practice.
  *
  * Exported for the control {@link nestedLiveRegions} needs: it answers with an
  * empty list both for a file that nests nothing and for a file the parser could
@@ -481,6 +515,10 @@ export function liveRegionsIn(source: string, fileName: string): LiveRegion[] {
     return undefined;
   };
 
+  /** Whether attributes arrive from somewhere this parser cannot evaluate. */
+  const hasSpread = (open: ts.JsxOpeningLikeElement): boolean =>
+    open.attributes.properties.some(ts.isJsxSpreadAttribute);
+
   /**
    * How this element declares itself a live region, or `undefined`.
    *
@@ -489,6 +527,12 @@ export function liveRegionsIn(source: string, fileName: string): LiveRegion[] {
    * for rule D, and only an explicit `aria-live` satisfies rule E. Returning just
    * the role read every correctly-built announcer as unqualified, which is the
    * bug this comment replaces.
+   *
+   * A spread with no literal live attribute reports as `"{...spread}"` — not a
+   * decided answer, an undecidable one, which fails closed rather than silent
+   * (`!325`). A spread ALONGSIDE a literal attribute keeps the literal reading:
+   * the element already counts as a region for nesting, and a spread can only
+   * weaken that, which is rule E's problem rather than rule D's.
    */
   const liveness = (open: ts.JsxOpeningLikeElement): string | undefined => {
     const role = attr(open, "role");
@@ -497,7 +541,8 @@ export function liveRegionsIn(source: string, fileName: string): LiveRegion[] {
       role !== undefined && LIVE_ROLES.has(role) ? `role="${role}"` : undefined,
       live !== undefined && live !== "off" ? `aria-live="${live}"` : undefined,
     ].filter((part): part is string => part !== undefined);
-    return parts.length > 0 ? parts.join(" ") : undefined;
+    if (parts.length > 0) return parts.join(" ");
+    return hasSpread(open) ? "{...spread}" : undefined;
   };
 
   const found: LiveRegion[] = [];
@@ -512,11 +557,12 @@ export function liveRegionsIn(source: string, fileName: string): LiveRegion[] {
         : undefined;
     const declared = open ? liveness(open) : undefined;
 
-    if (declared !== undefined) {
+    if (declared !== undefined && open !== undefined) {
       found.push({
         line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
         declared,
         ancestors: [...openRegions],
+        spread: hasSpread(open),
         selects: [...collectLiterals(node)],
       });
       openRegions.push(declared);
@@ -580,6 +626,7 @@ export function politeAnnouncersOf(
   return liveRegionsIn(source, fileName).filter(
     (region) =>
       region.declared.includes('aria-live="polite"') &&
+      !region.spread &&
       region.ancestors.length === 0 &&
       region.selects.includes(key),
   );

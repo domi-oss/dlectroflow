@@ -345,19 +345,68 @@ describe("nestedLiveRegions (rule D's parser)", () => {
   });
 
   /**
-   * The documented blind spot, pinned rather than left to be discovered — a guard
-   * that advertises a closed set and quietly has a bypass is the failure mode this
-   * module exists to remove. `{...live}` cannot be evaluated statically, so the
-   * nesting below is real and invisible. Nothing in the tree does this today; the
-   * day one of the three surfaces starts to, this spec fails and says why.
+   * `!325` — the hole this guard had, closed rather than documented.
+   *
+   * `{...live}` cannot be resolved statically, so the first version treated a
+   * spread-bearing element as "not a live region" and said nothing. That is the
+   * failure mode this whole module exists to remove: a guard that advertises a
+   * closed set and quietly has a bypass. **Fail closed** — a spread inside a live
+   * region MIGHT be a nested live region, so it is reported for a human to look
+   * at. "I could not determine this, so I am flagging it" is correct; "I could
+   * not determine this, so I am silent" is the bug.
    */
-  it("cannot see a role that arrives through a JSX spread — stated, not silent", () => {
+  it("reports a spread inside a live region, because it might be one", () => {
+    const found = nestedLiveRegions(
+      `const v = <div role="alert"><p {...live}>Saving…</p></div>;`,
+      "a.tsx",
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      inner: "{...spread}",
+      outer: 'role="alert"',
+    });
+  });
+
+  /**
+   * The other direction, and the one that is easy to miss: the spread is on the
+   * OUTER element, so it may be the `role="alert"` — which would make the polite
+   * region inside it nested after all. Same discipline, reported the same way.
+   */
+  it("reports a known region whose ancestor is an unresolvable spread", () => {
+    const found = nestedLiveRegions(
+      `const v = <div {...maybeAlert}><p aria-live="polite">Saving…</p></div>;`,
+      "a.tsx",
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      inner: 'aria-live="polite"',
+      outer: "{...spread}",
+    });
+  });
+
+  /** A spread with no live region anywhere near it is not anybody's problem. */
+  it("says nothing about a spread that has no live region above or below it", () => {
     expect(
       nestedLiveRegions(
-        `const v = <div role="alert"><p {...live}>Saving…</p></div>;`,
+        `const v = <div className="row"><button {...props}>Go</button></div>;`,
         "a.tsx",
       ),
     ).toEqual([]);
+  });
+
+  /**
+   * A spread ALONGSIDE a literal role is still ambiguous, because JSX resolves
+   * later attributes last: `{...props}` after `role="alert"` can overwrite it. The
+   * element is already counted as a live region for nesting purposes, so this only
+   * has to matter for rule E — see the announcer specs.
+   */
+  it("still treats an element with both a literal role and a spread as a region", () => {
+    expect(
+      nestedLiveRegions(
+        `const v = <div role="alert" {...props}><p role="status">Hi</p></div>;`,
+        "a.tsx",
+      ),
+    ).toHaveLength(1);
   });
 });
 
@@ -441,6 +490,29 @@ describe("politeAnnouncersOf (rule E)", () => {
            <>
              <div role="alert">{t("x.errorSaveFailed", voice)}</div>
              <p aria-live="assertive" className="sr-only">{t("x.errorSaving", voice)}</p>
+           </>
+         );`,
+        "a.tsx",
+        "x.errorSaving",
+      ),
+    ).toEqual([]);
+  });
+
+  /**
+   * `!325` — rule E fails closed on the same ambiguity, in the opposite
+   * direction. A spread on the announcer can overwrite `aria-live="polite"` with
+   * anything, including `"off"`, so a region carrying one cannot be *proved* to
+   * announce. Rule D reports the spread as a possible region; rule E refuses to
+   * count it as a proven one. Both readings are the pessimistic one, which is the
+   * only safe direction for a guard.
+   */
+  it("does not accept an announcer whose aria-live a spread could overwrite", () => {
+    expect(
+      politeAnnouncersOf(
+        `const v = (
+           <>
+             <div role="alert">{t("x.errorSaveFailed", voice)}</div>
+             <p aria-live="polite" {...props} className="sr-only">{t("x.errorSaving", voice)}</p>
            </>
          );`,
         "a.tsx",
@@ -603,6 +675,35 @@ describe("no notice nests one live region inside another (#218, #236)", () => {
       ).toBeGreaterThan(1);
     },
   );
+
+  /**
+   * The control for the fail-closed half, and a different claim from the one
+   * above. Rule D treats an unresolvable `{...spread}` as a possible live region,
+   * and a clean scan only means something if some real spread was actually put
+   * through that reasoning — otherwise "no nesting found" could equally mean the
+   * spread branch never ran.
+   *
+   * Measured when this landed: `inbox-view.tsx` contributes **6** spread-only
+   * candidates, and `nestedLiveRegions` clears all six because none sits inside a
+   * live region and no live region sits inside one. Asserted across the file set
+   * rather than per file, because the other two surfaces spread nothing today and
+   * requiring them to would be asserting an accident.
+   */
+  it("puts real spreads through the fail-closed branch, so a clean scan means something", () => {
+    const spreadOnly = LIVE_REGION_FILES.flatMap((file) =>
+      liveRegionsIn(read(file), path.basename(file)).filter(
+        (region) => region.declared === "{...spread}",
+      ),
+    );
+    expect(
+      spreadOnly.length,
+      "no scanned surface has a JSX spread any more, so rule D's fail-closed " +
+        "branch is untested against the real tree. Either every spread was " +
+        "removed (fine — point this at a synthetic fixture and say so) or the " +
+        "parser has stopped recognising `{...spread}`, which silently reopens " +
+        "the hole `!325` closed.",
+    ).toBeGreaterThan(0);
+  });
 });
 
 describe("every write notice announces its own wait (#218, #236)", () => {
