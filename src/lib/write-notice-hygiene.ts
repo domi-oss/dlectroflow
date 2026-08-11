@@ -24,7 +24,7 @@
  * one inherits every rule below the moment it adds that key. There is no list to
  * remember to add yourself to.
  *
- * ## The three rules
+ * ## The five rules
  *
  * **A — the matrix is complete.** `timedOut` and `rowGone` are independent facts,
  * so there are four message cells and not three, plus the stale-bundle case: five

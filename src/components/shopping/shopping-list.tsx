@@ -177,17 +177,31 @@ type WriteFailure = {
 };
 
 /**
- * Which of the three messages a failure gets — ordered by how much the user can
- * be told, most-certain first. `stale` and `timedOut` both override the generic
- * copy because both change what the user should DO. Mirrors `captureMessageKey`
- * in `inbox-view.tsx` and `failureMessageKey` in `focus-timer.tsx`.
+ * Which message a failure gets — ordered by how much the user can be told,
+ * most-certain first. `stale` and `timedOut` both override the generic copy
+ * because both change what the user should DO. Mirrors `writeFailureKey` in
+ * `inbox-view.tsx`, and `captureMessageKey` there / `failureMessageKey` in
+ * `focus-timer.tsx` for the two notices that have no row to lose.
+ *
+ * Every cell of it is enforced across surfaces by `write-notice-hygiene` (#246),
+ * which exists because this function was one cell short for a release and nothing
+ * failed: it read as complete to anyone auditing by grep for the helper.
  */
 function writeFailureKey(failure: WriteFailure, rowGone: boolean): StringKey {
   if (failure.stale) return "shopping.errorSaveStale";
+  // #246 — the two facts together, and neither of the messages below is honest
+  // about the pair. `writeFailureRemedy` has already withdrawn every control by
+  // the time this is true, so the timeout's "before trying again" promises a
+  // button that is not on the screen; and the user is being sent to check a list
+  // the page has itself just checked. Kept ABOVE `timedOut` for that reason, and
+  // separate from `errorSaveGone` because it must not inherit "nothing changed" —
+  // see the note below, which applies to this arm too.
+  if (failure.timedOut && rowGone) return "shopping.errorSaveTimeoutGone";
   // Stays ABOVE `rowGone`: a timeout's verdict is genuinely unknown, and "nothing
   // changed" would be a claim the client cannot support — the row may be absent
-  // BECAUSE the write it is unsure about landed. "Check the list" is still the
-  // honest instruction, and the list is exactly where the answer is.
+  // BECAUSE the write it is unsure about landed. While the row is still on the
+  // list, "check the list" is the honest instruction, the list is exactly where
+  // the answer is, and a Retry is offered to act on what is found.
   if (failure.timedOut) return "shopping.errorSaveTimeout";
   // A refusal is not a breakage, and saying "couldn't save that just now" about
   // one would send the user to look at their connection. Only the two the
@@ -228,6 +242,14 @@ function writeFailureRemedy(
   // !294): the rendered list no longer holds the row, so the page can say this
   // without a round trip whose only possible answer is `missing`. Offering a
   // button that cannot work is the display half of the finding this round fixes.
+  //
+  // #246 — this arm swallows `timedOut`, and that is the decision rather than the
+  // oversight. A timeout does not weaken the case for withdrawing the button, it
+  // strengthens it: retrying either re-posts a write that already landed or matches
+  // nothing, and BOTH settle as a silent success that clears the notice. A false
+  // "saved this time" is worse than the dead end it would replace.
+  // `writeFailureKey` carries the other half — a message that no longer offers a
+  // "trying again" this function is about to take away.
   if (failure.refused === "missing" || rowGone) return "none";
   return "retry";
 }
@@ -947,79 +969,135 @@ export function ShoppingList({
           4.5:1 in #40. Neither control sets `outline-none`, so the UA focus ring
           draws and WCAG 2.4.11 is satisfied without a bespoke indicator. */}
       {failure && (
-        <div
-          role="alert"
-          className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <p
-            id={failureId}
-            className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+        <>
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
           >
-            <TriangleAlert
-              aria-hidden="true"
-              className="mt-0.5 h-4 w-4 shrink-0"
-            />
-            <span className="break-words">
-              {t(writeFailureKey(failure, failureRowGone), voice)}{" "}
-              <strong>&ldquo;{failure.subject}&rdquo;</strong>
-            </span>
+            <p
+              id={failureId}
+              className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+            >
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="break-words">
+                {t(writeFailureKey(failure, failureRowGone), voice)}{" "}
+                <strong>&ldquo;{failure.subject}&rdquo;</strong>
+              </span>
+            </p>
+            {/* No control at all when nothing could work — a refusal naming a row
+                that is gone is answered by the refresh that came with it, and a
+                button whose only possible outcome is the message already on screen
+                is worse than none (Duo review round 5, !294). */}
+            {writeFailureRemedy(failure, failureRowGone) !== "none" && (
+              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                {writeFailureRemedy(failure, failureRowGone) === "reload" ? (
+                  // Retrying re-posts the same action id the running deployment
+                  // has already forgotten — or, for a switched-off feature, walks
+                  // into the same refusal. Either way a reload is the ONLY thing
+                  // on offer.
+                  <button
+                    type="button"
+                    aria-describedby={failureId}
+                    onClick={() => window.location.reload()}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("shopping.errorReload", voice)}
+                  </button>
+                ) : (
+                  // `aria-disabled`, not `disabled`: a disabled element cannot
+                  // hold focus, so the browser would drop it to <body> the moment
+                  // the retry starts — the same fault !294 fixed for the rename
+                  // editor, in the control that reports it. The press is guarded
+                  // in the handler instead, so a double-tap still cannot fire two
+                  // writes.
+                  <button
+                    ref={retryRef}
+                    type="button"
+                    // The SECOND channel for the wait, not the only one (#236). A
+                    // description is computed when focus LANDS on a control, so
+                    // this covers the notice mounting with a retry already in
+                    // flight. It cannot cover the press itself, because that
+                    // happens on a control that already holds focus and keeps it
+                    // by design; the live region below is what covers that.
+                    aria-describedby={
+                      failure.retrying ? `${failureId} ${savingId}` : failureId
+                    }
+                    aria-disabled={failure.retrying}
+                    onClick={retryFailedWrite}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("shopping.errorRetry", voice)}
+                  </button>
+                )}
+                {/* #236 — the SIGHTED copy of the wait, and only that.
+                    `aria-hidden` because the announcement is the sibling region
+                    below, and one sentence in two nodes is how it gets said
+                    twice. Hiding it also stops the insertion mutating this
+                    `role="alert"`: an alert is assertive AND atomic, so a visible
+                    child appearing inside it mid-retry re-reads the whole notice
+                    over the polite announcement. Nothing changes on screen. */}
+                {failure.retrying && (
+                  <p
+                    data-testid="shopping-saving-visible"
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t("shopping.errorSaving", voice)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          {/* #236 — where the wait is actually ANNOUNCED.
+              This notice shipped `!290`'s shape, which `!303` (#218) then found
+              to be half a fix and `!306` mirrored onto the inbox; the comment that
+              stood here argued, correctly, against NESTING a polite region inside
+              this assertive one — and then left `aria-describedby` to carry the
+              wait alone, which only moved the hole onto the button. A description
+              is read when focus LANDS on a control, and Retry is pressed on a
+              control that already holds focus and keeps it by design, so the value
+              gaining `savingId` mid-flight is a change nothing goes back to
+              re-read. A live region is the one channel defined for content that
+              changes while the user is stationary.
+              A SIBLING of the alert, never a descendant: a polite region nested
+              one level in inherits the container's politeness across its whole
+              subtree, which is the original bug rather than a fix for it.
+              Rendered whenever the notice is, and EMPTY until there is something
+              to say, because assistive technology announces a CHANGE to a region
+              already in the accessibility tree and one arriving with its first
+              message is silent. `sr-only` rather than `hidden` for the same
+              reason: a live region has to be rendered to be observed.
+              Outside the `writeFailureRemedy !== "none"` gate on purpose. A row
+              can vanish mid-retry, which withdraws the control and the sighted
+              line with it; the write is still running and this is still the honest
+              place to say so.
+              It keeps `savingId`, so the Retry's description still resolves to
+              real text. Kept identical to `inbox-view.tsx` and `focus-timer.tsx` —
+              these have drifted apart twice already, which is what produced #218
+              and then #236. `write-notice-hygiene` rule E now fails if any of the
+              three loses it. */}
+          <p
+            id={savingId}
+            data-testid="shopping-saving-announcer"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {failure.retrying && t("shopping.errorSaving", voice)}
           </p>
-          {/* No control at all when nothing could work — a refusal naming a row
-              that is gone is answered by the refresh that came with it, and a
-              button whose only possible outcome is the message already on screen
-              is worse than none (Duo review round 5, !294). */}
-          {writeFailureRemedy(failure, failureRowGone) !== "none" && (
-            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-              {writeFailureRemedy(failure, failureRowGone) === "reload" ? (
-                // Retrying re-posts the same action id the running deployment has
-                // already forgotten — or, for a switched-off feature, walks into
-                // the same refusal. Either way a reload is the ONLY thing on offer.
-                <button
-                  type="button"
-                  aria-describedby={failureId}
-                  onClick={() => window.location.reload()}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
-                >
-                  <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("shopping.errorReload", voice)}
-                </button>
-              ) : (
-                // `aria-disabled`, not `disabled`: a disabled element cannot hold
-                // focus, so the browser would drop it to <body> the moment the
-                // retry starts — the same fault this MR is fixing for the rename
-                // editor, in the control that reports it. The press is guarded in
-                // the handler instead, so a double-tap still cannot fire two writes.
-                <button
-                  ref={retryRef}
-                  type="button"
-                  // While a retry runs, the reason AND the wait are both reachable
-                  // from the control.
-                  aria-describedby={
-                    failure.retrying ? `${failureId} ${savingId}` : failureId
-                  }
-                  aria-disabled={failure.retrying}
-                  onClick={retryFailedWrite}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
-                >
-                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("shopping.errorRetry", voice)}
-                </button>
-              )}
-              {/* Deliberately NOT `role="status"`: a polite live region nested
-                inside this assertive one is undefined enough in practice that
-                "will it announce" has no answer. The wait rides the two
-                mechanisms that do — the pressed button's `aria-disabled` state
-                change, which a screen reader reports because focus is on it, and
-                the `aria-describedby` above, which picks this node up while it
-                shows. */}
-              {failure.retrying && (
-                <p id={savingId} className="text-muted-foreground text-xs">
-                  {t("shopping.errorSaving", voice)}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* `region` + an accessible name carrying the count, so the count is
