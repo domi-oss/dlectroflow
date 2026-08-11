@@ -1321,14 +1321,22 @@ export function InboxView({
           // Only take focus when the user has not moved it since the press. They
           // may have gone to the capture field during a ten-second hang, and
           // interrupting them mid-sentence is #210's argument for why the capture
-          // notice never steals focus at all. The `isConnected` arm covers the
-          // case the pressed control was removed under them: focus is already on
-          // <body>, so there is nothing to interrupt and everything to fix.
+          // notice never steals focus at all.
+          //
+          // There used to be a second arm here — `!origin.isConnected &&
+          // document.activeElement === document.body`, for the case the pressed
+          // control was removed under them. It is gone, and removing it changes
+          // no behaviour (!306, substitute review, which found that mutating it
+          // away left the whole suite green and then found out why). The effect
+          // that consumes this flag already treats `activeElement ===
+          // document.body` as sufficient on its own, so the arm was redundant
+          // wherever it agreed — and actively wrong where it did not. It was
+          // evaluated HERE, at settle time, while the effect runs after the
+          // commit: a user who moved focus in between would have had it taken
+          // anyway, by a flag whose stated purpose is to leave them alone.
+          // Deciding it once, at the later moment, is both simpler and correct.
           takeFocusForWrite.current =
-            origin !== null &&
-            (document.activeElement === origin ||
-              (!origin.isConnected &&
-                document.activeElement === document.body));
+            origin !== null && document.activeElement === origin;
           setWriteFailure({
             fn,
             target,
@@ -1375,10 +1383,25 @@ export function InboxView({
         // round 8 found — the row is written, so a refresh that throws is a stale
         // list, not a lost write, and must never be reported as one. The same
         // reasoning covers `onLanded`, which stands in for the refresh on the two
-        // writes that navigate instead (see {@link WriteFailure.onLanded}): it
-        // runs on success only, and a throw inside it cannot un-write the row.
-        if (onLanded) onLanded(result);
-        else router.refresh();
+        // writes that navigate instead (see {@link WriteFailure.onLanded}).
+        //
+        // Its OWN `catch`, and swallowing on purpose (!306, substitute review).
+        // Being outside the inner `try` made "never reported as a lost write"
+        // true, but it made it true by letting the throw leave the transition
+        // entirely — an unhandled rejection with no `error.tsx` anywhere in
+        // `src/` to catch it, which is the precise failure mode this issue
+        // exists to remove, arriving from the code removing it. There is nothing
+        // to tell the user that would be both true and useful: the write landed,
+        // so "couldn't save" is a lie, and the only casualty is a list that is
+        // one fetch stale and re-fetches on the next interaction. So it is
+        // swallowed where a reader can see the decision instead of inferring it
+        // from a missing `catch`.
+        try {
+          if (onLanded) onLanded(result);
+          else router.refresh();
+        } catch {
+          // Intentionally empty — see above.
+        }
       } finally {
         // Must run on every exit including a throw: a target left in `inFlight`
         // is a control that silently does nothing for the rest of the session,
@@ -1989,8 +2012,15 @@ export function InboxView({
       }
       // Outside the try/catch on purpose (round 8): the row is written, so a
       // refresh that throws is a stale list, not a lost capture, and must never
-      // be reported as one.
-      if (landed) router.refresh();
+      // be reported as one. Its own `catch` for the reason the row-write path
+      // gives at length (!306, substitute review): outside the try made that
+      // claim true by letting the throw leave the transition unhandled, which is
+      // #210's own defect wearing the fix. Swallowed where it can be read.
+      try {
+        if (landed) router.refresh();
+      } catch {
+        // Intentionally empty — a stale list, and the next interaction re-fetches.
+      }
     });
   };
 

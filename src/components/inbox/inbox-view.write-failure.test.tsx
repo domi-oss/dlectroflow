@@ -1466,3 +1466,244 @@ describe("InboxView — every row write reaches the notice (#225)", () => {
     });
   });
 });
+
+/**
+ * #225 — the claims the suite was asserting in prose only.
+ *
+ * Every spec here exists because a mutation to the line it is about left the
+ * suite green (!306, substitute review, by mutation testing the real source).
+ * A documented invariant with no spec is a comment, and this file has been the
+ * place those get turned into tests since !294.
+ */
+describe("InboxView — invariants that were documented but unpinned (#225)", () => {
+  it("carries a navigating write's outcome through the retry", async () => {
+    // `7877e2f`'s own headline: "a retry that saved the row and left the user on
+    // the inbox would be the press vanishing again." Dropping `onLanded` from
+    // `retryWrite` left the whole suite green.
+    vi.mocked(startBreakdown).mockRejectedValueOnce(new Error("offline"));
+    renderInbox([makeItem({ id: "r1", text: "plan the loft" })]);
+
+    await press(/break into steps/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/plan the loft/);
+
+    vi.mocked(startBreakdown).mockResolvedValueOnce("task-9");
+    await press(RETRY);
+
+    expect(push).toHaveBeenCalledWith("/tasks/task-9");
+  });
+
+  it("does not absorb Break into steps behind an Add to-do already in flight", async () => {
+    // The stated reason `"breakdown"` and `"focus"` are their own `WriteField`s
+    // rather than a share of `"triage"`: the second press asks to be TAKEN
+    // somewhere, which the first does not do, so absorbing it would be a silent
+    // no-op. Pointing both at `"triage"` left the suite green.
+    let releaseKeep = () => {};
+    vi.mocked(keepAsTask).mockImplementation(
+      () =>
+        new Promise<string | undefined>(
+          (resolve) => (releaseKeep = () => resolve(undefined)),
+        ),
+    );
+    vi.mocked(startBreakdown).mockResolvedValue("task-3");
+    renderInbox([makeItem({ id: "g1", text: "plan the loft" })]);
+
+    await press(/^add to-do$/i);
+    await press(/break into steps/i);
+
+    expect(vi.mocked(keepAsTask)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(startBreakdown)).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseKeep();
+      await flushTicks();
+    });
+  });
+
+  it("keeps the reload offer when a stale write's row has also gone", async () => {
+    // `stale` outranks `rowGone` in both `writeFailureKey` and
+    // `writeFailureRemedy`, because a reload is the only thing that can work and
+    // withdrawing it would leave a notice with no remedy at all. Inverting the
+    // precedence in both places left the suite green.
+    vi.mocked(completeItem).mockRejectedValueOnce(staleActionError());
+    const view = renderInbox([
+      makeItem({ id: "s1", text: "water the plants" }),
+    ]);
+
+    await press(COMPLETE);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/the app updated while this was open/i);
+
+    // The refresh lands and the row is gone — which for any other failure would
+    // withdraw every control.
+    await act(async () => {
+      view.rerender(
+        <InboxView
+          now={Date.now()}
+          initialItems={[]}
+          settings={settings}
+          welcomeVisible={false}
+          resumeStep={null}
+        />,
+      );
+      await flushTicks();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /the app updated while this was open/i,
+    );
+    expect(
+      screen.getByRole("button", { name: /reload the page/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not report a lost write when only the refresh threw", async () => {
+    // !290 round 8, documented on this path and until now verified only on the
+    // capture path: the row IS written, so a refresh that throws is a stale list,
+    // never a lost write. Moving `router.refresh()` inside the inner `try` left
+    // the suite green.
+    refresh.mockImplementationOnce(() => {
+      throw new Error("refresh blew up");
+    });
+    renderInbox([makeItem({ text: "water the plants" })]);
+
+    await press(COMPLETE);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(vi.mocked(completeItem)).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces the wait even when the row vanished and took the Retry with it", async () => {
+    // The polite region sits OUTSIDE the `writeRemedy !== "none"` gate on
+    // purpose: a row can vanish mid-retry, which withdraws the control and the
+    // sighted line with it, while the write is still running. Moving it inside
+    // the gate left the suite green.
+    vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const view = renderInbox([
+      makeItem({ id: "v1", text: "water the plants" }),
+    ]);
+
+    await press(/^delete$/i);
+    await press(/^delete$/i); // the inline confirm
+    await screen.findByRole("alert");
+
+    let releaseRetry = () => {};
+    vi.mocked(deleteBrainDumpItem).mockImplementationOnce(
+      () => new Promise<void>((resolve) => (releaseRetry = () => resolve())),
+    );
+    await press(RETRY);
+
+    await act(async () => {
+      view.rerender(
+        <InboxView
+          now={Date.now()}
+          initialItems={[]}
+          settings={settings}
+          welcomeVisible={false}
+          resumeStep={null}
+        />,
+      );
+      await flushTicks();
+    });
+
+    // No control left to describe, and the retry is still running, so the region
+    // is the only channel that can say so.
+    expect(screen.queryByRole("button", { name: RETRY })).toBeNull();
+    expect(screen.getByTestId("write-saving-announcer")).toHaveTextContent(
+      /saving/i,
+    );
+
+    await act(async () => {
+      releaseRetry();
+      await flushTicks();
+    });
+  });
+});
+
+/**
+ * #225 — the deadline itself, from both sides.
+ *
+ * `INBOX_ACTION_TIMEOUT_MS` is exported "so the test advances the real value
+ * rather than a copy of it", and every existing spec advances exactly that — so
+ * the deadline was only ever bounded from ABOVE. Replacing the constant at the
+ * call site with a hard-coded `2_000` left the whole suite green (!306,
+ * substitute review), which means a silent five-fold reduction — giving up on a
+ * write that was merely slow — was invisible. Ten seconds is a decision, and a
+ * decision with no lower bound is not tested.
+ */
+describe("InboxView — the row write's deadline (#225)", () => {
+  it("is still waiting one tick before the deadline, and gives up on it", async () => {
+    vi.useFakeTimers();
+    vi.mocked(completeItem).mockReturnValueOnce(new Promise<void>(() => {}));
+    renderInbox([makeItem({ text: "water the plants" })]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: COMPLETE }).click();
+      await flushTicks();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(INBOX_ACTION_TIMEOUT_MS - 1);
+      await flushTicks();
+    });
+
+    // A write still inside its budget has not failed, and saying it has is the
+    // false report this whole notice exists to avoid — pointing the other way.
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await flushTicks();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /no answer from the server/i,
+    );
+  });
+});
+
+/**
+ * #225 — where focus goes after a RETRY lands, which the code argues about at
+ * length and nothing pinned.
+ *
+ * `retryWrite` passes `origin: writeFailure.origin` — the control the ORIGINAL
+ * press came from — with a comment explaining that the Retry button itself is
+ * about to unmount, "and handing focus back to it would be handing it to
+ * nothing". Replacing that with `focusOrigin()` left the suite green (!306,
+ * substitute review), and the consequence is a WCAG 2.4.3 failure: the user is
+ * returned to the capture field rather than to the row control they were sent
+ * away from.
+ */
+describe("InboxView — focus after a retry that lands (#225)", () => {
+  it("returns focus to the control the first press came from, not the capture field", async () => {
+    // TWO failures before the success, and that is what makes this spec
+    // discriminate. A retry that lands first time arms the hand-off from the
+    // NOTICE's record, so `retryWrite`'s own `origin` never gets read — the
+    // argument only becomes the record's origin when the retry itself fails. So
+    // the mutation this pins (`origin: focusOrigin()`, which at that moment is
+    // the Retry button) is invisible until a second notice is built from it.
+    vi.mocked(completeItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("offline again"))
+      .mockResolvedValueOnce(undefined);
+    renderInbox([makeItem({ id: "f9", text: "water the plants" })]);
+
+    const complete = screen.getByRole("button", { name: COMPLETE });
+    complete.focus();
+    await press(COMPLETE);
+
+    // The notice took focus, which is the point of the hand-off existing.
+    expect(screen.getByRole("button", { name: RETRY })).toHaveFocus();
+
+    // Fails again, so the record is rebuilt — carrying the ORIGINAL origin, not
+    // the Retry button the user is standing on.
+    await press(RETRY);
+    expect(screen.getByRole("button", { name: RETRY })).toHaveFocus();
+
+    await press(RETRY);
+
+    // Back to the row's own control. Had the record been rebuilt from the Retry
+    // button, that button has since unmounted, so the hand-off would have found
+    // a disconnected node and dropped the user in the capture field — somewhere
+    // they never were (WCAG 2.4.3).
+    expect(complete).toHaveFocus();
+  });
+});
