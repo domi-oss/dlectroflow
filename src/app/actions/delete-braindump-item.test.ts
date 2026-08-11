@@ -237,6 +237,53 @@ describe("deleteBrainDumpItem", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/library");
     expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
   });
+
+  it("does not award inbox-zero when this call removed nothing", async () => {
+    // #251 — the race path, and the hole in the first version of this gate.
+    // The LOSER of a concurrent double-delete claims no completion (the winner
+    // already cleared it), so `tookCompletion` reads 0 — indistinguishable from
+    // an untriaged delete — and its `deleteMany` then matches nothing, so the
+    // transaction returns early having removed no row at all. Gating the award on
+    // `tookCompletion` alone waved it straight through, which put "+15 points and
+    // an inbox_zero badge for deleting a demo item" back on exactly the double-tap
+    // path this file's own doc comment calls real.
+    //
+    // The award's precondition is a REMOVAL, not a claim: `maybeAwardInboxZero`
+    // asks whether the untriaged queue is empty, and a call that deleted nothing
+    // cannot have emptied it.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: null,
+    });
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.brainDumpItem.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+  });
+
+  it("still revalidates when it removed nothing — another caller changed the list", async () => {
+    // The gate narrows the AWARD only. A concurrent delete really did remove the
+    // row, so this request's rendered lists are stale exactly as if it had done
+    // the removing itself, and skipping the revalidations would leave the Done
+    // tab showing a row that is gone.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: null,
+    });
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.brainDumpItem.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/library");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
 });
 
 // ── #251 — the reward reversal's wiring ────────────────────────────────────

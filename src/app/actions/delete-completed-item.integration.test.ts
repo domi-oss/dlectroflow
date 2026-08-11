@@ -269,6 +269,9 @@ describe("deleteBrainDumpItem — reversing exactly once (#251)", () => {
     const { item } = await completedTodo({ steps: 1 });
     await completedTodo({ steps: 1 });
 
+    const rewards = await import("@/lib/rewards");
+    vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
     const { deleteBrainDumpItem } = await import("./braindump");
     await Promise.all([
       deleteBrainDumpItem(item.id),
@@ -277,6 +280,36 @@ describe("deleteBrainDumpItem — reversing exactly once (#251)", () => {
 
     expect(await countRewards(WS, RewardType.StepDone)).toBe(1);
     expect(await countRewards(WS, RewardType.TaskComplete)).toBe(1);
+    // The half this test used to be blind to. Asserting only the reward counts
+    // let the loser of the race run the award: it claims no completion, so
+    // `tookCompletion` reads 0 — the same value an untriaged delete produces —
+    // and a gate gated on that alone waves it through. Both callers here deleted
+    // a COMPLETED row, so neither may award.
+    expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+  });
+
+  it("two concurrent deletes of one UNTRIAGED item award inbox zero exactly once", async () => {
+    // The discriminating case, and the one that shows why "did this call claim a
+    // completion" is the wrong question for a post-transaction award. Neither
+    // caller claims a completion here, because there is none — so the gate has to
+    // ask the other question instead: did THIS call remove a row. Exactly one of
+    // them did.
+    const item = await prisma.brainDumpItem.create({
+      data: { text: "needs triage", workspaceId: WS, status: "inbox" },
+    });
+    const rewards = await import("@/lib/rewards");
+    vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await Promise.all([
+      deleteBrainDumpItem(item.id),
+      deleteBrainDumpItem(item.id),
+    ]);
+
+    expect(await prisma.brainDumpItem.count({ where: { id: item.id } })).toBe(
+      0,
+    );
+    expect(rewards.maybeAwardInboxZero).toHaveBeenCalledTimes(1);
   });
 });
 

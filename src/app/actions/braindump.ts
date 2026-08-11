@@ -276,11 +276,21 @@ export async function deleteBrainDumpItem(id: string) {
   });
   if (!existing) return;
 
-  // Hoisted out of the transaction because `maybeAwardInboxZero` runs after it
-  // commits and needs the answer. It is the claimed count, not `existing`'s
-  // pre-read — a delete that lost the race to a concurrent one took no
-  // completion and must not be credited with the queue the winner emptied.
+  // Both hoisted out of the transaction because `maybeAwardInboxZero` runs after
+  // it commits and needs both answers, and they are different questions.
+  //
+  // `tookCompletion` — did this call CLAIM the completion. The right gate for the
+  // in-transaction reversal, and the wrong one on its own for the award: the
+  // loser of a concurrent double-delete also reads 0 here, because the winner had
+  // already cleared the flag, which makes it indistinguishable from an untriaged
+  // delete.
+  //
+  // `removedThis` — did this call actually REMOVE a row. That is the award's real
+  // precondition, and the one the first version of this gate was missing: the
+  // loser deletes nothing and returns early, so it cannot have emptied the queue
+  // `maybeAwardInboxZero` measures, whatever the row's completion state was.
   let tookCompletion = 0;
+  let removedThis = false;
 
   await prisma.$transaction(async (tx) => {
     // First write in the transaction on purpose — see the note above. Two
@@ -294,6 +304,7 @@ export async function deleteBrainDumpItem(id: string) {
     const { count } = await tx.brainDumpItem.deleteMany({
       where: { id, workspaceId },
     });
+    removedThis = count > 0;
     if (count === 0) return; // already deleted concurrently — nothing to clean up
 
     // Steps this delete destroys that were done, and therefore the `step_done`
@@ -346,16 +357,35 @@ export async function deleteBrainDumpItem(id: string) {
       await revokeUnqualifiedBadges(workspaceId, reversed, tx);
   });
 
-  // #251 — not for a completed item. `maybeAwardInboxZero` counts rows matching
-  // `status: Inbox` AND `completedAt: null`; a completed one fails the second
-  // half, so it was never in that count and deleting it cannot lower it. The
-  // queue is provably the same size on both sides of this call, so the only
-  // thing an award here can do is re-pay an inbox zero the workspace was already
-  // sitting on — measured at +15 points and an `inbox_zero` badge on the very
-  // path this issue is about, a delete whose whole job was to take points back.
-  // An untriaged row is the opposite case: deleting it genuinely can empty the
-  // queue, so that call has to survive, and the control test pins it.
-  if (tookCompletion === 0) await maybeAwardInboxZero(workspaceId);
+  // #251 — award only when this call actually removed a row that could have been
+  // in the queue `maybeAwardInboxZero` measures. Two independent reasons it might
+  // not have been, and BOTH are needed:
+  //
+  //  * `removedThis` — a call that deleted no row cannot have emptied anything.
+  //    This is the concurrent double-delete: the loser's `deleteMany` matches
+  //    nothing and the transaction returns early, yet it reaches this line just
+  //    like the winner. Gating on `tookCompletion` alone let it through, because
+  //    the loser claims no completion either — the winner had already cleared the
+  //    flag — so it reads exactly like an untriaged delete.
+  //  * `tookCompletion === 0` — `maybeAwardInboxZero` counts rows matching
+  //    `status: Inbox` AND `completedAt: null`, so a completed row was never in
+  //    that count and removing it cannot lower it. The queue is provably the same
+  //    size on both sides of this call, so an award can only re-pay an inbox zero
+  //    the workspace was already sitting on: measured at +15 points and an
+  //    `inbox_zero` badge, on the one call whose job is to take a payout back.
+  //
+  // An untriaged row is the case that must survive both — deleting it genuinely
+  // can empty the queue — and there is a control test for it at each level.
+  //
+  // Deliberately NOT also re-testing `status`/`snoozedUntil` from the snapshot.
+  // A triaged or future-snoozed row is not in that count either, so this gate is
+  // narrower than the invariant it serves — but the only way to close that here
+  // is to restate `maybeAwardInboxZero`'s predicate in a second place, and two
+  // copies of "what counts as untriaged" drifting apart is a worse bug than the
+  // one it would fix. Closing it properly means making the award fire on a
+  // transition rather than on a level, which is a change to every caller.
+  if (removedThis && tookCompletion === 0)
+    await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   // #251 — the Done tab renders the same rows and the dashboard renders the
   // points this call may have just taken back, so both are now stale for the
