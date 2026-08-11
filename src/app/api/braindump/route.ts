@@ -166,10 +166,11 @@ export async function POST(req: Request): Promise<Response> {
   //
   // Everything that can be decided from the body alone is decided before the
   // session is resolved, because this route is reachable with a guest cookie and
-  // `currentWorkspaceId()` costs two queries. A queued capture can never be
-  // malformed — `readQueue` returns only entries `isQueuedCapture` accepted — so
-  // this ordering cannot strand one; it only refuses requests that were never
-  // captures.
+  // `currentWorkspaceId()` costs a round trip — two for a signed-in account,
+  // which additionally re-reads the owner's status (#220). A queued capture can
+  // never be malformed — `readQueue` returns only entries `isQueuedCapture`
+  // accepted — so this ordering cannot strand one; it only refuses requests that
+  // were never captures.
   let rawBody: string;
   try {
     rawBody = await req.text();
