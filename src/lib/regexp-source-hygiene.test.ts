@@ -497,12 +497,15 @@ describe("the real tree", () => {
    * content. It reported those files clean while Semgrep kept firing on them.
    *
    * The list is the real per-file breakdown of `eslint.detect-non-literal-regexp`
-   * on `main`'s pipeline `2678` (`973919f`), measured 2026-08-11 — **18 findings
-   * across ten files**. That was the merge base until `!325` landed; the base is
-   * now `da32bf9`, whose own pipeline had not finished when this was rebased, so
-   * the newest FINISHED baseline is the one cited. `!325` adds no `new RegExp` to
-   * `src/` or `e2e/`, which is why the list below still holds — checked, not
-   * assumed.
+   * on `main`'s pipeline `2700` (`da32bf9`), measured 2026-08-11 — **18 findings
+   * across ten files**, and it reads `success`, which matters because the
+   * scan-result policy needs a FINISHED baseline to diff against. `d768832` is the
+   * current merge base and its own run was still going, so the newest finished one
+   * is cited deliberately rather than the newest one.
+   *
+   * Re-measured on `2700` and identical to the previous reading, file for file.
+   * `!325`, `!327` and `!328` between them add no `new RegExp` to `src/` or `e2e/`,
+   * which is why it held — checked each time, never assumed.
    *
    * **This snapshot rots, and it rotted inside a day.** Measured first on
    * `57a272a` it was 15 across nine; the rebase onto `973919f` added
