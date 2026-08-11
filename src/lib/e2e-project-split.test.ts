@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,7 +9,11 @@ import {
   doubleRoutedSpecs,
   routedNonSpecs,
   filesFor,
+  relativeImportTargets,
+  filesReaching,
+  retryMaskedSpecs,
   type ProjectRouting,
+  type Routing,
 } from "./e2e-project-split";
 
 /**
@@ -126,6 +130,183 @@ describe("claimingProjects — synthetic", () => {
     expect(routedNonSpecs(routing, isSuiteSpec)).toEqual([
       "/repo/e2e/a11y/axe-helpers.ts",
     ]);
+  });
+});
+
+// ── #247: reaching the a11y helpers from a retrying project ──────────────────
+
+describe("relativeImportTargets — synthetic", () => {
+  it("resolves a `..` hop the way the importing file's directory implies", () => {
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/smoke/schedule-menu.spec.ts",
+        `import { scanA11y } from "../a11y/axe-helpers";`,
+      ),
+    ).toEqual(["/repo/e2e/a11y/axe-helpers"]);
+  });
+
+  it("drops bare-package specifiers", () => {
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/smoke/x.spec.ts",
+        `import { test } from "@playwright/test";
+         import { PrismaClient } from "@prisma/client";`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("catches every import form that can pull a module in", () => {
+    // Under-reporting is the dangerous direction: a form this misses is an
+    // assertion the guard cannot see.
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/a.spec.ts",
+        `import type { T } from "./type-only";
+         export { scanA11y } from "./re-exported";
+         import "./side-effect";
+         const m = await import("./dynamic");
+         const r = require("./required");`,
+      ).sort(),
+    ).toEqual([
+      "/repo/e2e/dynamic",
+      "/repo/e2e/re-exported",
+      "/repo/e2e/required",
+      "/repo/e2e/side-effect",
+      "/repo/e2e/type-only",
+    ]);
+  });
+});
+
+describe("filesReaching — synthetic", () => {
+  const HELPERS = "/repo/e2e/a11y/axe-helpers.ts";
+
+  it("finds a direct importer", () => {
+    const sources = new Map([
+      [HELPERS, "export function scanA11y() {}"],
+      [
+        "/repo/e2e/smoke/menu.spec.ts",
+        `import { scanA11y } from "../a11y/axe-helpers";`,
+      ],
+      ["/repo/e2e/smoke/plain.spec.ts", `import { x } from "../helpers";`],
+      ["/repo/e2e/helpers.ts", "export const x = 1;"],
+    ]);
+    expect(
+      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual(["/repo/e2e/smoke/menu.spec.ts"]);
+  });
+
+  it("finds a TRANSITIVE importer through a re-exporting module", () => {
+    // The refactor that defeats a one-hop grep, and therefore the whole reason
+    // this traversal is not a one-hop check.
+    const sources = new Map([
+      [HELPERS, "export function scanA11y() {}"],
+      [
+        "/repo/e2e/a11y-wrappers.ts",
+        `export { scanA11y } from "./a11y/axe-helpers";`,
+      ],
+      [
+        "/repo/e2e/smoke/menu.spec.ts",
+        `import { scanA11y } from "../a11y-wrappers";`,
+      ],
+    ]);
+    expect(
+      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual(["/repo/e2e/a11y-wrappers.ts", "/repo/e2e/smoke/menu.spec.ts"]);
+  });
+
+  it("terminates on an import cycle rather than hanging the suite", () => {
+    const sources = new Map([
+      [HELPERS, "export function scanA11y() {}"],
+      ["/repo/e2e/a.ts", `import "./b";`],
+      ["/repo/e2e/b.ts", `import "./a";`],
+    ]);
+    expect(
+      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([]);
+  });
+
+  it("ignores a specifier that resolves to no file in the tree", () => {
+    const sources = new Map([
+      [HELPERS, "export function scanA11y() {}"],
+      ["/repo/e2e/a.spec.ts", `import "./deleted-yesterday";`],
+    ]);
+    expect(
+      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([]);
+  });
+});
+
+describe("retryMaskedSpecs — synthetic", () => {
+  const routing: Routing = new Map([
+    ["/repo/e2e/a11y/axe-core-flow.spec.ts", ["a11y"]],
+    ["/repo/e2e/smoke/menu.spec.ts", ["chromium"]],
+    ["/repo/e2e/a11y/axe-helpers.ts", []],
+  ]);
+
+  it("flags a reacher a retrying project claims", () => {
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/smoke/menu.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([
+      {
+        file: "/repo/e2e/smoke/menu.spec.ts",
+        claims: [{ name: "chromium", retries: 1 }],
+      },
+    ]);
+  });
+
+  it("treats an UNSET `retries` as retrying, not as zero", () => {
+    // The load-bearing case. `chromium` declares no `retries`, so it inherits
+    // `process.env.CI ? 1 : 0` — read that inherited number and this guard
+    // passes locally and fails in CI on an unchanged tree.
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/smoke/menu.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", undefined],
+        ]),
+      ),
+    ).toEqual([
+      {
+        file: "/repo/e2e/smoke/menu.spec.ts",
+        claims: [{ name: "chromium", retries: undefined }],
+      },
+    ]);
+  });
+
+  it("passes a reacher only the zero-retry project claims", () => {
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/a11y/axe-core-flow.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not flag a helper module no project runs", () => {
+    // A module is not a test. `unroutedSpecs` is what catches a spec nobody runs.
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/a11y/axe-helpers.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -327,5 +508,62 @@ describe("the committed e2e tree routes cleanly (#127)", () => {
       raw[0]?.name,
       "a11y is no longer declared first — the dependencies above should still hold the ordering, but this pairing is deliberate; read the comment in config/playwright.config.ts before changing it",
     ).toBe("a11y");
+  });
+});
+
+describe("no a11y assertion runs with a retry to spend (#247)", () => {
+  /** The module every a11y assertion in the suite goes through. */
+  const A11Y_HELPERS = join(REPO_ROOT, "e2e", "a11y", "axe-helpers.ts")
+    .split(sep)
+    .join("/");
+
+  const readSource = (file: string) => readFileSync(file, "utf8");
+
+  const reachers = () => filesReaching(A11Y_HELPERS, e2eFiles(), readSource);
+
+  it("is looking at a module that exists", () => {
+    // Without this the whole describe degrades to a pass: rename or move
+    // `axe-helpers.ts` and `filesReaching` finds nobody reaching a file that is
+    // not there, which reads exactly like compliance. Same failure shape as an
+    // empty a11y project, one level in.
+    expect(
+      e2eFiles(),
+      `${A11Y_HELPERS} is gone — this guard is now measuring nothing. Point it at the module the a11y helpers actually live in.`,
+    ).toContain(A11Y_HELPERS);
+  });
+
+  it("can see the call sites it is supposed to police", () => {
+    // The other half of the same defence: prove the traversal returns non-zero
+    // on the real tree, and that it finds the gate's own specs. A zero here
+    // would mean the import scanner stopped working, not that the repo is clean.
+    const found = reachers();
+    expect(found.length).toBeGreaterThan(0);
+    expect(found).toContain(
+      join(REPO_ROOT, "e2e", "a11y", "axe-core-flow.spec.ts")
+        .split(sep)
+        .join("/"),
+    );
+  });
+
+  it("runs every a11y-helper caller in a project that declares retries: 0", async () => {
+    // #247. #127 gave the `a11y` PROJECT zero retries; it could not see an
+    // assertion called from a spec in another project. `schedule-menu.spec.ts`
+    // and `people-admin.spec.ts` had four such calls between them, and the
+    // retry masked #222's document-title race at one of them until it failed on
+    // `main` instead and skipped a production deploy.
+    const { projects, raw } = await realProjects();
+    const routing = routeFiles(e2eFiles(), projects, isSuiteSpec);
+    const retriesByProject = new Map(raw.map((p) => [p.name, p.retries]));
+
+    const masked = retryMaskedSpecs(reachers(), routing, retriesByProject);
+    expect(
+      masked.map(
+        ({ file, claims }) =>
+          `${file.slice(REPO_ROOT.length)} runs in ${claims
+            .map((c) => `${c.name} (retries: ${c.retries ?? "inherited"})`)
+            .join(", ")}`,
+      ),
+      "an a11y assertion is reachable from a project that retries, so a real WCAG failure there is indistinguishable from a flake and gets retried away. Move the assertion into e2e/a11y/ rather than relaxing this.",
+    ).toEqual([]);
   });
 });
