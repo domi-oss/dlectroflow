@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { waitForShell } from "../helpers";
 import { scanA11y } from "./axe-helpers";
 
@@ -13,23 +13,16 @@ import { scanA11y } from "./axe-helpers";
  * `metadata.title`, so the `<title>` is in the server-streamed HTML and a
  * genuinely absent one would fail every scan of every route rather than one.
  *
- * What actually happens, read off the DOM snapshots in the CI trace of job
- * `15826251144` (`/shopping with a row`, sha `fd4b608`):
- *
- *   after@call@1738  <head> … META, TITLE, META[description], LINK, LINK      ← 8 children
- *   after@call@1744  <head> … META, META                                      ← 4 children,
- *                    and the TITLE is at /HTML/BODY/DIV/DIV/DIV/DIV
- *   after@call@1752  <head> … META, TITLE, META[description], LINK, LINK      ← 8 children
- *
- * `call@1744` is the spec's last wait before the scan and `call@1752` is
- * `axe.runPartial` itself, so the re-application of the metadata block brackets
- * the scan exactly. Next streams `metadata` into the body and React 19 hoists it
- * into `<head>`; on the RSC payload that a `router.refresh()` brings back, the
- * whole block — `<title>`, the description `<meta>` and both icon `<link>`s —
- * is detached and re-inserted. `document.title` is `""` only for the instant the
- * element belongs to no parent at all (verified: a `<title>` parked inside a body
- * `<div>` still reads `"dlectroflow"`), and axe's `doc-has-title` check is
- * literally `!!sanitize(document.title)` — so that instant is the whole bug.
+ * What actually happens: Next streams `metadata` into the body and React 19
+ * hoists it into `<head>`, and on the RSC payload a `router.refresh()` brings
+ * back, the whole hoisted block — `<title>`, the description `<meta>` and both
+ * icon `<link>`s — is detached and re-inserted. `document.title` is `""` only for
+ * the instant the element belongs to no parent at all (verified: a `<title>`
+ * parked inside a body `<div>` still reads `"dlectroflow"`), and axe's
+ * `doc-has-title` check is literally `!!sanitize(document.title)` — so that
+ * instant is the whole bug. #222 has the CI trace showing the re-insertion
+ * bracketing `axe.runPartial`; the ids are left there rather than copied here,
+ * because a purged job log makes them unverifiable while the mechanism stays true.
  *
  * Milliseconds wide, and therefore not reproducible on demand. So this file does
  * not try to win a race: it reproduces the STATE the race produces — a detached
@@ -66,7 +59,7 @@ const DETACH_MS = 750;
  * scan would simply see a titled page.
  */
 async function detachTitle(
-  page: import("@playwright/test").Page,
+  page: Page,
   restoreAfterMs: number | null,
 ): Promise<string> {
   return page.evaluate((ms) => {

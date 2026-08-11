@@ -99,16 +99,21 @@ function report(violations: Violation[], allowed: Set<string>): string {
 // `<title>` in the server-streamed HTML. Next puts that metadata in the BODY and
 // React 19 hoists it into `<head>` — and on the RSC payload a `router.refresh()`
 // brings back, the whole hoisted block (`<title>`, the description `<meta>` and
-// both icon `<link>`s) is detached and re-inserted. Read off the CI trace of job
-// `15826251144`, the spec's last wait before the scan caught `<head>` four
-// children short with the `<title>` sitting at `/HTML/BODY/DIV/DIV/DIV/DIV`, and
-// the scan itself landed between that and the re-insertion.
+// both icon `<link>`s) is detached and re-inserted.
 //
 // axe's `doc-has-title` check is exactly `!!sanitize(document.title)`, and
 // `document.title` is empty only while the element belongs to no parent at all —
-// so that instant, a few milliseconds wide, is the entire bug. It made the gate
-// fail on whichever mutate-then-scan spec happened to land in it: `/ (with a
-// row)` on one run and `/shopping` on the next, same SHA.
+// a `<title>` parked inside a body `<div>` still reads `"dlectroflow"`. So the
+// bug is that one instant of re-parenting, a few milliseconds wide, and the
+// specs it exposes are the ones whose last wait before scanning is on *body*
+// content, which says nothing about `<head>`. It failed whichever
+// mutate-then-scan spec landed in the window — `/ (with a row)` on one attempt
+// and `/shopping` on the next, same SHA.
+//
+// #222 carries the CI evidence: the trace snapshots bracketing `axe.runPartial`
+// with `<head>` four children short, and the red/red/green runs on one sha. It
+// is deliberately not restated here — job logs are purged and trace ids mean
+// nothing once the artefact expires, so the durable reference is the issue.
 //
 // So every scan waits for the title first. Deliberately here rather than in
 // `waitForShell`:
