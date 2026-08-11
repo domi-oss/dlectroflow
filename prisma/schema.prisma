@@ -27,6 +27,22 @@ model User {
   providerSub String // stable subject from the provider, never the email
   email       String?
   handle      String? // provider username, lowercased
+  // #252 — what this person wants to be CALLED. The first field on the account
+  // they choose themselves: `handle` is the lowercased username the OAuth
+  // provider issued and `id` is a cuid, so before this the header could only
+  // ever greet somebody by a name they did not pick.
+  //
+  // On User and not on Settings, because a name is person-scoped and Settings is
+  // workspace-scoped — a workspace has members (identityFor returns a role), so
+  // a name stored there would be one name for everybody in it.
+  //
+  // Nullable with NO default and NO backfill, deliberately: the migration that
+  // adds it must be pure metadata. See the 2026-08-06 P3009 outage — data
+  // migrations here are only ever exercised against empty tables, so "every
+  // existing row is untouched" is the only property that can be relied on.
+  // `accountLabel()` therefore has to render a null as well as it renders a
+  // name, and does.
+  displayName String?
   role        String    @default("member") // owner | member
   status      String    @default("active") // active | revoked
   aiPolicy    String    @default("capped") // uncapped | capped | own_key
@@ -202,6 +218,20 @@ model Settings {
   // but stopping a focus session is never something to infer from "quiet,
   // please". Plain Boolean, like focusShuffle: no CHECK constraint to mirror.
   focusPauseTogether       Boolean   @default(false)
+  // #252 — does the header carry a quick-access icon for the focus timer?
+  //
+  // The one new gate the header's quick-access cluster needs. The trolley's gate
+  // already existed (`shoppingList` below) because /shopping is an optional
+  // feature; /focus is not optional, so nothing governed its AVAILABILITY —
+  // only its appearance (focusTimerStyle, focusSound, …). The owner asked for
+  // this icon to be optional, so it gets a column of its own rather than being
+  // hung off one of those.
+  //
+  // Defaults ON: focus is the payoff step of the app's core loop and the button
+  // was asked for, so an account that never opens Settings should have it. One
+  // toggle turns it off. Plain Boolean, like focusShuffle and shoppingList: no
+  // pseudo-enum, hence no CHECK constraint to mirror in src/lib/constants.ts.
+  focusQuickAccess         Boolean   @default(true)
   focusTimerTipDismissedAt DateTime?
   // #199 — shopping-list mode. OFF by default: the whole point of the switch is
   // that the feature adds no surface for people who don't want it, so an existing

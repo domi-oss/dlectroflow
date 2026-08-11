@@ -12,9 +12,10 @@ import { t, type Voice } from "@/lib/strings";
  * Three fields, and the list is asserted in identity.test.ts so it cannot widen
  * by accident:
  *
- *  • `label` — the provider handle, else a short account id. NEVER the email.
- *    Same rule the People panel has always used (it is the same function now),
- *    so the two surfaces cannot disagree about what an account is called.
+ *  • `label` — the name the person chose, else the provider handle, else a
+ *    short account id. NEVER the email. Same rule the People panel has always
+ *    used (it is the same function now), so the two surfaces cannot disagree
+ *    about what an account is called.
  *  • `provider` — display-named, because #74 requires the provider to be stated
  *    wherever identity is shown. That decision (one login = one account = one
  *    workspace, account linking permanently out of scope) means signing in with
@@ -38,17 +39,36 @@ export type AccountIdentity = {
 };
 
 /**
- * What to call an account on screen: its provider handle, else a short id.
+ * What to call an account on screen: the name it chose, else its provider
+ * handle, else a short id.
  *
- * The fallback exists because `AuthProfile.username` is optional — a provider may
- * withhold it — and a blank name in the header is precisely the "did I lose
- * everything?" ambiguity #100 removes. It is a prefix of the account id because
- * that is the only stable identifier left when there is no handle.
+ * The last fallback exists because `AuthProfile.username` is optional — a
+ * provider may withhold it — and a blank name in the header is precisely the
+ * "did I lose everything?" ambiguity #100 removes. It is a prefix of the account
+ * id because that is the only stable identifier left when there is no handle.
+ *
+ * #252 put `User.displayName` in front of both. The handle is the lowercased
+ * username the OAuth provider issued and the stub is a slice of a cuid: they are
+ * both names chosen FOR the person, and neither is what anybody would answer if
+ * asked theirs. The column is nullable and every row starts out `NULL`, so the
+ * two existing rungs are not a legacy path — they are what almost every account
+ * still renders as.
+ *
+ * `displayName` is trimmed and tested for emptiness rather than reached through
+ * `??`, because a stored `""` is not `null`: `displayName ?? handle` would hand
+ * the header an empty string and reintroduce the exact blank-label ambiguity
+ * this function exists to remove. `saveDisplayName` normalises `""` to `null` on
+ * the way in, so this is the second of two guards rather than the only one — the
+ * column is nullable and hand-editable, and a display rule that depends on a
+ * writer being the only writer is a rule that breaks quietly.
  */
 export function accountLabel(user: {
   id: string;
   handle: string | null;
+  displayName: string | null;
 }): string {
+  const chosen = user.displayName?.trim();
+  if (chosen) return chosen;
   return user.handle ?? `#${user.id.slice(0, 8)}`;
 }
 
@@ -88,6 +108,8 @@ export function roleWord(role: UserRole): string {
 export function identityFor(user: {
   id: string;
   handle: string | null;
+  /** #252 — the name the person chose for themselves; `null` until they do. */
+  displayName: string | null;
   provider: string;
   role: UserRole;
 }): AccountIdentity {

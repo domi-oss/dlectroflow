@@ -171,6 +171,9 @@ export async function collectExport(input: {
             id: true,
             provider: true,
             handle: true,
+            // #252 — the name they typed in themselves, which is personal data
+            // they supplied and therefore squarely inside Art. 15/20.
+            displayName: true,
             email: true,
             role: true,
             aiPolicy: true,
