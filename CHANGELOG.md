@@ -507,6 +507,30 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **The shopping list stops asking you to retry something it has taken the button
+  away for, and says out loud that it is retrying (#246, #236).** Two small things
+  in the notice that appears when a change to your list does not save. If the
+  server never answered **and** the item has since left the list, it used to say
+  "check the list before trying again" above a notice with no Try again button on
+  it — because retrying a row that is gone either repeats a change that already
+  went through or matches nothing, and both would look like it had quietly worked.
+  It now says the item is not on the list any more **and** that the change may
+  already have saved, which is the honest pair: it cannot claim nothing changed,
+  because the item may be missing precisely *because* the change went through.
+
+  The second is for screen-reader users. While a retry was in flight the notice
+  showed "Saving…" on screen, but the only thing pointing at those words was a
+  description on the Try again button — and a description is read when you *arrive*
+  at a button, not while you are standing on it, which is exactly where you are
+  after pressing it. The wait is now announced properly, from the same kind of
+  region the focus timer and the inbox already use. Nothing changes on screen.
+
+  A new repo-wide check (`write-notice-hygiene`) now asserts that every surface
+  with one of these notices carries the whole set of messages, that each message
+  agrees with the button it is shown beside, and that the wait is announced rather
+  than merely displayed. Four surfaces grew this notice separately and each of them
+  had drifted; this is the check that stops a fifth.
+
 - **"Back to inbox" in the step editor can no longer lose a step (#212).** The
   control takes one step out of the plan you are editing and puts it in your
   inbox as its own thing to break down later. It used to take the row away
