@@ -259,6 +259,75 @@ describe("comments are not code, and stripping them must not lose code (#150)", 
         [],
       );
     });
+
+    // ── Raised by review on !323, and it is the inverse of the bug above ──────
+    //
+    // The first version computed "comment-only" as "absent once stripComments
+    // has run". `stripComments` also removes REAL code in the shapes the hazard
+    // fixtures below pin, so a genuine axe import in one of those files was
+    // classified comment-only — and the invariant that consumes this would then
+    // tell someone whose import is correct to "put the path in backticks", which
+    // is the opposite of the truth.
+    //
+    // Reachability was never affected (it never calls this), so nothing could
+    // ship a masked WCAG assertion. But a diagnostic that lies is worse than no
+    // diagnostic, and this one exists purely to be read by a human.
+    //
+    // The invariant now: a specifier may only be called comment-only when it is
+    // PROVABLY not code. Absence after a lossy strip cannot establish that, so
+    // every occurrence must also sit on a line that OPENS a comment — a line
+    // whose first non-whitespace is `//`, `/*` or `*`. Such a line cannot carry
+    // code, so no string or regex literal can be hiding on it. Anything less
+    // certain abstains.
+    describe("never accuses real code, in every shape stripComments mangles", () => {
+      const hazards: [string, string][] = [
+        [
+          "a string containing a block-comment opener, import on a later line",
+          `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+        ],
+        [
+          "a regex literal containing slashes, import on the same line",
+          `const re = /\\/\\//; ${AXE_IMPORT}`,
+        ],
+        [
+          "a regex literal containing a quote ahead of the import",
+          `const q = /["']/;\n${AXE_IMPORT}`,
+        ],
+        [
+          "a string containing a line-comment opener before the import",
+          `const s = "a // b";\n${AXE_IMPORT}`,
+        ],
+      ];
+
+      for (const [name, source] of hazards) {
+        it(`does not call the real axe import a comment despite ${name}`, () => {
+          expect(
+            commentOnlySpecifiers(source),
+            "a real import was classified comment-only, so the invariant would tell someone with correct code to put their import path in backticks",
+          ).not.toContain(AXE);
+        });
+      }
+
+      it("still abstains rather than guessing when the strip is untrustworthy", () => {
+        // Belt and braces on the same input: the specifier is real code, so the
+        // honest answer is the empty set, not merely "not AXE".
+        expect(
+          commentOnlySpecifiers(
+            `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+          ),
+        ).toEqual([]);
+      });
+
+      it("still reports a trailing comment's specifier when the line opens one", () => {
+        // The rule is about the line OPENING a comment, so a whole-line `//`
+        // still classifies even with code above and below it.
+        expect(
+          commentOnlySpecifiers(
+            `const a = 1;\n// import x from "./axe-helpers";\nconst b = 2;`,
+          ),
+        ).toEqual(["./axe-helpers"]);
+      });
+    });
   });
 
   describe("fail closed — every shape that can defeat a text-level strip", () => {

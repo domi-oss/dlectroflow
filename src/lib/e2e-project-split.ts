@@ -262,13 +262,77 @@ export function importsPackage(source: string, pkg: string): boolean {
  * leaving someone to reverse-engineer why prose tripped a routing guard.
  *
  * Comment-exclusive only. A specifier both imported and discussed is code.
+ *
+ * ── Why absence after stripping is not enough (raised on !323) ───────────────
+ * The first version of this asked only "did `stripComments` remove it?", which is
+ * the inverse of the bug above and just as wrong. Because the strip also removes
+ * REAL code in the shapes the colocated hazard tests pin, a genuine axe import in
+ * such a file was classified comment-only — and the invariant that reads this
+ * would then tell someone whose import is perfectly correct to "put the path in
+ * backticks". Reachability was never affected, so nothing could ship a masked
+ * WCAG assertion; but a diagnostic that lies is worse than none, and being read
+ * by a human is this function's only job.
+ *
+ * So a specifier must be PROVABLY not code, by two independent signals agreeing:
+ * the lossy strip removed it, AND every one of its occurrences sits on a line
+ * that OPENS a comment. A line whose first non-whitespace is `//`, `/*` or `*`
+ * cannot also carry code, so no string or regex literal can be hiding on it —
+ * which is exactly the ambiguity the strip alone cannot resolve. Anything less
+ * certain abstains and says nothing.
+ *
+ * Abstaining costs only a less specific failure message. Accusing real code costs
+ * a developer their afternoon, so the asymmetry decides the design.
  */
 export function commentOnlySpecifiers(source: string): string[] {
   const inCode = new Set(specifiersIn(stripComments(source)));
-  return [...new Set(specifiersIn(source))].filter(
-    (specifier) => !inCode.has(specifier),
+  const candidates = new Set(
+    specifiersIn(source).filter((specifier) => !inCode.has(specifier)),
   );
+  if (candidates.size === 0) return [];
+
+  const lines = source.split("\n");
+  /** Offset of each line's first character, so a match index maps to its line. */
+  const lineStarts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineStarts.push(offset);
+    offset += line.length + 1;
+  }
+  const lineAt = (index: number): string => {
+    // Last line whose start is at or before `index`.
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (lineStarts[mid] <= index) lo = mid;
+      else hi = mid - 1;
+    }
+    return lines[lo];
+  };
+
+  /** Every occurrence on a comment-opening line, for each candidate. */
+  const proven = new Map<string, boolean>();
+  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+    const specifier = match[1];
+    if (!candidates.has(specifier)) continue;
+    // A match spanning a newline (`import x\n  from "./y"`) straddles lines that
+    // may not agree, so it is never proof.
+    const single = !match[0].includes("\n");
+    const opensComment = single && OPENS_COMMENT.test(lineAt(match.index));
+    proven.set(specifier, (proven.get(specifier) ?? true) && opensComment);
+  }
+  // `=== true` so a candidate with no recorded occurrence — which would make
+  // "every occurrence is a comment" vacuously true — is excluded rather than
+  // accused.
+  return [...candidates].filter((specifier) => proven.get(specifier) === true);
 }
+
+/**
+ * A line whose first non-whitespace begins a comment: `//`, `/*`, or the `*`
+ * continuation of a JSDoc block, which is how this repo writes nearly all of its
+ * prose. Such a line cannot also carry code.
+ */
+const OPENS_COMMENT = /^\s*(?:\/\/|\/\*|\*)/;
 
 /**
  * Every file in `files` whose import graph reaches a file `isTarget` accepts —
