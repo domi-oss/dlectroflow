@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,8 +9,15 @@ import {
   doubleRoutedSpecs,
   routedNonSpecs,
   filesFor,
+  relativeImportTargets,
+  filesReaching,
+  importsPackage,
+  commentOnlySpecifiers,
+  retryMaskedSpecs,
   type ProjectRouting,
+  type Routing,
 } from "./e2e-project-split";
+import { stripComments } from "./source-text";
 
 /**
  * #127 — the routing guard's own tests.
@@ -126,6 +133,437 @@ describe("claimingProjects — synthetic", () => {
     expect(routedNonSpecs(routing, isSuiteSpec)).toEqual([
       "/repo/e2e/a11y/axe-helpers.ts",
     ]);
+  });
+});
+
+// ── #247: reaching @axe-core/playwright from a retrying project ──────────────
+
+describe("relativeImportTargets — synthetic", () => {
+  it("resolves a `..` hop the way the importing file's directory implies", () => {
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/smoke/schedule-menu.spec.ts",
+        `import { scanA11y } from "../a11y/axe-helpers";`,
+      ),
+    ).toEqual(["/repo/e2e/a11y/axe-helpers"]);
+  });
+
+  it("drops bare-package specifiers", () => {
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/smoke/x.spec.ts",
+        `import { test } from "@playwright/test";
+         import { PrismaClient } from "@prisma/client";`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("resolves against `.` when the file has no directory part", () => {
+    // `lastIndexOf("/")` returns -1 here, and `slice(0, -1)` would drop the
+    // filename's last character and resolve one directory too deep.
+    expect(
+      relativeImportTargets("x.spec.ts", `import "./axe-helpers";`),
+    ).toEqual(["axe-helpers"]);
+  });
+
+  it("catches every import form that can pull a module in", () => {
+    // Under-reporting is the dangerous direction: a form this misses is an
+    // assertion the guard cannot see.
+    expect(
+      relativeImportTargets(
+        "/repo/e2e/a.spec.ts",
+        `import type { T } from "./type-only";
+         export { scanA11y } from "./re-exported";
+         import "./side-effect";
+         const m = await import("./dynamic");
+         const r = require("./required");`,
+      ).sort(),
+    ).toEqual([
+      "/repo/e2e/dynamic",
+      "/repo/e2e/re-exported",
+      "/repo/e2e/required",
+      "/repo/e2e/side-effect",
+      "/repo/e2e/type-only",
+    ]);
+  });
+});
+
+describe("importsPackage — synthetic", () => {
+  it("matches a bare package import and a subpath of it", () => {
+    expect(importsPackage(`import A from "@axe-core/playwright";`, AXE)).toBe(
+      true,
+    );
+    expect(importsPackage(`import A from "@axe-core/playwright/x";`, AXE)).toBe(
+      true,
+    );
+  });
+
+  it("does not match a different package that merely shares a prefix", () => {
+    expect(importsPackage(`import A from "@axe-core/playwright-x";`, AXE)).toBe(
+      false,
+    );
+    expect(
+      importsPackage(`import { test } from "@playwright/test";`, AXE),
+    ).toBe(false);
+  });
+
+  it("does not match a relative path that happens to end in the name", () => {
+    expect(importsPackage(`import A from "./@axe-core/playwright";`, AXE)).toBe(
+      false,
+    );
+  });
+});
+
+/** The package every axe scan in the suite has to go through. */
+const AXE = "@axe-core/playwright";
+
+describe("comments are not code, and stripping them must not lose code (#150)", () => {
+  // Raised by review on !323, and both halves were measured before choosing a
+  // fix. The scanner reads raw text, so a comment quoting a specifier becomes a
+  // phantom edge — real, and Duo was right about it. But `stripComments` is
+  // documented in source-text.ts as erring "towards seeing LESS", and for THIS
+  // caller seeing less means declaring a file that genuinely reaches axe to be
+  // clean while it retries a WCAG assertion. That is the defect this MR removes,
+  // reintroduced in the parser.
+  //
+  // So: `stripComments` CLASSIFIES, it never DECIDES. The reachability answer
+  // stays fail-closed on the raw text, which can only ever over-report.
+
+  const AXE_IMPORT = `import AxeBuilder from "${AXE}";`;
+
+  describe("classification — which specifiers exist only inside comments", () => {
+    it("reports a specifier that only a line comment mentions", () => {
+      expect(
+        commentOnlySpecifiers(
+          '// import x from "./axe-helpers";\nconst a = 1;',
+        ),
+      ).toEqual(["./axe-helpers"]);
+    });
+
+    it("reports one that only a multi-line block comment mentions", () => {
+      expect(
+        commentOnlySpecifiers(
+          `/**\n * Tags are derived from "${AXE}" defaults.\n */\nconst a = 1;`,
+        ),
+      ).toEqual([AXE]);
+    });
+
+    it("reports nothing when the specifier is real code", () => {
+      expect(commentOnlySpecifiers(AXE_IMPORT)).toEqual([]);
+    });
+
+    it("reports nothing when a comment quotes a specifier the code also imports", () => {
+      // The specifier is in both, so it is code. Only the comment-EXCLUSIVE ones
+      // are worth telling anyone about.
+      expect(commentOnlySpecifiers(`// see "${AXE}"\n${AXE_IMPORT}`)).toEqual(
+        [],
+      );
+    });
+
+    // ── Raised by review on !323, and it is the inverse of the bug above ──────
+    //
+    // The first version computed "comment-only" as "absent once stripComments
+    // has run". `stripComments` also removes REAL code in the shapes the hazard
+    // fixtures below pin, so a genuine axe import in one of those files was
+    // classified comment-only — and the invariant that consumes this would then
+    // tell someone whose import is correct to "put the path in backticks", which
+    // is the opposite of the truth.
+    //
+    // Reachability was never affected (it never calls this), so nothing could
+    // ship a masked WCAG assertion. But a diagnostic that lies is worse than no
+    // diagnostic, and this one exists purely to be read by a human.
+    //
+    // The invariant now: a specifier may only be called comment-only when it is
+    // PROVABLY not code. Absence after a lossy strip cannot establish that, so
+    // every occurrence must also sit on a line that OPENS a comment — a line
+    // whose first non-whitespace is `//`, `/*` or `*`. Such a line cannot carry
+    // code, so no string or regex literal can be hiding on it. Anything less
+    // certain abstains.
+    describe("never accuses real code, in every shape stripComments mangles", () => {
+      const hazards: [string, string][] = [
+        [
+          "a string containing a block-comment opener, import on a later line",
+          `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+        ],
+        [
+          "a regex literal containing slashes, import on the same line",
+          `const re = /\\/\\//; ${AXE_IMPORT}`,
+        ],
+        [
+          "a regex literal containing a quote ahead of the import",
+          `const q = /["']/;\n${AXE_IMPORT}`,
+        ],
+        [
+          "a string containing a line-comment opener before the import",
+          `const s = "a // b";\n${AXE_IMPORT}`,
+        ],
+      ];
+
+      for (const [name, source] of hazards) {
+        it(`does not call the real axe import a comment despite ${name}`, () => {
+          expect(
+            commentOnlySpecifiers(source),
+            "a real import was classified comment-only, so the invariant would tell someone with correct code to put their import path in backticks",
+          ).not.toContain(AXE);
+        });
+      }
+
+      it("still abstains rather than guessing when the strip is untrustworthy", () => {
+        // Belt and braces on the same input: the specifier is real code, so the
+        // honest answer is the empty set, not merely "not AXE".
+        expect(
+          commentOnlySpecifiers(
+            `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+          ),
+        ).toEqual([]);
+      });
+
+      it("still reports a trailing comment's specifier when the line opens one", () => {
+        // The rule is about the line OPENING a comment, so a whole-line `//`
+        // still classifies even with code above and below it.
+        expect(
+          commentOnlySpecifiers(
+            `const a = 1;\n// import x from "./axe-helpers";\nconst b = 2;`,
+          ),
+        ).toEqual(["./axe-helpers"]);
+      });
+    });
+  });
+
+  describe("fail closed — every shape that can defeat a text-level strip", () => {
+    // Each of these is a REAL import that `stripComments` alone would lose. The
+    // assertion is that reachability still says yes, so the guard cannot go
+    // quiet on a file it failed to understand.
+    const hazards: [string, string][] = [
+      [
+        "a string containing a block-comment opener, import on a later line",
+        `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+      ],
+      [
+        "a regex literal containing slashes, import on the same line",
+        `const re = /\\/\\//; ${AXE_IMPORT}`,
+      ],
+      [
+        "a regex literal containing a quote ahead of the import",
+        `const q = /["']/;\n${AXE_IMPORT}`,
+      ],
+      [
+        "a string containing the word from followed by a quote",
+        `const msg = "copied from \\"elsewhere\\"";\n${AXE_IMPORT}`,
+      ],
+      [
+        "an import specifier inside a template literal, plus a real import",
+        `const doc = \`import x from "./ghost";\`;\n${AXE_IMPORT}`,
+      ],
+    ];
+
+    for (const [name, source] of hazards) {
+      it(`still sees the real axe import despite ${name}`, () => {
+        const sources = new Map([["/repo/e2e/a.spec.ts", source]]);
+        expect(
+          filesReaching(
+            (_f, s) => importsPackage(s, AXE),
+            [...sources.keys()],
+            (f) => sources.get(f)!,
+          ),
+          "reachability must never rest on stripComments, which is documented to see LESS",
+        ).toEqual(["/repo/e2e/a.spec.ts"]);
+      });
+    }
+
+    it("proves stripComments alone WOULD have lost two of them", () => {
+      // The evidence for the paragraph above, run rather than asserted. If
+      // source-text.ts ever becomes string-aware this fails, and the comment
+      // that justifies the fail-closed design has to be revisited.
+      const lost = [
+        `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+        `const re = /\\/\\//; ${AXE_IMPORT}`,
+      ];
+      for (const source of lost) {
+        expect(importsPackage(source, AXE)).toBe(true);
+        expect(importsPackage(stripComments(source), AXE)).toBe(false);
+      }
+    });
+  });
+});
+
+describe("filesReaching — synthetic", () => {
+  const HELPERS = "/repo/e2e/a11y/axe-helpers.ts";
+  /** The real predicate: anything that can run an axe scan. */
+  const runsAxe = (_file: string, source: string) =>
+    importsPackage(source, AXE);
+
+  it("finds a direct importer, and the helper module itself", () => {
+    const sources = new Map([
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
+      [
+        "/repo/e2e/smoke/menu.spec.ts",
+        `import { scanA11y } from "../a11y/axe-helpers";`,
+      ],
+      ["/repo/e2e/smoke/plain.spec.ts", `import { x } from "../helpers";`],
+      ["/repo/e2e/helpers.ts", "export const x = 1;"],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([HELPERS, "/repo/e2e/smoke/menu.spec.ts"]);
+  });
+
+  it("finds a spec that hand-rolls its own scan, touching no helper", () => {
+    // `e2e/smoke/member-delete-account.spec.ts` was exactly this, and a guard
+    // keyed on the helper MODULE reported it clean while it retried a
+    // zero-tolerance WCAG assertion in the `member` project.
+    const sources = new Map([
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
+      [
+        "/repo/e2e/smoke/delete-account.spec.ts",
+        `import AxeBuilder from "${AXE}";
+         const r = await new AxeBuilder({ page }).analyze();`,
+      ],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([HELPERS, "/repo/e2e/smoke/delete-account.spec.ts"]);
+  });
+
+  it("finds a TRANSITIVE importer through a re-exporting module", () => {
+    // The refactor that defeats a one-hop grep, and therefore the whole reason
+    // this traversal is not a one-hop check.
+    const sources = new Map([
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
+      [
+        "/repo/e2e/a11y-wrappers.ts",
+        `export { scanA11y } from "./a11y/axe-helpers";`,
+      ],
+      [
+        "/repo/e2e/smoke/menu.spec.ts",
+        `import { scanA11y } from "../a11y-wrappers";`,
+      ],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+      // Sorted, and `a11y-wrappers.ts` precedes `a11y/axe-helpers.ts` because
+      // "-" (0x2D) sorts below "/" (0x2F).
+    ).toEqual([
+      "/repo/e2e/a11y-wrappers.ts",
+      HELPERS,
+      "/repo/e2e/smoke/menu.spec.ts",
+    ]);
+  });
+
+  it("terminates on an import cycle rather than hanging the suite", () => {
+    const sources = new Map([
+      ["/repo/e2e/a.ts", `import "./b";`],
+      ["/repo/e2e/b.ts", `import "./a";`],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([]);
+  });
+
+  it("reads and parses each file exactly once, across every traversal", () => {
+    // Raised by review on !323. The outer filter starts a fresh DFS per file, so
+    // a shared module used to be re-read and re-regexed once per importing spec.
+    // Asserting the READ COUNT rather than a duration keeps this a real
+    // assertion instead of a benchmark that passes on a fast machine.
+    const sources = new Map([
+      ["/repo/e2e/helpers.ts", "export const x = 1;"],
+      ...(Array.from({ length: 5 }, (_, i) => [
+        `/repo/e2e/smoke/s${i}.spec.ts`,
+        `import { x } from "../helpers";`,
+      ]) as [string, string][]),
+    ]);
+    const reads: string[] = [];
+    filesReaching(runsAxe, [...sources.keys()], (f) => {
+      reads.push(f);
+      return sources.get(f)!;
+    });
+    expect(reads).toHaveLength(sources.size);
+    expect(new Set(reads).size).toBe(sources.size);
+    // Without the cache this was 11: five specs each re-reading helpers.ts.
+    expect(reads.filter((f) => f.endsWith("helpers.ts"))).toHaveLength(1);
+  });
+
+  it("ignores a specifier that resolves to no file in the tree", () => {
+    const sources = new Map([
+      ["/repo/e2e/a.spec.ts", `import "./deleted-yesterday";`],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([]);
+  });
+});
+
+describe("retryMaskedSpecs — synthetic", () => {
+  const routing: Routing = new Map([
+    ["/repo/e2e/a11y/axe-core-flow.spec.ts", ["a11y"]],
+    ["/repo/e2e/smoke/menu.spec.ts", ["chromium"]],
+    ["/repo/e2e/a11y/axe-helpers.ts", []],
+  ]);
+
+  it("flags a reacher a retrying project claims", () => {
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/smoke/menu.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([
+      {
+        file: "/repo/e2e/smoke/menu.spec.ts",
+        claims: [{ name: "chromium", retries: 1 }],
+      },
+    ]);
+  });
+
+  it("treats an UNSET `retries` as retrying, not as zero", () => {
+    // The load-bearing case. `chromium` declares no `retries`, so it inherits
+    // `process.env.CI ? 1 : 0` — read that inherited number and this guard
+    // passes locally and fails in CI on an unchanged tree.
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/smoke/menu.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", undefined],
+        ]),
+      ),
+    ).toEqual([
+      {
+        file: "/repo/e2e/smoke/menu.spec.ts",
+        claims: [{ name: "chromium", retries: undefined }],
+      },
+    ]);
+  });
+
+  it("passes a reacher only the zero-retry project claims", () => {
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/a11y/axe-core-flow.spec.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not flag a helper module no project runs", () => {
+    // A module is not a test. `unroutedSpecs` is what catches a spec nobody runs.
+    expect(
+      retryMaskedSpecs(
+        ["/repo/e2e/a11y/axe-helpers.ts"],
+        routing,
+        new Map([
+          ["a11y", 0],
+          ["chromium", 1],
+        ]),
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -327,5 +765,128 @@ describe("the committed e2e tree routes cleanly (#127)", () => {
       raw[0]?.name,
       "a11y is no longer declared first — the dependencies above should still hold the ordering, but this pairing is deliberate; read the comment in config/playwright.config.ts before changing it",
     ).toBe("a11y");
+  });
+});
+
+describe("no a11y assertion runs with a retry to spend (#247)", () => {
+  const readSource = (file: string) => readFileSync(file, "utf8");
+
+  /**
+   * Every file that can run an axe scan.
+   *
+   * Keyed on the PACKAGE, not on `e2e/a11y/axe-helpers.ts`. The helper module is
+   * how the gate is meant to be reached, and
+   * `e2e/smoke/member-delete-account.spec.ts` bypassed it entirely — it imported
+   * `@axe-core/playwright` and built its own `AxeBuilder`, so a guard aimed at
+   * the helpers called it clean while it retried a WCAG assertion in `member`.
+   * Everything that scans has to import this package, helpers included.
+   */
+  const reachers = () =>
+    filesReaching(
+      (_file, source) => importsPackage(source, AXE),
+      e2eFiles(),
+      readSource,
+    );
+
+  it("is looking at a package the suite actually depends on", () => {
+    // Without this the whole describe degrades to a pass: rename the package (or
+    // typo it here) and the traversal finds nobody importing something nothing
+    // imports, which reads exactly like compliance. Same failure shape as an
+    // empty a11y project, one level in.
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(
+      { ...manifest.dependencies, ...manifest.devDependencies },
+      `${AXE} is not a dependency — this guard is now measuring nothing.`,
+    ).toHaveProperty(AXE);
+  });
+
+  it("has no file whose axe reachability rests only on a comment (#150)", () => {
+    // The cure for what review on !323 actually objected to. Reachability is
+    // fail-closed on raw text, so a comment quoting a specifier DOES inflate the
+    // graph — the complaint was that whoever hit it would have to
+    // reverse-engineer why prose tripped a routing guard. This makes that state
+    // illegal in the tree and says so in one sentence, so the confusing version
+    // of the failure can never happen.
+    //
+    // Only specifiers that would really create an edge count: a comment naming a
+    // path that resolves to nothing cannot change any answer.
+    const files = e2eFiles();
+    const known = new Set(files);
+    const offenders: string[] = [];
+    for (const file of files) {
+      for (const specifier of commentOnlySpecifiers(readSource(file))) {
+        if (specifier === AXE || specifier.startsWith(`${AXE}/`)) {
+          offenders.push(
+            `${file.slice(REPO_ROOT.length)} — comment quotes ${AXE}`,
+          );
+          continue;
+        }
+        if (!specifier.startsWith(".")) continue;
+        const resolvedFrom = relativeImportTargets(
+          file,
+          // The specifier alone, re-wrapped so the resolver sees one edge.
+          `import ${JSON.stringify(specifier)};`,
+        );
+        const hit = resolvedFrom.find((base) =>
+          [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`].some((c) =>
+            known.has(c),
+          ),
+        );
+        if (hit !== undefined) {
+          offenders.push(
+            `${file.slice(REPO_ROOT.length)} — comment quotes ${specifier}`,
+          );
+        }
+      }
+    }
+    expect(
+      offenders,
+      "a comment quotes an import specifier that resolves to a real module, so it becomes a phantom edge in the reachability graph. Put the path in backticks instead of straight quotes, or drop the `from` before it.",
+    ).toEqual([]);
+  });
+
+  it("can see the call sites it is supposed to police", () => {
+    // The other half of the same defence: prove the traversal returns non-zero
+    // on the real tree, and that it finds both shapes — the helper module and a
+    // spec that only reaches axe THROUGH it. A zero here would mean the import
+    // scanner stopped working, not that the repo is clean.
+    const abs = (...p: string[]) =>
+      join(REPO_ROOT, ...p)
+        .split(sep)
+        .join("/");
+    const found = reachers();
+    expect(found.length).toBeGreaterThan(0);
+    expect(found).toContain(abs("e2e", "a11y", "axe-helpers.ts"));
+    expect(found).toContain(abs("e2e", "a11y", "axe-core-flow.spec.ts"));
+  });
+
+  it("runs every axe caller in a project that declares retries: 0", async () => {
+    // #247. #127 gave the `a11y` PROJECT zero retries; it could not see an
+    // assertion called from a spec in another project. `schedule-menu.spec.ts`
+    // and `people-admin.spec.ts` had FIVE such calls between them — two and
+    // three, the issue having named only one of schedule-menu's — and
+    // `member-delete-account.spec.ts` a sixth, in the `member` project, through
+    // an `AxeBuilder` it built itself. The retry masked #222's document-title
+    // race at one of them until it failed on `main` instead and skipped a
+    // production deploy.
+    const { projects, raw } = await realProjects();
+    const routing = routeFiles(e2eFiles(), projects, isSuiteSpec);
+    const retriesByProject = new Map(raw.map((p) => [p.name, p.retries]));
+
+    const masked = retryMaskedSpecs(reachers(), routing, retriesByProject);
+    expect(
+      masked.map(
+        ({ file, claims }) =>
+          `${file.slice(REPO_ROOT.length)} runs in ${claims
+            .map((c) => `${c.name} (retries: ${c.retries ?? "inherited"})`)
+            .join(", ")}`,
+      ),
+      "an a11y assertion is reachable from a project that retries, so a real WCAG failure there is indistinguishable from a flake and gets retried away. Move the assertion into e2e/a11y/ rather than relaxing this.",
+    ).toEqual([]);
   });
 });

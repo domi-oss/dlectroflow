@@ -1,6 +1,8 @@
-import { test, expect, type Page } from "@playwright/test";
-import AxeBuilder from "@axe-core/playwright";
-import { waitForShell, MOBILE } from "../helpers";
+import { test, expect } from "@playwright/test";
+import {
+  openAccountSection,
+  deleteAccountTrigger as trigger,
+} from "../member-account-fixture";
 
 /**
  * #153 — the member's own "Delete my account" control, in a production build.
@@ -26,27 +28,6 @@ import { waitForShell, MOBILE } from "../helpers";
  * src/app/actions/account.test.ts, where it can be driven without a fixture to
  * destroy.
  */
-
-const ACCOUNT = "#settings-account";
-
-/** Every /settings section is a disclosure (#101) and they all rest closed. */
-async function openAccountSection(page: Page): Promise<void> {
-  await page.goto("/settings");
-  await waitForShell(page);
-  const toggle = page.locator(`[data-section-toggle="${ACCOUNT.slice(1)}"]`);
-  await expect(toggle).toBeVisible();
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click();
-  }
-  await expect(toggle).toHaveAttribute("aria-expanded", "true");
-}
-
-function trigger(page: Page) {
-  return page
-    .locator(ACCOUNT)
-    .locator("xpath=ancestor::section")
-    .getByRole("button", { name: /^delete my account$/i });
-}
 
 test("a member's Account section offers a real Delete my account dialog", async ({
   page,
@@ -109,33 +90,8 @@ test("the dialog needs a typed word, and Escape returns focus to the trigger", a
   await expect(page.getByRole("alertdialog")).toBeHidden();
 });
 
-test("the dialog is usable and axe-clean at 390px", async ({ page }) => {
-  // 390px is the device most of this app is used on, and a modal with its
-  // buttons past the fold is a modal you cannot answer.
-  await page.setViewportSize(MOBILE);
-  await openAccountSection(page);
-  await trigger(page).click();
-
-  const dialog = page.getByRole("alertdialog");
-  await expect(dialog).toBeVisible();
-
-  for (const name of [/^cancel$/i, /^delete my account$/i]) {
-    const button = dialog.getByRole("button", { name });
-    await expect(button).toBeVisible();
-    const box = await button.boundingBox();
-    // WCAG 2.5.5 target size, the same floor the disconnect confirmation is
-    // held to in member-google.spec.ts.
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-  }
-
-  // Scoped to the dialog: the rest of /settings is scanned by the a11y suite,
-  // and an open modal makes everything behind it inert anyway.
-  const results = await new AxeBuilder({ page })
-    .include('[role="alertdialog"]')
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-    .analyze();
-  expect(results.violations).toEqual([]);
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-});
+// The 390px axe scan and the WCAG 2.5.5 target-size floor moved to
+// e2e/a11y/axe-account-deletion.spec.ts (#247). They are AA assertions, and this
+// project inherits the suite-wide retry — which makes a real regression
+// indistinguishable from a flake. That spec carries a `test.use` override for the
+// member's session so it can run in the zero-retry `a11y` project.
