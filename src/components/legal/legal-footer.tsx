@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { SOURCE_REPO_URL } from "@/lib/legal";
 
@@ -25,10 +24,13 @@ import { SOURCE_REPO_URL } from "@/lib/legal";
  * Not a client component: no state, no effects, so it renders directly inside
  * the Server-Component layouts.
  */
+// No `external` flag any more (#200): it existed to choose between `next/link`
+// and a plain anchor, and all three now open in a new tab, where `next/link` has
+// nothing to offer. A field nothing reads is a field that goes stale.
 const LINKS = [
-  { href: "/privacy", label: "Privacy", external: false },
-  { href: "/terms", label: "Terms", external: false },
-  { href: SOURCE_REPO_URL, label: "Source", external: true },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+  { href: SOURCE_REPO_URL, label: "Source" },
 ] as const;
 
 // One shared link style. Mirrors src/components/nav/back-link.tsx so a footer
@@ -46,23 +48,45 @@ export function LegalFooter({ className }: { className?: string }) {
         aria-label="Legal and source"
         className="text-muted-foreground mx-auto flex w-full max-w-3xl flex-wrap items-center justify-center gap-x-4 px-4 py-3 text-xs"
       >
-        {LINKS.map((link) =>
-          link.external ? (
-            // Leaves the app, so a plain anchor rather than <Link> (nothing to
-            // prefetch or client-navigate). No `target="_blank"`: nothing in this
-            // app is lost by navigating away — every bit of state is persisted
-            // server-side — so forcing a new tab would only take the choice away
-            // from the reader and add an "opens in a new tab" announcement to a
-            // link that does not need one.
-            <a key={link.href} href={link.href} className={LINK_CLASS}>
-              {link.label}
-            </a>
-          ) : (
-            <Link key={link.href} href={link.href} className={LINK_CLASS}>
-              {link.label}
-            </Link>
-          ),
-        )}
+        {/* All three open in a new tab, and all three are plain anchors —
+            `next/link` has nothing to offer a navigation that leaves this tab.
+            The previous rule was the opposite of this, and its stated reason was
+            wrong: "every bit of state is persisted server-side" is not true of
+            the text sitting in the capture bar, or of a note whose debounced
+            save has not flushed yet. This footer renders under EVERY screen
+            including the inbox, so an in-tab jump to the terms could destroy a
+            thought someone was part-way through capturing — which in a
+            brain-dump tool is the one loss with no undo.
+
+            The cost the old comment identified is real and is paid below rather
+            than avoided: a new tab is a change of context the user did not
+            request (WCAG 3.2.5), so every link says so in its accessible name.
+            Sighted users see the tab appear; a screen-reader user gets nothing
+            unless it is in the name. */}
+        {LINKS.map((link) => (
+          <a
+            key={link.href}
+            href={link.href}
+            target="_blank"
+            // `noopener` is the load-bearing half — without it the opened
+            // document holds a `window.opener` handle back into this one. Implied
+            // by `target="_blank"` in current browsers; stated anyway, because it
+            // costs one attribute and its absence fails silently.
+            rel="noopener noreferrer"
+            // An explicit label, NOT the visible text plus a leading space in an
+            // `sr-only` span. That was tried first and computes as
+            // "Privacy(opens in a new tab)" — one word — because accessible-name
+            // computation collapses the whitespace that separated them. #44 hit
+            // the identical fault on its note control ("Add notefor <task>"), so
+            // this is the second time this exact shape has produced a mangled
+            // name. Whitespace between an element's text and a hidden span does
+            // not survive; an aria-label does.
+            aria-label={`${link.label} (opens in a new tab)`}
+            className={LINK_CLASS}
+          >
+            {link.label}
+          </a>
+        ))}
       </nav>
     </footer>
   );

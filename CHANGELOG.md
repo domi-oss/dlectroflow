@@ -358,6 +358,19 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **The footer's Privacy, Terms and Source links now open in a new tab (#200).**
+  That footer sits under every screen, the inbox included, and the old
+  behaviour took you away from the page you were on. The reasoning written
+  beside it — that nothing is lost because every bit of state is kept on the
+  server — was not true of the words already typed into the capture bar, or of
+  a note whose save had not yet gone through. In a tool built for catching a
+  thought before it goes, that is the one loss with no undo.
+
+  Opening a new tab is a change of context nobody asked for, so each link now
+  says so out loud: its name reads "Privacy (opens in a new tab)". Sighted
+  users watch the tab appear; anyone using a screen reader is told, which is
+  the part that would otherwise be missing.
+
 - **Inbox drag now runs on the browser's own drag and drop (#163).**
   `@dnd-kit/core` is replaced by `@atlaskit/pragmatic-drag-and-drop`. Dragging a
   row between buckets with a mouse or a touchscreen behaves as before, and the

@@ -77,12 +77,19 @@ describe("Privacy Policy page: structure", () => {
     }
   });
 
-  it("renders the shared legal footer", () => {
+  // The name is asserted in full rather than as "Terms" (#200). It carries the
+  // WCAG 3.2.5 announcement now that the link opens a new tab, and the whole
+  // point of putting it in the accessible name is that a screen-reader user
+  // hears it — so a spec matching only the visible half would pass with the
+  // announcement missing, which is the thing that must not regress.
+  it("renders the shared legal footer, announcing the new tab", () => {
     render(<PrivacyPage />);
-    expect(screen.getByRole("link", { name: "Terms" })).toHaveAttribute(
-      "href",
-      "/terms",
-    );
+    const terms = screen.getByRole("link", {
+      name: "Terms (opens in a new tab)",
+    });
+    expect(terms).toHaveAttribute("href", "/terms");
+    expect(terms).toHaveAttribute("target", "_blank");
+    expect(terms).toHaveAttribute("rel", "noopener noreferrer");
   });
 });
 
