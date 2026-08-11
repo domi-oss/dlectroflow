@@ -137,6 +137,22 @@ export const STRINGS = {
   // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
   // a kind of task". Only rendered when Settings.shoppingList is on.
   "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
+  // #252 — the header's quick-access icons. Their own keys rather than reusing
+  // `nav.focusTimer` / `nav.shopping`, for a reason that only applies to an
+  // icon-only control: those two are VISIBLE menu text, so the playful voice
+  // decorates them with an emoji, and these strings are an `aria-label` and a
+  // `title`. A screen reader spells an emoji out, so the flavour would be read
+  // aloud as part of the control's name ("stopwatch Focus Timer") — and unlike
+  // the menu rows there is no visible text for WCAG 2.5.3 to require it to
+  // match. Identical across both voices for the same reason `action.complete`
+  // is: the name of a destination is not where a skin belongs. The WORDS still
+  // match the menu rows exactly, so the icon and the row it duplicates cannot
+  // start describing two different places.
+  "nav.focusQuickAccess": { plain: "Focus Timer", playful: "Focus Timer" },
+  "nav.shoppingQuickAccess": {
+    plain: "Shopping list",
+    playful: "Shopping list",
+  },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
@@ -594,6 +610,21 @@ export const STRINGS = {
   // CONSEQUENCE in both directions, including what off means: someone reaching
   // for the player's pause button normally just wants quiet, so "this also
   // stops your session" has to be on screen before they turn it on.
+  // #252 — the header's focus shortcut. The hint carries the one thing the
+  // checkbox cannot: turning it off hides an ICON, it does not take the focus
+  // timer away. From the switch alone those two read identically, and only one of
+  // them is what happens — the same reasoning `shopping.settingsHint` gives for
+  // saying that hiding the list does not delete it.
+  "focusSettings.quickAccess": {
+    plain: "Shortcut in the header",
+    playful: "⏱️ Shortcut in the header",
+  },
+  "focusSettings.quickAccessHint": {
+    plain:
+      "Adds a one-tap timer button to the top bar. Turning it off hides the button — the focus timer is still in the menu.",
+    playful:
+      "Adds a one-tap timer button to the top bar. Turning it off hides the button — the focus timer is still in the menu.",
+  },
   "focusSettings.pauseTogether": {
     plain: "Pause music and timer together",
     playful: "⏸️ Pause music and timer together",
@@ -1362,6 +1393,20 @@ export const STRINGS = {
   // changes (it pays for their breakdowns, so no instance cap applies) is the one
   // thing they cannot discover, so the copy states it outright.
   "settings.accountHeading": { plain: "Account", playful: "Account" },
+  // #252 — the name the header calls you by. The hint carries the four things
+  // that are not discoverable from an input box: WHERE it shows (the header, on
+  // every page, so it is not private to this panel), the length bound (the field
+  // silently stops accepting characters at the cap, so the number has to be said
+  // out loud), that it is a display name and not a login (changing it cannot lock
+  // anybody out), and that emptying it is the way BACK — otherwise "clear it" and
+  // "break it" look identical from here.
+  "settings.accountNameLabel": { plain: "Your name", playful: "Your name" },
+  "settings.accountNameHint": {
+    plain:
+      "What the header calls you, on every page — up to 60 characters. It does not change how you sign in, and leaving it empty goes back to your provider username.",
+    playful:
+      "🏷️ What the header calls you, on every page — up to 60 characters. It does not change how you sign in, and leaving it empty goes back to your provider username.",
+  },
   "settings.accountKeyLabel": { plain: "API key", playful: "API key" },
   "settings.accountKeyHint": {
     plain:

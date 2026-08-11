@@ -27,10 +27,16 @@ vi.mock("@/app/actions/google-schedule", () => ({
 // Nothing here triggers the delete flow, so it passes either way today; the cost
 // lands on whoever adds that interaction and gets "not a function" instead of a
 // failing assertion. Raised in review on !237.
+// #252 — `saveDisplayName` is here because the panel REACHES it
+// (`DisplayNameField`), the same reason `deleteOwnAccount` is. A factory mock
+// replaces the module wholesale, so an omission is `undefined` at call time
+// rather than a failing assertion — this file is the second site !237 names for
+// exactly that.
 vi.mock("@/app/actions/account", () => ({
   saveOwnLlmKey: vi.fn().mockResolvedValue({ ok: true }),
   removeOwnLlmKey: vi.fn().mockResolvedValue({ ok: true }),
   deleteOwnAccount: vi.fn().mockResolvedValue({ ok: true }),
+  saveDisplayName: vi.fn().mockResolvedValue({ ok: true }),
 }));
 vi.mock("@/app/actions/people", () => ({
   invitePerson: vi.fn().mockResolvedValue({ ok: true }),
@@ -117,6 +123,7 @@ function AllSections({ voice = "plain" as Voice }) {
         alarmEnabled={false}
         sound="off"
         pauseTogether={false}
+        quickAccess
         voice={voice}
       />
       <IntegrationsPanel
@@ -125,6 +132,7 @@ function AllSections({ voice = "plain" as Voice }) {
       />
       <AccountPanel
         handle="owner"
+        displayName={null}
         provider="gitlab"
         keyPresent={false}
         activeModelName="claude-sonnet-4-6"

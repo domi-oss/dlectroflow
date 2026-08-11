@@ -27,6 +27,17 @@ type Prefs = {
   sound: string;
   /** #65 — opt-in music↔timer pause coupling (Settings.focusPauseTogether). */
   pauseTogether: boolean;
+  /**
+   * #252 — does the header carry a one-tap shortcut to the timer?
+   * (`Settings.focusQuickAccess`, which defaults ON.)
+   *
+   * A member of `Prefs` rather than a prop this section reads separately,
+   * because every write here sends the WHOLE group: `updateFocusTimerSettings`
+   * leaves the column alone when the key is absent, so a partial payload would
+   * make "change the timer style" the one path that cannot turn the shortcut
+   * off. Being in `Prefs` also enrols it in the #227 rollback ledger for free.
+   */
+  quickAccess: boolean;
 };
 
 /**
@@ -67,6 +78,7 @@ export function FocusTimerSection({
   alarmEnabled,
   sound,
   pauseTogether,
+  quickAccess,
   voice,
   defaultExpanded,
 }: Prefs & { voice: Voice; defaultExpanded?: boolean }) {
@@ -81,6 +93,7 @@ export function FocusTimerSection({
     alarmEnabled,
     sound,
     pauseTogether,
+    quickAccess,
   });
 
   const persist = (next: Prefs, previous: Prefs) => {
@@ -209,6 +222,21 @@ export function FocusTimerSection({
         hint={t("focusSettings.pauseTogetherHint", voice)}
         checked={prefs.pauseTogether}
         onChange={(v) => set("pauseTogether", v)}
+      />
+
+      {/* #252 — last in the group, because it is the only switch here that
+          changes something OUTSIDE the focus session: the other five are about
+          what happens once you have started. It is a plain boolean like
+          focusShuffle, so coercion in the action is the only validation needed,
+          and it defaults ON — focus is the payoff step of the core loop and the
+          button was asked for, so an account that never opens this page should
+          have it. The hint says the timer stays in the menu, because "hide the
+          shortcut" and "disable the timer" look identical from a checkbox. */}
+      <Toggle
+        label={t("focusSettings.quickAccess", voice)}
+        hint={t("focusSettings.quickAccessHint", voice)}
+        checked={prefs.quickAccess}
+        onChange={(v) => set("quickAccess", v)}
       />
     </CollapsibleSection>
   );

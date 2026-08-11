@@ -7,7 +7,7 @@ import { currentUser } from "@/lib/workspace";
 import { encryptToken } from "@/lib/crypto/token-cipher";
 import { freezeAccount } from "@/lib/account-lifecycle";
 import { OWNER_COOKIE } from "@/lib/auth/session";
-import { UserRole } from "@/lib/constants";
+import { MAX_DISPLAY_NAME_LENGTH, UserRole } from "@/lib/constants";
 import { configuredProvider } from "@/lib/llm/configured-provider";
 import { detectForeignProviderKey } from "@/lib/llm/key-shape";
 
@@ -42,6 +42,15 @@ import { detectForeignProviderKey } from "@/lib/llm/key-shape";
 export type AccountActionResult =
   | { ok: true }
   | { ok: false; error: "not_signed_in" | "invalid_key" | "not_found" };
+
+/**
+ * #252 — `saveDisplayName`'s outcomes. Its own union, for the reason
+ * `DeleteAccountResult` is one: `invalid_key` cannot happen here, and a panel
+ * that has to handle impossible cases stops describing what can actually happen.
+ */
+export type SaveDisplayNameResult =
+  | { ok: true }
+  | { ok: false; error: "not_signed_in" | "invalid_name" | "not_found" };
 
 /**
  * #177 step 1 — `saveOwnLlmKey`'s outcomes, which are `AccountActionResult`
@@ -106,6 +115,7 @@ const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
 const NOT_SIGNED_IN = { ok: false, error: "not_signed_in" } as const;
 const INVALID_KEY = { ok: false, error: "invalid_key" } as const;
+const INVALID_NAME = { ok: false, error: "invalid_name" } as const;
 
 export async function saveOwnLlmKey(apiKey: string): Promise<SaveKeyResult> {
   const me = await currentUser();
@@ -150,6 +160,73 @@ export async function saveOwnLlmKey(apiKey: string): Promise<SaveKeyResult> {
   }
 
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+/**
+ * #252 — set, or clear, the name this account is called by.
+ *
+ * Rules 1 and 3 of the module comment apply unchanged: no id parameter, so the
+ * row is the session's row by construction, and it writes exactly one column.
+ *
+ * ## What it refuses, and why each one
+ *
+ *  * **Control characters**, through the same `CONTROL_CHARS` the key path uses.
+ *    This string is rendered in the header of every page and interpolated into an
+ *    `aria-label` and a `title`: a newline is a line the bar never budgeted for,
+ *    and a NUL or an ESC is invisible in every surface an owner could inspect it
+ *    through — including the People panel, which renders the same label.
+ *  * **Anything past {@link MAX_DISPLAY_NAME_LENGTH}**, measured AFTER trimming
+ *    so trailing whitespace cannot fail an otherwise-fine name.
+ *
+ * And what it deliberately does NOT refuse: any script, any accent, any emoji. A
+ * character allowlist on a name field is a rule about whose names are acceptable,
+ * and `truncate` already bounds what the layout has to survive.
+ *
+ * ## Empty means null, not ""
+ *
+ * Clearing the field is a real operation — someone who set a name must be able to
+ * go back to their handle — and it stores `null`. `accountLabel()` also treats a
+ * blank as unset, but a column with two spellings of "unset" is a column whose
+ * readers eventually disagree, so the writer normalises rather than relying on
+ * every reader to.
+ *
+ * ## Two revalidations, and the second is the one that matters
+ *
+ * The label is rendered by the app SHELL, not by /settings, so revalidating that
+ * page alone would leave the header saying the old thing on every route until a
+ * full reload. `revalidatePath("/", "layout")` is what invalidates the layout
+ * that renders it.
+ */
+export async function saveDisplayName(
+  name: string,
+): Promise<SaveDisplayNameResult> {
+  const me = await currentUser();
+  if (!me) return NOT_SIGNED_IN;
+
+  const trimmed = name.trim();
+  if (trimmed.length > MAX_DISPLAY_NAME_LENGTH) return INVALID_NAME;
+  if (CONTROL_CHARS.test(trimmed)) return INVALID_NAME;
+
+  try {
+    await prisma.user.update({
+      where: { id: me.id },
+      // "" is normalised to null here, so there is exactly one stored spelling
+      // of "this account has not chosen a name".
+      data: { displayName: trimmed === "" ? null : trimmed },
+    });
+  } catch (err) {
+    // P2025 = the row is gone (account deleted mid-request). Reported, not
+    // thrown, for the reason saveOwnLlmKey gives: the caller holds a verified
+    // session, so this is a real state. Anything else rethrows.
+    if ((err as { code?: string }).code === "P2025") {
+      return { ok: false, error: "not_found" };
+    }
+    throw err;
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
