@@ -36,42 +36,6 @@ import {
  */
 const WROTE = { ok: true } as const;
 
-/**
- * The wall-clock budget for the two specs that render the list AT its cap
- * (#235).
- *
- * Every other spec in this file finishes in ≤113 ms. These two do not, and the
- * reason is not a timer or an unmocked transition — it is render volume.
- * `MAX_SHOPPING_ITEMS` is 500 (`src/lib/shopping.ts`), and both specs have to
- * render 500 or 499 rows in jsdom because **being at the cap is the thing they
- * are testing**. One of them then drives two add round-trips over that list.
- *
- * Measured, same tree:
- *
- *   spec                                    isolated   full suite   under 3x load
- *   survives a pre-check stale by one write   1196 ms      1413 ms      5145 ms
- *   refuses to add past the cap               ~1050 ms     1327 ms      4644 ms
- *
- * Vitest's 5000 ms default is a WALL-CLOCK budget, so both drift with
- * suite-wide CPU contention while the code under test is unchanged. The first
- * of them crossed it in CI on 2026-08-10 at **5293 ms**, red-failing `!318` —
- * a merge request that touched the page footer — with 310 of 311 files green.
- * A red pipeline caused by contention says nothing about the code and teaches
- * people to re-run rather than read the failure.
- *
- * Scoped to these two specs rather than raised repo-wide, and rather than
- * shrinking the fixture: a smaller list would need `MAX_SHOPPING_ITEMS` mocked,
- * and `shopping-list.tsx` also imports `shoppingItemTextError`,
- * `shoppingRemainingCount` and `splitShoppingList` from that same module — so
- * the mock would need an `importOriginal` spread and would silently render the
- * component against undefined exports if anyone forgot (#160). Paying 20 s of
- * budget on two specs is cheaper than that trap.
- *
- * 20 s is far above the loaded worst case and far below anything a genuinely
- * hung test would reach, and it only costs time on a failure.
- */
-const CAP_SPEC_TIMEOUT_MS = 20_000;
-
 const { addMock, renameMock, doneMock, savedMock, deleteMock, refreshMock } =
   vi.hoisted(() => ({
     addMock: vi.fn().mockResolvedValue({ ok: true }),
@@ -111,6 +75,39 @@ const renderList = (items: Parameters<typeof ShoppingList>[0]["items"] = []) =>
   render(<ShoppingList items={items} voice="plain" />);
 
 /**
+ * The capture form, found by tag rather than by an accessibility query (#235).
+ *
+ * A `screen.*` query walks the whole document and computes an accessible name
+ * for every candidate, so its cost scales with the size of the rendered tree,
+ * not with how specific the query looks. The two specs that render the list AT
+ * its cap put ~1500 buttons in that tree, and there the SAME query costs three
+ * orders of magnitude more than when it is scoped to this form. Measured on one
+ * 500-row tree:
+ *
+ *   query                                        unscoped   scoped to the form
+ *   getByLabelText(/add to the list/i)             501 ms                 0 ms
+ *   getByRole("button", { name: /^add$/i })        265 ms                 0 ms
+ *   the same getByRole again, cache warm           240 ms                 0 ms
+ *
+ * Rendering those 500 rows is only ~61 ms of it, so the tree is not what is
+ * slow — searching it is. Scoping is therefore preferred over a raised
+ * per-spec timeout, which would have kept the cost and only stopped counting
+ * it, and over shrinking the fixture: a smaller list would need
+ * `MAX_SHOPPING_ITEMS` mocked, and `shopping-list.tsx` also imports
+ * `shoppingItemTextError`, `shoppingRemainingCount` and `splitShoppingList`
+ * from that same module — so the mock would need an `importOriginal` spread and
+ * would silently render the component against undefined exports if anyone
+ * forgot (#160). Being at the cap is the thing those two specs test, so the
+ * fixture stays at the true cap.
+ *
+ * There is exactly one `<form>` in the component: the capture field and its Add
+ * button. Every other spec here renders a handful of rows, where an unscoped
+ * query costs ~1 ms, and they are left alone.
+ */
+const captureForm = (container: HTMLElement): HTMLElement =>
+  container.querySelector("form")!;
+
+/**
  * `fireEvent` rather than `userEvent`: some specs below drive fake timers, and
  * userEvent's own timer plumbing has to be wired to them separately. Same
  * precedent, and the same flush budget, as `inbox-view.test.tsx`.
@@ -127,8 +124,16 @@ const flushTicks = async () => {
 };
 const flush = () => act(async () => flushTicks());
 
-const addViaField = async (value: string) => {
-  const field = screen.getByLabelText(/add to the list/i);
+/**
+ * `scope` defaults to the whole document, which is what `screen` already
+ * searches — so every existing caller is unchanged. The at-the-cap spec passes
+ * {@link captureForm} instead, because there the field lookup is the single
+ * most expensive statement in the test.
+ */
+const addViaField = async (value: string, scope?: HTMLElement) => {
+  const field = (scope ? within(scope) : screen).getByLabelText(
+    /add to the list/i,
+  );
   fireEvent.change(field, { target: { value } });
   fireEvent.submit(field.closest("form")!);
   await flush();
@@ -193,23 +198,26 @@ describe("capturing", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it(
-    "refuses to add past the cap, and says why",
-    async () => {
-      const full = Array.from({ length: MAX_SHOPPING_ITEMS }, (_, i) =>
-        item({ id: `s${i}`, text: `thing ${i}`, order: i + 1 }),
-      );
-      renderList(full);
-      await userEvent.type(
-        screen.getByLabelText(/add to the list/i),
-        "one more",
-      );
-      await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
-      expect(addMock).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert")).toHaveTextContent(/full at 500 items/i);
-    },
-    CAP_SPEC_TIMEOUT_MS,
-  );
+  // Queries scoped to the capture form rather than the 500-row document — see
+  // `captureForm` (#235). The refusal this asserts on is the field's own, which
+  // renders inside that form; that a server refusal does NOT instead raise the
+  // failure notice is covered on an empty list by "does not dress a refusal up
+  // as a failure".
+  it("refuses to add past the cap, and says why", async () => {
+    const full = Array.from({ length: MAX_SHOPPING_ITEMS }, (_, i) =>
+      item({ id: `s${i}`, text: `thing ${i}`, order: i + 1 }),
+    );
+    const form = captureForm(renderList(full).container);
+    await userEvent.type(
+      within(form).getByLabelText(/add to the list/i),
+      "one more",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: /^add$/i }));
+    expect(addMock).not.toHaveBeenCalled();
+    expect(within(form).getByRole("alert")).toHaveTextContent(
+      /full at 500 items/i,
+    );
+  });
 });
 
 describe("the two sections", () => {
@@ -857,30 +865,26 @@ describe("when the server refuses a write", () => {
    * so the pre-check passes on a count that is now wrong and the server is the
    * only thing left that can refuse it.
    */
-  it(
-    "survives a pre-check that was stale by one write",
-    async () => {
-      const nearlyFull = Array.from(
-        { length: MAX_SHOPPING_ITEMS - 1 },
-        (_, i) => item({ id: `s${i}`, text: `thing ${i}`, order: i + 1 }),
-      );
-      addMock
-        .mockResolvedValueOnce(WROTE)
-        .mockResolvedValueOnce(refused("full"));
-      renderList(nearlyFull);
+  // Queries scoped to the capture form, as in the other at-the-cap spec (#235).
+  it("survives a pre-check that was stale by one write", async () => {
+    const nearlyFull = Array.from({ length: MAX_SHOPPING_ITEMS - 1 }, (_, i) =>
+      item({ id: `s${i}`, text: `thing ${i}`, order: i + 1 }),
+    );
+    addMock.mockResolvedValueOnce(WROTE).mockResolvedValueOnce(refused("full"));
+    const form = captureForm(renderList(nearlyFull).container);
 
-      await addViaField("oat milk");
-      const field = await addViaField("bread");
+    await addViaField("oat milk", form);
+    const field = await addViaField("bread", form);
 
-      expect(addMock).toHaveBeenNthCalledWith(1, "oat milk");
-      expect(addMock).toHaveBeenNthCalledWith(2, "bread");
-      // The second one is the one that did not land, and it is the one still on
-      // screen — in the field, ready to be re-sent once there is room.
-      expect(field).toHaveValue("bread");
-      expect(screen.getByRole("alert")).toHaveTextContent(/full at 500 items/i);
-    },
-    CAP_SPEC_TIMEOUT_MS,
-  );
+    expect(addMock).toHaveBeenNthCalledWith(1, "oat milk");
+    expect(addMock).toHaveBeenNthCalledWith(2, "bread");
+    // The second one is the one that did not land, and it is the one still on
+    // screen — in the field, ready to be re-sent once there is room.
+    expect(field).toHaveValue("bread");
+    expect(within(form).getByRole("alert")).toHaveTextContent(
+      /full at 500 items/i,
+    );
+  });
 
   // A refusal is not a breakage, so the notice's "couldn't save that just now"
   // and its Retry — which would post the same refused call again — must stay away.
