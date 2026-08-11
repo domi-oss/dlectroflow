@@ -432,25 +432,30 @@ describe("the real tree", () => {
     // mean something. A scan that silently matched nothing would satisfy the
     // gate while asserting nothing at all — the failure shape this project has
     // recorded seven times.
-    // EXACT, not a floor. It was `>= 15` against 25 real sites, which left the
+    // EXACT, not a floor. It was `>= 15` against 25 real sites at the time, which left the
     // guard free to lose 40% of its coverage and stay green — a floor is not a
     // control when the thing being guarded against is silently seeing less
     // (!319 review). Update this deliberately when a construction is added or
     // removed; that is the point.
     //
     // Which means an unrelated MR that adds a `new RegExp` anywhere in `src/` or
-    // `e2e/` fails HERE, in a file it never touched — `!306` (#225) adds one to
-    // `inbox-view.write-failure.test.tsx` and will. The message below is what
-    // turns that from a puzzle into a one-line fix, so keep it attached to the
-    // assertion.
+    // `e2e/` fails HERE, in a file it never touched. That is not theoretical: it
+    // went 25 → 28 on the rebase onto `973919f`, and **the delta was not the +1
+    // predicted**. `!306` (#225) was expected to add one and its merged form adds
+    // none; `!318` (#200) added three to `legal-footer.test.tsx` instead — the
+    // very three findings this MR cites as the footer's. Re-count, never assume a
+    // delta. The message below is what turns the failure from a puzzle into a
+    // one-line fix, so keep it attached to the assertion.
     expect(
       sites.length,
       "A `new RegExp` was added to or removed from src/ or e2e/. That is fine — " +
-        "bump this number to match. It is exact on purpose: a floor would let " +
-        "the scanner silently go blind and stay green. If the count went DOWN " +
-        "and you did not delete a construction, the tokeniser has stopped " +
-        "seeing one, which is the bug this guard exists to prevent.",
-    ).toBe(25);
+        "re-count and bump this number to match, and do not assume the delta " +
+        "(it was +3 on the last rebase, from a file nobody expected). It is " +
+        "exact on purpose: a floor would let the scanner silently go blind and " +
+        "stay green. If the count went DOWN and you did not delete a " +
+        "construction, the tokeniser has stopped seeing one, which is the bug " +
+        "this guard exists to prevent.",
+    ).toBe(28);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);
@@ -486,17 +491,26 @@ describe("the real tree", () => {
   /**
    * The guard must see every file the demoted rule sees. This is the assertion
    * that makes the demotion honest, and it is not hypothetical: the first
-   * version of the scanner silently skipped FOUR of these nine, because a regex
+   * version of the scanner silently skipped FOUR of these, because a regex
    * literal containing a quote (`/^(["'])(.*?)\\1/` in `version-hygiene.ts`)
    * desynchronised its quote tracking and everything below it read as string
    * content. It reported those files clean while Semgrep kept firing on them.
    *
    * The list is the real per-file breakdown of `eslint.detect-non-literal-regexp`
-   * on `main`'s pipeline for `57a272a`, measured 2026-08-10 — 15 findings across
-   * nine files.
+   * on `main`'s pipeline `2674` (`9d59f6a`), measured 2026-08-11 — **18 findings
+   * across ten files**.
+   *
+   * **This snapshot rots, and it rotted inside a day.** Measured first on
+   * `57a272a` it was 15 across nine; the rebase onto `973919f` added
+   * `legal-footer.test.tsx` (3, from `!318`) and dropped `dockerfile-hygiene.ts`
+   * from 2 to 1. Re-measure it when this test fails rather than deleting the
+   * entry that no longer matches — a per-file count going DOWN is Semgrep
+   * changing its mind, which is fine; the guard seeing fewer is not, and that is
+   * what the exact total above catches.
    */
   it("sees every file the demoted SAST rule reports on", () => {
     const REPORTED_BY_SEMGREP = [
+      "src/components/legal/legal-footer.test.tsx",
       "src/lib/__tests__/scoping.harness.test.ts",
       "src/lib/registry-prune.test.ts",
       "e2e/smoke/settings-disclosure.spec.ts",
@@ -515,8 +529,9 @@ describe("the real tree", () => {
 
     // Presence is too weak on its own: `migration-data-harness.ts` carries 8
     // sites and would satisfy "seen" with 1. These are Semgrep's own per-file
-    // counts for the nine files, and the guard must see at least as many.
+    // counts for the ten files, and the guard must see at least as many.
     const SEMGREP_PER_FILE: Record<string, number> = {
+      "src/components/legal/legal-footer.test.tsx": 3,
       "src/lib/__tests__/scoping.harness.test.ts": 3,
       "src/lib/registry-prune.test.ts": 3,
       "e2e/smoke/settings-disclosure.spec.ts": 2,
@@ -524,7 +539,7 @@ describe("the real tree", () => {
       "src/lib/dockerfile-hygiene.test.ts": 1,
       "src/lib/git-env.test.ts": 1,
       "src/lib/version-hygiene.ts": 1,
-      "src/lib/dockerfile-hygiene.ts": 2,
+      "src/lib/dockerfile-hygiene.ts": 1,
       "src/components/dashboard/badge-grid.test.tsx": 1,
     };
     for (const [file, atLeast] of Object.entries(SEMGREP_PER_FILE)) {

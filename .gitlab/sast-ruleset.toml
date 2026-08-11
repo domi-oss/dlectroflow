@@ -98,9 +98,14 @@
   # ── #234: dynamic-RegExp detection is demoted to Info ───────────────────────
   #
   # `eslint.detect-non-literal-regexp` is the largest single source of SAST
-  # findings in this repo: **15 of the 37 SAST findings on main** (pipeline for
-  # `57a272a`, measured 2026-08-10), across nine files. With its sibling
-  # `nodejs_scan.javascript-dos-rule-regex_dos` the regex family is 22 of 37.
+  # findings in this repo: **58 records across the project's vulnerability
+  # history, 57 of them already dismissed** (2026-08-11). On main's pipeline 2674
+  # (`9d59f6a`) it is 18 findings across ten files, and with its sibling
+  # `nodejs_scan.javascript-dos-rule-regex_dos` (8) the regex family is 26 of 42
+  # — 62% of everything the scanners say about this codebase.
+  #
+  # The cumulative figure leads because the per-pipeline one rots: it read 15 of
+  # 37 across nine files on `57a272a` a day earlier.
   #
   # Not one has been a true positive, structurally rather than by luck. CWE-185
   # needs an attacker to influence the pattern. Every construction here
@@ -146,9 +151,9 @@
   # rule was doing, and its keys carry no line number so it cannot
   # re-fingerprint.
   #
-  # That guard also asserts it can SEE all nine files this rule reports on, and
+  # That guard also asserts it can SEE all ten files this rule reports on, and
   # at least as many sites per file. Its first version silently missed four of
-  # the nine — a regex literal containing a quote desynchronised its tokeniser —
+  # them — a regex literal containing a quote desynchronised its tokeniser —
   # and reported them clean while Semgrep kept firing. A compensating control
   # that looks at nothing is worse than no control, because the demotion stays
   # either way.

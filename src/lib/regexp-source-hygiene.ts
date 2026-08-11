@@ -5,7 +5,7 @@
  *
  * `eslint.detect-non-literal-regexp` is the largest single source of SAST
  * findings here: **58 records across the project's vulnerability history, 57 of
- * them already dismissed** (2026-08-11), spread across nine files that the rule
+ * them already dismissed** (2026-08-11), spread across ten files that the rule
  * still reports on. Its sibling `nodejs_scan.javascript-dos-rule-regex_dos` sits
  * behind it, and between them the regex family is most of what the scanners have
  * ever said about this codebase.
@@ -47,7 +47,7 @@
  * ── Why a guard and not just a rewrite ───────────────────────────────────────
  *
  * #234 as filed proposed removing three `new RegExp` constructs from the
- * scoping harness. Those are 3 of the 25 constructions in the tree, and
+ * scoping harness. Those are 3 of the 28 constructions in the tree, and
  * `registry-prune.test.ts` carries the same three. Worse, the harness's patterns
  * are assembled from `Prisma.dmmf` **at runtime**, which is what makes a model
  * enrol in the scoping check automatically; replacing them with a fixed set
@@ -137,7 +137,7 @@ export function regexpSiteKey(file: string, argument: string): string {
  * string and never finds a close, so every `new RegExp` below it — including
  * the one on line 98 that the SAST rule reports — is treated as string content
  * and skipped. The guard reported that file clean while the rule kept firing on
- * it. Four of the nine files the rule names were being missed this way.
+ * it. Four of the files the rule names were being missed this way.
  *
  * So the states are tracked properly: line and block comments, single- and
  * double-quoted strings, template literals (whose `${…}` pushes back into
