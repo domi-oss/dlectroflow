@@ -61,7 +61,16 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     // The control the description hangs off. Asserting it is here first means a
     // future refactor that drops it fails loudly instead of quietly restoring
     // the "scan of nothing" this test exists to end.
-    await expect(row.getByRole("button", { name: "Move to" })).toBeVisible();
+    //
+    // #253 — that control is the ▾ trigger now: the compact 📥 Move-to went with
+    // the row's trailing icon cluster, and "Move to…" is one of the entries the
+    // trigger opens. Re-pointed rather than dropped, because the precondition it
+    // enforces (this scan really did have a row with actions on it) is the whole
+    // point of the assertion. Left closed on purpose — the scan below is of the
+    // RESTING row, which is what the baseline was taken against.
+    await expect(
+      row.getByRole("button", { name: "All options" }),
+    ).toBeVisible();
     await scanA11y(page, "/ (with a row)");
   });
 
@@ -131,7 +140,9 @@ test.describe("accessibility: core-flow routes (axe)", () => {
 
     const row = needsReviewRow(page, label);
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Add to-do" }).click();
+    // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+    await row.getByRole("button", { name: "All options" }).click();
+    await row.getByRole("button", { name: "Add as single task to do" }).click();
 
     const todoRow = page
       .locator('[data-bucket="singleTask"]')

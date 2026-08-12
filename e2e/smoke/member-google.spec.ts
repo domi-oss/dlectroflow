@@ -156,7 +156,15 @@ test("a member's inbox calendar control leads with Google, not the .ics fallback
   await expect(row).toBeVisible();
   // Before #118 this row showed "Add to calendar (.ics)" for a member, because
   // the page handed them `google = null`.
+  //
+  // #253 — the control is an entry in the row's ▾ list, not an inline 📅. Which
+  // control it is remains the whole point of the assertion: a member must get the
+  // Google path, not the guest .ics fallback.
+  await row.getByRole("button", { name: "All options" }).click();
   await expect(row.getByRole("button", { name: "Schedule" })).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: "Add to calendar (.ics)" }),
+  ).toBeVisible(); // the owner-only companion entry, not the guest's primary
 });
 
 test("the disconnect confirmation is reachable and reads correctly at 390px", async ({

@@ -322,7 +322,11 @@ for (const theme of THEMES) {
 
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
-      await row.getByRole("button", { name: "Add to-do" }).click();
+      // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+      await row.getByRole("button", { name: "All options" }).click();
+      await row
+        .getByRole("button", { name: "Add as single task to do" })
+        .click();
 
       const todoRow = page
         .locator('[data-bucket="singleTask"]')

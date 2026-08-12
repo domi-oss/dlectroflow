@@ -401,6 +401,24 @@ export function ScheduleControl({
           {label}
         </button>
         {needsDuration && open && (
+          // #253 — this expansion GROWS the ▾ popup, wider (the three presets
+          // measure ~190px against the popup's 160px `min-w-40`, and
+          // `popupSurface` is a flex column, so it sizes to its widest child) and
+          // ~88px taller. Nothing here constrains that, deliberately: Base UI
+          // re-runs its collision handling on a content resize
+          // (`useAnchorPositioning` passes floating-ui `autoUpdate`
+          // `elementResize: true`), so the popup shifts and flips to stay on
+          // screen by itself.
+          //
+          // Measured rather than assumed. A `max-w-40` cap plus `flex-wrap` on the
+          // presets was written first, on the theory that the growth escaped the
+          // viewport; removing both and re-running "the expanded duration presets
+          // fit the phone viewport" (e2e/smoke/row-menu-viewport-fit.spec.ts) still
+          // passed, which says the reflow handles it and the constraint was
+          // decoration wearing a bug fix's comment. What the exercise did find is
+          // that the re-position lands a FRAME LATE, from a ResizeObserver
+          // callback — so that spec polls its measurement instead of reading it
+          // once, and any future check of this popup has to as well.
           <span className="mt-1 flex flex-col gap-2 px-2.5 pb-1 text-xs">
             {durationFields}
           </span>

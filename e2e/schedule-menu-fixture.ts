@@ -120,14 +120,26 @@ export function multiStepRow(page: Page) {
  * Open the seeded row's Schedule dialog and wait for it to be readable.
  *
  * `exact`: the marker is the task title, so "Drag <title>" / "Edit <title>" also
- * contain it — only the 📅 control is named exactly "Schedule". The dialog is
+ * contain it — only the Schedule control is named exactly "Schedule". The dialog is
  * portaled into the row, so a row-scoped query still finds it (#92's idiom).
+ *
+ * #253 — two presses, not one. The 📅 icon went with the row's trailing icon
+ * cluster and Schedule is a ▾-list entry now; the entry opens the SAME #106 dialog,
+ * which is the property this fixture and `axe-schedule-menu.spec.ts` exist to
+ * check. (That equivalence is not incidental: the `isMenu` branch used to return
+ * before the dialog branch, so #253 had to reorder them or delete #106 from every
+ * inbox row by accident.)
  */
 export async function openScheduleDialog(page: Page) {
   const row = multiStepRow(page);
   await expect(row).toBeVisible();
+  await row.getByRole("button", { name: "All options" }).click();
   await row.getByRole("button", { name: "Schedule", exact: true }).click();
-  const dialog = row.getByRole("dialog");
+  // Named, not bare. #253 put the ▾ list in the row and Base UI renders it as a
+  // `dialog` too, so `getByRole("dialog")` inside a row now resolves to two
+  // elements and fails Playwright's strict mode. Naming it is also the stronger
+  // assertion: it pins WHICH dialog opened.
+  const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
   await expect(dialog).toBeVisible();
   return dialog;
 }

@@ -13,7 +13,9 @@ test("focus timer starts and pauses", async ({ page }) => {
   // Item appears in the Needs review bucket; triage it into a to-do.
   const row = needsReviewRow(page, label);
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Add to-do" }).click();
+  // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+  await row.getByRole("button", { name: "All options" }).click();
+  await row.getByRole("button", { name: "Add as single task to do" }).click();
 
   // It now lives in the single-task bucket with a Start Focus affordance.
   const todoRow = page
