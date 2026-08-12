@@ -2,7 +2,7 @@
  * #175 — `POST /api/braindump` against real Postgres.
  *
  * `route.test.ts` decides the route's own logic with `writeCapture` and the
- * workspace resolver mocked. Four of this feature's promises cannot be shown that
+ * workspace resolver mocked. Five of this feature's promises cannot be shown that
  * way, because they are facts about the DATABASE and about the SEAM between the
  * route, the resolver and the unique index — and the seam is where #220's bug
  * lived while every function on either side of it was correct:
@@ -11,6 +11,8 @@
  *  2. a workspace mismatch yields 409 **and no row**
  *  3. a frozen account yields 403 **and no row**
  *  4. a guest sandbox captures normally
+ *  5. a capture arriving on the hostname production serves **without a redirect**
+ *     yields a row, and a forged `Origin` on that same hostname does not (#175)
  *
  * So nothing below `next/headers` is mocked: real session signing, the real
  * resolver, the real Prisma client, a real `freezeAccount`, and the real index.
@@ -92,11 +94,14 @@ function jarWith(cookie: string, token: string) {
   };
 }
 
-const post = (body: Record<string, unknown>) =>
+const post = (
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+) =>
   POST(
     new Request("http://localhost/api/braindump", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
     }),
   );
@@ -162,6 +167,64 @@ describe("POST /api/braindump (real Postgres)", () => {
     expect(await rowsWithKey("key-control")).toEqual([
       { text: "buy milk", notes: null, workspaceId: WS_ID },
     ]);
+  });
+
+  /**
+   * ⚠️ The #175 multi-host regression, proved where it can only be proved: a real
+   * row, from a real session, for a capture arriving on the hostname production
+   * serves WITHOUT a redirect.
+   *
+   * `route.test.ts` pins the same case with `writeCapture` mocked, so it can show
+   * the route decided to write; only this file can show the row exists. It earns
+   * the round trip because the first implementation of the CSRF guard compared
+   * against `PUBLIC_ORIGIN` and answered `400` here — which the client maps to
+   * "retryable", so the capture was never lost and never saved, and nothing
+   * anywhere reported it.
+   *
+   * `PUBLIC_ORIGIN` is stubbed to the OTHER served hostname deliberately: unset is
+   * the one configuration in which the wrong comparand accidentally behaves, so
+   * without this stub the case cannot fail.
+   */
+  it("writes a capture that arrived on a served non-canonical host (#175)", async () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "https://work.dlectroflow.dev");
+
+    const res = await post(
+      { clientKey: "key-apex", text: "typed on the apex", workspaceId: WS_ID },
+      {
+        origin: "https://dlectroflow.dev",
+        "x-forwarded-host": "dlectroflow.dev",
+        "x-forwarded-proto": "https",
+      },
+    );
+
+    expect(res.status).toBe(201);
+    expect(await rowsWithKey("key-apex")).toEqual([
+      { text: "typed on the apex", notes: null, workspaceId: WS_ID },
+    ]);
+  });
+
+  /**
+   * And the control on the same seam, so the case above cannot be satisfied by a
+   * guard that stopped guarding. A forged `Origin` against the victim's host is
+   * refused, and refused BEFORE the session — so no row, in either workspace.
+   */
+  it("refuses a forged Origin and writes no row (#175, CWE-352)", async () => {
+    const res = await post(
+      {
+        clientKey: "key-forged",
+        text: "not the user's words",
+        workspaceId: WS_ID,
+      },
+      {
+        origin: "https://evil.example",
+        "x-forwarded-host": "dlectroflow.dev",
+        "x-forwarded-proto": "https",
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Request origin not allowed" });
+    expect(await rowsWithKey("key-forged")).toEqual([]);
   });
 
   it("splits the inline note into the real columns, end to end (#179)", async () => {

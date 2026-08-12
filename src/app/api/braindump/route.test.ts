@@ -20,6 +20,12 @@
  *     gets none of the CSRF protection Next gives a server action. The status
  *     matters as much as the refusal: 403 and 409 are already spoken for in the
  *     client's outcome map, so a CSRF rejection must not borrow either.
+ *  4. **…and a capture from the OTHER hostname production serves is allowed**
+ *     (#175). The pair is the point: this deployment serves more than one hostname
+ *     without a redirect, so "refuses a forgery" and "accepts a real capture" are
+ *     two properties that a single pinned origin cannot hold at once. Getting only
+ *     the first is an outage that reports itself as nothing, and it is what the
+ *     first version of this guard did.
  *
  * The error classes are the REAL ones, not stubs: the route narrows on
  * `instanceof`, and a fake would make both refusal branches pass for the wrong
@@ -27,7 +33,7 @@
  * reason).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { currentWorkspaceIdMock, writeCaptureMock, revalidatePathMock } =
   vi.hoisted(() => ({
@@ -46,19 +52,43 @@ vi.mock("@/lib/workspace", async (importOriginal) => {
 });
 vi.mock("@/lib/capture-write", () => ({ writeCapture: writeCaptureMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
-// Stubbed rather than left real, as `logout/route.test.ts` does: `requestOrigin`
-// reads PUBLIC_ORIGIN, which `config/vitest.config.ts` deliberately does not
-// forward, so a real one would answer differently depending on the shell the
-// suite was launched from.
-vi.mock("@/lib/origin");
+// `@/lib/origin` is deliberately NOT mocked, unlike `logout/route.test.ts`.
+//
+// That stub existed for one reason: `requestOrigin` reads PUBLIC_ORIGIN, which
+// `config/vitest.config.ts` deliberately does not forward, so a real one answers
+// differently depending on the shell the suite was launched from. `inboundOrigin`
+// reads no environment at all — it is a pure function of the request's own headers
+// — so the real implementation is both hermetic here AND the thing under test.
+// Stubbing it would have hidden this file's own regression: a mock returning "the
+// allowed origin" cannot express that production serves more than one.
 
 import { MissingWorkspaceError, RevokedAccountError } from "@/lib/workspace";
 import { CAPTURE_QUEUE_MAX_BYTES, newClientKey } from "@/lib/capture-queue";
-import { requestOrigin } from "@/lib/origin";
 import { POST } from "./route";
 
-/** The origin this app is served from, as `requestOrigin` reports it. */
-const APP_ORIGIN = "https://dlectroflow.dev";
+/**
+ * The canonical host — the one production's PUBLIC_ORIGIN names
+ * (`.gitlab-ci.yml`, `deploy_production`: `--set-string host="…"`).
+ */
+const CANONICAL_HOST = "work.dlectroflow.dev";
+
+/** The origin a browser on the canonical host sends. */
+const APP_ORIGIN = `https://${CANONICAL_HOST}`;
+
+/**
+ * A SECOND host the same production ingress serves — the apex — and the reason
+ * this file cannot describe "the" allowed origin (#175).
+ *
+ * `.gitlab-ci.yml` passes it as `legacyHosts[1]` and records that it is *"served
+ * WITHOUT a redirect … That is deliberate"* (Google's OAuth consent review fetches
+ * the homepage cold and wants a 200, not a hop). `/api/braindump` is not in
+ * `CANONICAL_ORIGIN_PREFIXES`, so nothing moves a capture onto the canonical host
+ * first. A real person's real capture arrives here.
+ */
+const SERVED_APEX_HOST = "dlectroflow.dev";
+
+/** The origin a browser on the apex sends. */
+const APEX_ORIGIN = `https://${SERVED_APEX_HOST}`;
 
 /** The workspace the COOKIE resolves to. Never anything a request supplied. */
 const SESSION_WS = "ws-session";
@@ -73,20 +103,56 @@ const validBody = (over: Body = {}): Body => ({
   ...over,
 });
 
-const post = (body: Body | string, headers: Record<string, string> = {}) =>
-  POST(
-    new Request("http://localhost/api/braindump", {
+/**
+ * A POST as it reaches the pod, arriving on the canonical host unless a case says
+ * otherwise.
+ *
+ * `x-forwarded-host` is set on every request because that is what a real one
+ * carries: both deploy targets write it from the inbound `Host` and neither passes
+ * a client-supplied value through — ingress-nginx via
+ * `proxy_set_header X-Forwarded-Host $best_http_host` with
+ * `set $best_http_host $http_host` (unconditional; the neighbouring
+ * `X-Forwarded-For` line IS guarded by `use-forwarded-headers`, this one is not),
+ * and Caddy via `header_up X-Forwarded-Host {host}` (`docker/Caddyfile`). A test
+ * that omitted it would be exercising a shape production never produces.
+ *
+ * The URL is built from the arrival host so the request is internally coherent —
+ * a `Host` of one hostname under a URL of another is not a request any proxy emits,
+ * and `inboundOrigin` falls back to the URL when no host header is present.
+ */
+const post = (body: Body | string, headers: Record<string, string> = {}) => {
+  const arrivedOn = headers["x-forwarded-host"] ?? CANONICAL_HOST;
+  return POST(
+    new Request(`https://${arrivedOn}/api/braindump`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
+      headers: {
+        "Content-Type": "application/json",
+        "x-forwarded-host": arrivedOn,
+        ...headers,
+      },
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
   );
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requestOrigin).mockReturnValue(APP_ORIGIN);
+  // ⚠️ **Set, and load-bearing — without it this file cannot see the bug it
+  // exists to stop.** `config/vitest.config.ts` forwards only DATABASE_URL, so
+  // PUBLIC_ORIGIN is UNSET under the suite, and unset is the one configuration in
+  // which `requestOrigin` does the right thing here: it falls through to its
+  // forwarded-header branch and returns the origin the request arrived on. The
+  // wrong comparand is therefore invisible to a test that does not pin this — the
+  // guard passes locally and refuses every capture on the apex in production,
+  // which is precisely what happened. Stubbed to production's real value so the
+  // suite runs against production's configuration rather than the dev accident.
+  vi.stubEnv("PUBLIC_ORIGIN", APP_ORIGIN);
   currentWorkspaceIdMock.mockResolvedValue(SESSION_WS);
   writeCaptureMock.mockResolvedValue("created");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/braindump — the happy paths", () => {
@@ -171,8 +237,9 @@ describe("POST /api/braindump — CSRF (CWE-352)", () => {
     // And it is not in the FlushOutcome vocabulary at all.
     const body = await res.json();
     expect(body).not.toHaveProperty("status");
-    // Says why, so a misconfigured PUBLIC_ORIGIN refusing every capture is
-    // diagnosable — but never names the origin it would have accepted.
+    // Says why, so an origin rule refusing captures is diagnosable as an origin
+    // rule rather than as a queue fault — but never names the origin it would have
+    // accepted.
     expect(body.error).toBe("Request origin not allowed");
     expect(JSON.stringify(body)).not.toContain(APP_ORIGIN);
   });
@@ -180,6 +247,110 @@ describe("POST /api/braindump — CSRF (CWE-352)", () => {
   it("allows a POST whose Origin is this app", async () => {
     const res = await post(validBody(), { origin: APP_ORIGIN });
     expect(res.status).toBe(201);
+  });
+
+  // ── The multi-host regression (#175) ──────────────────────────────────────
+  //
+  // ⚠️ This is the case that made the first implementation of this guard refuse
+  // EVERY capture on one of the two hostnames production serves, and it is the
+  // reason the comparand is the origin the request ARRIVED ON rather than
+  // PUBLIC_ORIGIN. It is not a hypothetical: the apex is served with no redirect
+  // deliberately, so the inbox is reachable there and a capture typed there sends
+  // an `Origin` PUBLIC_ORIGIN does not name.
+  //
+  // The blast radius is why it earns two assertions rather than a status check.
+  // The spec routes the FOREGROUND write through this same handler, so a refusal
+  // here is not a degraded offline path — it is the capture bar not working, and
+  // the queue mapping 400 to "retryable" means it presents as *"waiting to save"*
+  // forever while filling to its cap with words that can never leave.
+  it("allows a capture from a served-but-not-canonical host, and WRITES it", async () => {
+    const res = await post(validBody(), {
+      origin: APEX_ORIGIN,
+      "x-forwarded-host": SERVED_APEX_HOST,
+    });
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ status: "saved" });
+    // The row is the point. A 201 that wrote nothing would satisfy the status
+    // assertion and still lose the capture.
+    expect(writeCaptureMock).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: SESSION_WS,
+      text: "buy milk",
+      clientKey: "3f2b9c1e-0d4a-4c8e-9f11-a7b3c5d6e7f8",
+    });
+  });
+
+  // ⚠️ The control that stops the fix above becoming "accept everything". Run on
+  // BOTH served hosts, because "the request arrived on a non-canonical host" must
+  // not be a state in which the guard stops guarding — an attacker chooses which
+  // hostname to aim a forgery at, and would pick the weaker one.
+  it.each([
+    ["the canonical host", CANONICAL_HOST],
+    ["the apex", SERVED_APEX_HOST],
+  ])(
+    "still refuses an attacker's Origin against a victim's Host — arriving on %s",
+    async (_label, arrivedOn) => {
+      const res = await post(validBody(), {
+        origin: "https://evil.example.com",
+        "x-forwarded-host": arrivedOn,
+      });
+
+      expect(res.status).toBe(400);
+      expect(writeCaptureMock).not.toHaveBeenCalled();
+      expect(currentWorkspaceIdMock).not.toHaveBeenCalled();
+    },
+  );
+
+  // A deployment with no reverse proxy in front of it — `npm run dev`, or a
+  // self-host that terminates TLS in the app. `inboundHost` prefers
+  // `x-forwarded-host` precisely because production HAS a proxy, so the fallback
+  // arm needs its own case or a regression there is invisible behind the header
+  // every other test sets.
+  it("compares against a bare Host when nothing forwarded one", async () => {
+    const allowed = await POST(
+      new Request("http://localhost:3000/api/braindump", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          host: "localhost:3000",
+          origin: "http://localhost:3000",
+        },
+        body: JSON.stringify(validBody()),
+      }),
+    );
+    expect(allowed.status).toBe(201);
+
+    const refused = await POST(
+      new Request("http://localhost:3000/api/braindump", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          host: "localhost:3000",
+          origin: "https://evil.example.com",
+        },
+        body: JSON.stringify(validBody()),
+      }),
+    );
+    expect(refused.status).toBe(400);
+  });
+
+  // ⚠️ The property, stated directly rather than only implied by the case above,
+  // because it is the one a reverting change would trip over first. PUBLIC_ORIGIN
+  // is the right source for an OAuth redirect URI and the wrong one for this
+  // comparison, and the two live in the same module — so pin that this guard does
+  // not consult it. Set to a hostname this deployment does not serve: if the
+  // comparand ever goes back to being PUBLIC_ORIGIN, both arms below break loudly
+  // instead of only breaking in production.
+  it("does not consult PUBLIC_ORIGIN — the arrival origin decides", async () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "https://somewhere-else.example");
+
+    const allowed = await post(validBody(), { origin: APP_ORIGIN });
+    expect(allowed.status).toBe(201);
+
+    const refused = await post(validBody(), {
+      origin: "https://somewhere-else.example",
+    });
+    expect(refused.status).toBe(400);
   });
 
   // Deliberate, and the same call `logout/route.ts` made: a missing Origin is a
@@ -214,13 +385,43 @@ describe("POST /api/braindump — CSRF (CWE-352)", () => {
 
   // A near-miss is the case a substring or `startsWith` check waves through, and
   // it is the realistic shape of an attack: register a lookalike host.
+  //
+  // ⚠️ Each one is now relative to the ARRIVAL host, and the list gained a member
+  // it could not have had before: an `Origin` naming the OTHER hostname this same
+  // deployment serves. Widening the comparand from one pinned origin to "the one
+  // the request arrived on" is exactly the change that could have been
+  // over-widened into "any host we serve", and that would be wrong — a page on the
+  // apex is a different origin from the canonical host by every rule a browser
+  // applies, and the app's own capture fetch is a relative path, so it is never
+  // the request being made.
+  //
+  // `http://…` is the scheme downgrade, and it is load-bearing rather than
+  // decorative: it is the case that fails the moment somebody "simplifies" this to
+  // compare hostnames and drop the scheme.
+  //
+  // `"null"` is the literal string a browser sends for an opaque origin — a
+  // sandboxed iframe, or a POST that arrived via a cross-origin redirect. It must
+  // refuse rather than being treated as a missing header, which is why the
+  // allow-arm below tests for the header's ABSENCE and not for falsiness.
   it.each([
-    "https://dlectroflow.dev.evil.example",
-    "http://dlectroflow.dev",
-    "https://evil.dlectroflow.dev",
+    `https://${CANONICAL_HOST}.evil.example`,
+    `https://evil.${CANONICAL_HOST}`,
+    `http://${CANONICAL_HOST}`,
+    APEX_ORIGIN,
     "null",
   ])("refuses the near-miss origin %s", async (origin) => {
     const res = await post(validBody(), { origin });
+    expect(res.status).toBe(400);
+    expect(writeCaptureMock).not.toHaveBeenCalled();
+  });
+
+  // And the same pairing the other way round, so neither host is the one that
+  // happens to be hard-coded as "allowed" by accident.
+  it("refuses the canonical Origin against an apex Host", async () => {
+    const res = await post(validBody(), {
+      origin: APP_ORIGIN,
+      "x-forwarded-host": SERVED_APEX_HOST,
+    });
     expect(res.status).toBe(400);
     expect(writeCaptureMock).not.toHaveBeenCalled();
   });

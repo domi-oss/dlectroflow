@@ -5,7 +5,7 @@ import {
   RevokedAccountError,
 } from "@/lib/workspace";
 import { writeCapture } from "@/lib/capture-write";
-import { requestOrigin } from "@/lib/origin";
+import { hasDisallowedOrigin } from "@/lib/origin";
 import {
   byteLength,
   CAPTURE_QUEUE_MAX_BYTES,
@@ -33,9 +33,41 @@ import {
  * Next protects server actions against CSRF for us. A plain route handler gets
  * none of that — and the only reason this route exists is that a service worker
  * cannot replay a server action, so the protection was lost in that trade and
- * nothing replaced it. The guard is `src/app/api/auth/logout/route.ts`'s, copied
+ * nothing replaced it. The rule is `src/app/api/auth/logout/route.ts`'s, reused
  * rather than reinvented: reject an `Origin` that is PRESENT and does not match,
  * allow a MISSING one for non-browser clients.
+ *
+ * ⚠️ **What it matches against is `hasDisallowedOrigin` (src/lib/origin.ts), and
+ * it is the origin the request ARRIVED on — never `PUBLIC_ORIGIN`.** This is the
+ * one part of the guard that a single-hostname mental model gets wrong, and it is
+ * worth the paragraph because the failure is silent, total, and reported to nobody:
+ *
+ *  * **Production serves this app on more than one hostname, deliberately, with no
+ *    redirect between them.** `.gitlab-ci.yml`'s `deploy_production` passes the
+ *    apex as `legacyHosts[1]` and says so — *"served WITHOUT a redirect … That is
+ *    deliberate"* (Google's OAuth consent review fetches the homepage cold and
+ *    wants a `200`, not a hop) — and `src/lib/auth/gate.ts` states that `/` must
+ *    keep answering `200` on every hostname the ingress serves. `PUBLIC_ORIGIN`
+ *    names exactly one of them, and `/api/braindump` is **not** in
+ *    `CANONICAL_ORIGIN_PREFIXES`, so nothing moves a capture onto that one first.
+ *  * So the first version of this guard, which compared against
+ *    `requestOrigin(req)`, refused **every capture** on the apex — the FOREGROUND
+ *    write too, since this route is the single write path. The `400` is classified
+ *    retryable, so the queue kept the words and kept retrying: the strip reads
+ *    *"waiting to save"* forever while the queue fills to its cap, and no error
+ *    surfaces anywhere.
+ *  * **It was a regression, not a pre-existing hole, and the mechanism is the part
+ *    to remember.** Capture worked on the apex because the write was a **server
+ *    action**, and Next's action guard compares `Origin` against the request's own
+ *    `Host`/`x-forwarded-host`. Moving to a route handler changed the comparand
+ *    from *"the host the browser used"* to *"the one canonical host"*, which are
+ *    the same thing on a single-hostname deployment and are not here. ⚠️ **Any
+ *    future route handler replacing a server action inherits this trap** — check
+ *    the comparand before assuming the protection carried over.
+ *  * It was also invisible to this route's own tests until they pinned
+ *    `PUBLIC_ORIGIN`, because unset is the one configuration where `requestOrigin`
+ *    happens to be right (it falls back to the forwarded headers). See the
+ *    `vi.stubEnv` in `route.test.ts`.
  *
  * ⚠️ **Read this before "simplifying" either control, because each one looks
  * redundant while the other is standing.** They are independent and both load-
@@ -244,17 +276,23 @@ export async function POST(req: Request): Promise<Response> {
   // comment for what a forged request could still cost if it got as far as
   // resolving a session. The house pattern is `logout/route.ts`'s; 400 rather than
   // 403 is deliberate and is explained there too.
-  const allowedOrigin = requestOrigin(req);
-  const declaredOrigin = req.headers.get("origin");
-  if (declaredOrigin && declaredOrigin !== allowedOrigin) {
+  // ⚠️ `hasDisallowedOrigin`, NOT a comparison against `requestOrigin(req)` —
+  // production serves this app on more than one hostname with no redirect, so
+  // pinning PUBLIC_ORIGIN here refused every capture typed on the apex. The full
+  // reasoning, the three reasons the arrival origin cannot be spoofed past the
+  // ingress, and the server-action-to-route-handler trap are all on that function
+  // (#175). Do not inline the comparison back into this file.
+  if (hasDisallowedOrigin(req)) {
     // Names the REASON but never the origin we accept. The caller already knows
     // the Origin it sent, so saying it was rejected leaks nothing; the expected
     // value is what a refusal must not hand over, the same way the 409 below does
     // not name the resolved workspace.
     //
     // Distinct from the body-shaped 400s on purpose, and not for the caller's
-    // benefit: a misconfigured PUBLIC_ORIGIN would refuse EVERY capture here, and
-    // an operator reading "Invalid capture" would go looking at the queue.
+    // benefit: a wrong origin rule refuses EVERY capture here while the client maps
+    // 400 to "retryable", so it presents as "waiting to save" forever and to an
+    // operator as nothing at all — and one reading "Invalid capture" would go
+    // looking at the queue.
     return json(400, { error: "Request origin not allowed" });
   }
 
