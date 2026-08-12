@@ -344,7 +344,8 @@ words kept in the field.
 appends to the fresh read, so the merge neither sorts nor consults `capturedAt`, and no comparator is
 needed to describe the result.
 
-⚠️ **The residual is real and belongs to MR 2, named here so it is not read as an oversight.** `getItem`
+⚠️ **The residual is real and belongs to MR 2 (defined in _Sequencing_), named here so it is not read as an
+oversight.** `getItem`
 carries **no ordering guarantee** against another tab's `setItem`, so a read can be stale the instant it
 returns and **no amount of re-reading detects that**. The `storage` event does not fix it by letting a tab
 learn before writing; it fixes it by letting the **losing** tab notice, after the fact, that the queue no
@@ -384,8 +385,8 @@ can be arbitrarily large, and without a byte bound a single capture could exhaus
 `QuotaExceededError` on the write this whole design depends on being reliable. Whether capture text
 should have a limit *at all* is a separate question and not this issue's to answer.
 
-**64 KB is a bound on the total, and it therefore fails in two different ways — which is three refusal
-states, not two.** An earlier draft of this section said "64 KB total … and a single capture over that
+**64 KB is a bound on the total, and it therefore fails in two different ways — so the item cap and the
+byte cap are three refusal states between them, not two.** An earlier draft of this section said "64 KB total … and a single capture over that
 bound is refused with its own message", which reads as though there were one byte check. There are two,
 they have different remedies, and the wording table below carries a separate sentence for each:
 
@@ -394,14 +395,16 @@ they have different remedies, and the wording table below carries a separate sen
 | **One capture exceeds 64 KB on its own** | Nothing that is already queued is relevant; this capture cannot ever fit | Shorten *this* one, or copy it elsewhere |
 | **The queue total is at 64 KB and a further capture, however short, does not fit** | This capture is fine; the queue is full | Wait for some to save — **shortening will not help** |
 
-**So the three refusals do not share a message, and this is the one place that argument is made.**
-Collapsing any two of them repeats round 1's defect in a new place: telling someone whose two-word
-capture was refused to *"shorten it"* is advice that cannot work, and telling someone who pasted one
-essay that *"20 captures are already waiting"* quotes a number that may well be zero. **A refusal
-message whose remedy the user cannot act on is the same defect as a refusal message with the wrong
-number in it.** The item cap can quote a figure the user recognises (20); neither byte condition can,
-because a byte total is not something anyone can count in their own queue — so the byte copy says what
-to do without quoting a figure. Three separate sentences, in the wording table below.
+**So no two of these refusals share a message, and this is the one place that argument is made.**
+Collapsing any two repeats round 1's defect in a new place: telling someone whose two-word capture was
+refused to *"shorten it"* is advice that cannot work, and telling someone who pasted one essay that
+*"20 captures are already waiting"* quotes a number that may well be zero. **A refusal message whose
+remedy the user cannot act on is the same defect as a refusal message with the wrong number in it.** The
+item cap can quote a figure the user recognises (20); neither byte condition can, because a byte total is
+not something anyone can count in their own queue — so the byte copy says what to do without quoting a
+figure. **The rule, not the count**: every refusal state in the cap family gets its own sentence in the
+wording table below, which is why a fourth arriving later (`QuotaExceededError`, under *"When storage
+itself fails"*) needed no argument of its own.
 
 ⚠️ **That argument appeared four times in seventy lines and is now made only here** — review of this
 spec counted them, and two were near-verbatim seventeen lines apart. Worse, one copy sat *under* the
@@ -638,7 +641,7 @@ body: { clientKey, text, workspaceId }
 | Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` — unless already `account-revoked`, which wins |
 | Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
 | **No resolvable workspace at all** — `MissingWorkspaceError`, and not its `RevokedAccountError` subclass | **`401`** | keep, treat as **retryable**, clear `blockedBy` — **but not `account-revoked`** |
-| **Origin not allowed** (the rule above), or a body this route cannot parse or accept | **`400`** | keep, **retryable** |
+| **Origin not allowed** (the rule under *CSRF*, **below**), or a body this route cannot parse or accept | **`400`** | keep, **retryable** |
 | **Body over the size backstop** | **`413`** | keep, **retryable** |
 | Anything else — including any status not listed here | `5xx`, network failure, **anything unrecognised** | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
 
@@ -1243,9 +1246,13 @@ flush; the server is. If an owner un-freezes the account and the user signs in a
 thing terminality costs is a wrong sentence, which is exactly what it buys back. Discard remains the
 user's release valve either way.
 
-**a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
-`role="status"` announces the waiting count (a background count is not an interruption); an assertive
-`role="alert"` announces **every refusal state**. Each element's `role` is **fixed for the lifetime of the
+#### a11y — two live regions, and what each of them is allowed to say
+
+The strip carries **two live regions, not one whose `role` changes.** A polite
+`role="status"` announces the waiting count and the in-flight wait (neither is an interruption); an
+assertive `role="alert"` announces **every refusal state that occurs while the page is open** — the
+qualifier is load-bearing and is the subject of *"A refusal restored from storage"* below, because a
+refusal read back out of `localStorage` must not be announced at all. Each element's `role` is **fixed for the lifetime of the
 strip**, and each is **mounted empty from the strip's first paint** and then filled. (Stated as "every
 refusal" rather than by counting them, because the count has now changed twice under review and a
 sentence that enumerates states goes stale the moment one is added. ⚠️ **This parenthesis was followed by
@@ -1512,8 +1519,14 @@ TDD, failing test first, in this order:
    Assert both halves, because an implementation that gates the whole strip passes a test that only
    checks the empty case is invisible.
    - **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches no
-     network, and — the assertion that matters — **a queue of 20 permanently-blocked entries can be
-     emptied back to a usable state**, which is the dead-end this control exists to prevent.
+     network, deletes from the **mirror before `localStorage`**, and — the assertion that matters —
+     **a queue of 20 permanently-blocked entries can be emptied back to a usable state**, which is the
+     dead-end this control exists to prevent.
+   - **Discard against a flush in flight, both directions.** An entry with a `POST` outstanding **refuses**
+     the discard and says so; a confirm resolving against an entry that has already left the queue **says
+     it saved** rather than silently doing nothing. Both are assertions about what the user is told, not
+     just about the store, because in both cases the store ends up in the state a naive implementation
+     would also reach.
    - **Two sibling live regions with fixed roles**, both present and empty before the first message: the
      polite one carries the count, the assertive one carries the refusals, neither is nested in the other
      (`write-notice-hygiene` rule D also blocks that mechanically), and **no element's `role` changes
