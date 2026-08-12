@@ -376,20 +376,30 @@ body: { clientKey, text, workspaceId }
 | `clientKey` already present for this workspace | `200` | remove — already saved |
 | Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` — unless already `account-revoked`, which wins |
 | Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
-| **No resolvable session at all** — neither owner nor guest cookie | **`401`** | keep, treat as **retryable**, clear `blockedBy` — **but not `account-revoked`** |
+| **No resolvable workspace at all** — `MissingWorkspaceError`, and not its `RevokedAccountError` subclass | **`401`** | keep, treat as **retryable**, clear `blockedBy` — **but not `account-revoked`** |
 | Anything else | `5xx` / network failure | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
 
-⚠️ **`401` was missing from this table and is added here.** Review of this spec found it referenced as
-retryable in the Background Sync section below while never being defined as an outcome at all — so the
-document named a status its own contract did not have. It is a real response: the route answers `401` when
-neither cookie resolves, which is reachable straight after a `403` because #220 deletes the owner cookie
-in that same response, and reachable again whenever a guest cookie has also lapsed.
+⚠️ **`401` was missing from this table and is added here** — it was referenced as retryable in the
+Background Sync section while never being defined as an outcome, so the document named a status its own
+contract did not have.
 
-**Retryable is the right classification, and it is not obvious.** A `401` says nothing about the capture —
-only that *this* request arrived without a usable session. The very next request mints a guest sandbox, so
-the condition clears by itself. Treating it as terminal would strand a perfectly saveable capture. But it
-must not clear an `account-revoked` mark, for the same reason `5xx` must not: a missing cookie is no
-evidence an account was un-frozen, and after a `403` a missing cookie is the *expected* next state.
+⚠️ **And the first version of this paragraph then got its trigger wrong, in a way this document's own
+worked example contradicted two sections later.** It said `401` fires immediately after a `403`, because
+#220 deletes the owner cookie in that response. **It does not, and the walkthrough below is the correct
+one: that request returns `409`.** `src/proxy.ts` mints a **guest sandbox** for any request arriving
+without a session, so the next request resolves a workspace perfectly well — it is just the *wrong* one, so
+the declared-`workspaceId` comparison refuses it with `409`. `currentWorkspaceId()` never throws on that
+path, and `401` is what the route returns only when it *does* throw `MissingWorkspaceError`.
+
+**So `401` is rare on the ordinary browser path, and the honest reason to keep it in the table is not that
+users hit it.** Guest minting means a browser almost always has *something* to resolve; `401` belongs to a
+caller that does not pass through that minting. It is listed because the queue must classify every status
+the route can return, and an unlisted one would fall through to whatever the client's default branch is.
+
+**Retryable is the right classification, and that part was never in doubt.** A `401` says nothing about the
+capture — only that *this* request arrived without a usable session — and the condition clears by itself.
+Terminal would strand a perfectly saveable capture. It must still not clear an `account-revoked` mark, for
+the same reason `5xx` must not: a missing session is no evidence an account was un-frozen.
 
 **The mark is a precedence, not an assignment: `account-revoked` > `session-expired` > unmarked, and
 only a successful outcome clears it** (by removing the entry). Why that is needed, and why the obvious
@@ -520,7 +530,7 @@ sufficient description of the handler — it needs a rule, and the rule is not "
 |---|---|---|
 | Mirror empty | **resolve** | Done. Nothing to come back for |
 | Anything left for a **retryable** reason (`5xx`, network, `401`) | **reject** | The only way to get another attempt while no tab is open |
-| Everything left is **permanently blocked** (`account-revoked`, or a `409` already shown not to be fixable) | **resolve** | ⚠️ **Rejecting here is the bug.** Those entries can never flush, so the platform would retry on its own schedule forever, burn battery, and eventually give up anyway — while the *user-facing* remedy is Discard, which only a foreground tab can offer |
+| Everything left is marked **`account-revoked`** | **resolve** | ⚠️ **Rejecting here is the bug.** Those entries can never flush, so the platform would retry on its own schedule forever, burn battery, and eventually give up anyway — while the *user-facing* remedy is Discard, which only a foreground tab can offer |
 | Mixed retryable and permanently blocked | **reject** | The retryable ones justify another attempt; the blocked ones are simply skipped on each pass |
 
 **So the handler's exit condition is "no retryable work remains", not "the mirror is empty".** That
@@ -537,14 +547,26 @@ a cookie and a workspace the worker has no access to, so:
 - **The `blockedUnder` comparison is the foreground's alone.** It runs at render time out of state the app
   is already holding — that is the property that made it better than a `signInTried` flag in the first
   place, and it does not survive being moved into a worker.
-- **The worker's input is the persisted `blockedBy` on the mirrored entry**, written by a foreground tab.
-  It is a plain, already-decided verdict: `account-revoked` means never; a `session-expired` entry that the
-  foreground has already judged unfixable is **marked as such by the foreground before it is mirrored**,
-  and the worker reads that mark rather than re-deriving it.
-- **So a `409` the worker sees for the first time is simply retryable**, and it stays that way until a
-  foreground tab makes the comparison and updates the mark. That is the correct outcome: the worker
-  retrying a capture that a later sign-in *will* save is exactly the behaviour wanted, and the only cost of
-  the worker not knowing is an extra background attempt nobody sees.
+- **The worker's input is the persisted `blockedBy` on the mirrored entry**, written by a foreground tab —
+  and ⚠️ **`account-revoked` is the ONLY value it treats as terminal.**
+
+  An earlier version of this section said a `session-expired` entry the foreground had judged unfixable
+  would be "marked as such before it is mirrored". **There is no such mark.** `QueuedCapture` carries
+  `blockedBy` and `blockedUnder`, and neither is a verdict: `blockedBy` says *which* refusal, and
+  `blockedUnder` is the raw input to a comparison, not its result. So that table row was unreachable as
+  written, which review of this spec caught — and the fix is **not** to add a field.
+- **The unfixable-`409` judgement is a COPY decision, not a flush decision, and is deliberately not
+  mirrored.** It changes which sentence the strip shows; it never changes whether a flush is worth trying.
+  Keeping it out of the worker's input costs one thing, named here so it is a trade rather than an
+  oversight: **a capture that will `409` forever keeps drawing background retries until the user discards
+  it.** That is acceptable — those retries are cheap, invisible, and bounded by the platform's own backoff,
+  whereas a persisted "give up" verdict is a new field that can go stale, and a stale one would abandon a
+  capture that a later sign-in *would* have saved. Between a wasted request and an abandoned capture, this
+  design has already chosen, everywhere else, to waste the request.
+- **So every `409` is retryable as far as the worker is concerned** — the first one and the hundredth
+  alike, since nothing it can read distinguishes them. That is the correct outcome rather than a
+  compromise: the worker retrying a capture that a later sign-in *will* save is exactly the behaviour
+  wanted, and the only thing the worker's ignorance costs is background attempts nobody sees.
 
 **Which means the mirrored entry has to carry `blockedBy`, not just the capture.** Stated here because the
 mirror is described above as "a cache of the real thing" and a reader could reasonably mirror only the
