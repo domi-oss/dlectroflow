@@ -213,6 +213,21 @@ async function editTitle(rowText: string, next: string) {
 
 const COMPLETE = /complete/i;
 const RETRY = /try again/i;
+const DELETE = /^delete$/i;
+/**
+ * #253 relabelled two of the controls these specs press, and both are now only
+ * reachable from a row's ▾ list. Exact strings rather than regexes, matching the
+ * ▾-entry convention in `inbox-view.test.tsx`: `t()` returns the whole accessible
+ * name, so a substring pattern would also match a longer future sibling.
+ *
+ * `Move to…` (`action.moveTo`) was always this menu trigger's text — what changed
+ * is that the row's compact 📥, whose `aria-label` was the bare "Move to", went
+ * with the end cluster, so the ellipsis form is the only one left.
+ * `Add as single task to do` (`action.addTodoFull`) likewise replaces the inline
+ * short "Add to-do" (`action.addTodo`) the row used to carry.
+ */
+const MOVE_TO = "Move to…";
+const ADD_TODO = "Add as single task to do";
 
 /**
  * #255 — two-row fixtures whose ORDER is decided here rather than by the clock.
@@ -233,24 +248,118 @@ const RENDERS_SECOND = new Date(Date.now() - 2_000);
 const RENDERS_FIRST = new Date(Date.now() - 1_000);
 
 /**
- * A row's ✓ Complete control, reached through the row that holds the item rather
- * than by where that row landed in the list (#255).
+ * The `<li>` that holds `itemText` — the one lookup #255 and #253 must agree on.
  *
- * Every ✓ Complete in the board shares one accessible name, so the row is the only
- * thing that tells two of them apart — and the ✎ pencil is the anchor because its
- * `aria-label={`Edit ${item.text}`}` is the one per-row unique name in the markup,
- * which is why {@link editTitle} above already leans on it. Re-queried on every
- * call rather than held: the notice mounting and unmounting above the board
- * re-renders the rows, and a stale node would fail an assertion for a reason that
- * is not the one under test.
+ * ⚠️ This exists so the two fixes below cannot drift apart, and both of them are
+ * load-bearing:
+ *   • #255 — a row must be named by its ITEM, never by where it landed in the
+ *     list. Needs-review sorts newest-first on a millisecond `createdAt`, so a
+ *     positional `getAllByRole(...)[n]` read the other row about one run in five.
+ *   • #253 — a row's Delete / Move to… / Add-as-single-task entries are behind
+ *     the ▾ now, so reaching one means opening THAT row's ▾ first
+ *     ({@link openRowMenu}).
+ * A site that needs both — the right row, and its menu open — composes them
+ * through this function. Reintroducing a positional lookup for either reason
+ * breaks the other, which is why the row lookup is one function and not two.
+ *
+ * The ✎ pencil is the anchor because its `aria-label={`Edit ${item.text}`}` is the
+ * one per-row unique accessible name in the markup, which is why {@link editTitle}
+ * above already leans on it. It sits on the row's TITLE line, not in the ▾ list
+ * (`pencil` vs `editMenuItem` in inbox-view.tsx), so it stays reachable with the
+ * menu shut — #253 moved other controls into the popup but deliberately not this
+ * one, and that is what keeps this anchor usable.
+ *
+ * Re-queried on every call rather than held: the notice mounting and unmounting
+ * above the board re-renders the rows, and a stale node would fail an assertion
+ * for a reason that is not the one under test.
  */
-function completeOnRow(itemText: string): HTMLElement {
+function rowFor(itemText: string): HTMLElement {
   const row = screen
     .getByRole("button", { name: `Edit ${itemText}` })
     .closest("li");
   if (!(row instanceof HTMLElement))
     throw new Error(`no row markup around "${itemText}"`);
-  return within(row).getByRole("button", { name: COMPLETE });
+  return row;
+}
+
+/**
+ * A row's ✓ Complete control, reached through the row that holds the item rather
+ * than by where that row landed in the list (#255).
+ *
+ * Every ✓ Complete in the board shares one accessible name, so the row is the only
+ * thing that tells two of them apart.
+ */
+function completeOnRow(itemText: string): HTMLElement {
+  return within(rowFor(itemText)).getByRole("button", { name: COMPLETE });
+}
+
+/**
+ * Open a row's ▾ list, so a #253 menu entry is reachable.
+ *
+ * Same contract as `openRowMenu` in `inbox-view.test.tsx` — the trigger is found
+ * by the accessible name "All options", scoped to the row — but driven with this
+ * file's `act` + `.click()` + {@link flushTicks} idiom rather than `userEvent`,
+ * for the reason {@link flushTicks} already records: two specs here run on fake
+ * timers, and userEvent deadlocks under them unless its own timer plumbing is
+ * wired up separately. Per-file local helpers are the convention for this one
+ * anyway — `inbox-view.drag.test.tsx` declares its own too.
+ *
+ * The popup is portaled into the trigger's own wrapper rather than to `<body>`
+ * (`container={menuRef}` in row-actions.tsx), so its entries stay inside the row
+ * and {@link menuEntryOnRow} can keep scoping to it.
+ */
+async function openRowMenu(itemText: string) {
+  await act(async () => {
+    within(rowFor(itemText))
+      .getByRole("button", { name: "All options" })
+      .click();
+    await flushTicks();
+  });
+}
+
+/**
+ * A control inside a row's ▾ list, with the list already open (#253).
+ *
+ * Scoped to the row rather than to the popup: the armed Delete confirm replaces
+ * the entry that opened it and both halves live in the same popup, but a caller
+ * asserting on the row's other controls in the same breath wants one scope, not
+ * two — and the popup is inside the row either way.
+ */
+function menuEntryOnRow(itemText: string, name: RegExp | string): HTMLElement {
+  return within(rowFor(itemText)).getByRole("button", { name });
+}
+
+/**
+ * Press a #253 ▾ entry on a named row: open the list, then press the entry.
+ *
+ * The row-scoping half is {@link rowFor}'s (#255) and the menu-opening half is
+ * {@link openRowMenu}'s (#253) — see rowFor's note on why they are composed
+ * rather than reimplemented per site.
+ */
+async function pressInRowMenu(itemText: string, name: RegExp | string) {
+  await openRowMenu(itemText);
+  await act(async () => {
+    menuEntryOnRow(itemText, name).click();
+    await flushTicks();
+  });
+}
+
+/**
+ * Delete a row through the ▾ list's two-step confirm.
+ *
+ * #253 moved the resting Delete into the list. The armed `Delete · Cancel` pair
+ * REPLACES that entry in place rather than opening anything new — one
+ * `confirmDeleteId`, `deleteControl` in inbox-view.tsx — so the popup stays open
+ * across both presses and only one control is named "Delete" at a time. That is
+ * why the second press is a re-query and not a held node, and why it needs no
+ * second {@link openRowMenu}.
+ */
+async function confirmDeleteOnRow(itemText: string) {
+  await pressInRowMenu(itemText, DELETE);
+  await act(async () => {
+    menuEntryOnRow(itemText, DELETE).click(); // the armed confirm
+    await flushTicks();
+  });
 }
 
 beforeEach(() => {
@@ -416,8 +525,7 @@ describe("InboxView — a row write that does not land (#225)", () => {
     vi.mocked(deleteBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
     const { rerender } = renderInbox([makeItem({ text: "water the plants" })]);
 
-    await press(/^delete$/i);
-    await press(/^delete$/i); // the inline confirm
+    await confirmDeleteOnRow("water the plants");
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     // The user is standing on the Retry that is about to be taken away.
     screen.getByRole("button", { name: RETRY }).focus();
@@ -475,14 +583,7 @@ describe("InboxView — a row write that does not land (#225)", () => {
     );
     const { rerender } = renderInbox([makeItem({ text: "water the plants" })]);
 
-    await act(async () => {
-      screen.getByRole("button", { name: /^delete$/i }).click();
-      await flushTicks();
-    });
-    await act(async () => {
-      screen.getByRole("button", { name: /^delete$/i }).click(); // the inline confirm
-      await flushTicks();
-    });
+    await confirmDeleteOnRow("water the plants");
     await act(async () => {
       vi.advanceTimersByTime(INBOX_ACTION_TIMEOUT_MS);
       await flushTicks();
@@ -540,12 +641,13 @@ describe("InboxView — the double-press guard (#225)", () => {
     );
     renderInbox([makeItem()]);
 
+    // #253 — both presses land on the ▾ entry, which is where the only Add-as-
+    // single-task control lives now. The list stays open across them (the entry
+    // is a plain button in a Popover, not a menuitem that dismisses), so the
+    // second press reaches the same control the user's would.
+    await pressInRowMenu("sample item", ADD_TODO);
     await act(async () => {
-      screen.getByRole("button", { name: /add to-?do/i }).click();
-      await flushTicks();
-    });
-    await act(async () => {
-      screen.getByRole("button", { name: /add to-?do/i }).click();
+      menuEntryOnRow("sample item", ADD_TODO).click();
       await flushTicks();
     });
 
@@ -1409,8 +1511,12 @@ describe("InboxView — every row write reaches the notice (#225)", () => {
     vi.mocked(completeItem).mockRejectedValueOnce(new Error("offline"));
     renderInbox([makeItem({ id: "m1", text: "buy oat milk" })]);
 
-    const row = screen.getByText("buy oat milk").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    // #253 — Move to… is a ▾ entry now. The popover is opened with this file's
+    // own idiom and the nested Base UI Menu is driven with `userEvent`, which its
+    // menuitems need for roving focus and activation.
+    await openRowMenu("buy oat milk");
+    const row = rowFor("buy oat milk");
+    await user.click(within(row).getByRole("button", { name: MOVE_TO }));
     await user.click(
       await within(row).findByRole("menuitem", { name: /^Completed$/ }),
     );
@@ -1435,8 +1541,9 @@ describe("InboxView — every row write reaches the notice (#225)", () => {
     const user = userEvent.setup();
     renderInbox([makeItem({ id: "m2", text: "buy rye bread" })]);
 
-    const row = screen.getByText("buy rye bread").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    await openRowMenu("buy rye bread");
+    const row = rowFor("buy rye bread");
+    await user.click(within(row).getByRole("button", { name: MOVE_TO }));
     await user.click(
       await within(row).findByRole("menuitem", { name: /^Completed$/ }),
     );
@@ -1553,7 +1660,10 @@ describe("InboxView — invariants that were documented but unpinned (#225)", ()
     vi.mocked(startBreakdown).mockResolvedValue("task-3");
     renderInbox([makeItem({ id: "g1", text: "plan the loft" })]);
 
-    await press(/^add to-do$/i);
+    // Add-as-single-task is a ▾ entry after #253; Break into steps is still an
+    // inline button on the row, which is the point — the two writes are reached
+    // from different surfaces and must still not absorb one another.
+    await pressInRowMenu("plan the loft", ADD_TODO);
     await press(/break into steps/i);
 
     expect(vi.mocked(keepAsTask)).toHaveBeenCalledTimes(1);
@@ -1628,8 +1738,7 @@ describe("InboxView — invariants that were documented but unpinned (#225)", ()
       makeItem({ id: "v1", text: "water the plants" }),
     ]);
 
-    await press(/^delete$/i);
-    await press(/^delete$/i); // the inline confirm
+    await confirmDeleteOnRow("water the plants");
     await screen.findByRole("alert");
 
     let releaseRetry = () => {};
