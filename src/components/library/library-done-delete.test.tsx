@@ -288,6 +288,54 @@ describe("LibraryDoneDelete — when the write does not land (#251)", () => {
     expect(announcer.closest('[role="alert"]')).toBeNull();
   });
 
+  it("says the wait exactly once to a screen reader, and keeps saying it politely", async () => {
+    // #251 review — the other half of the live region, borrowed from
+    // `focus-timer.test.tsx`, which has four specs for this where this file had
+    // one. The spec above only proves the region is EMPTY before the wait, and the
+    // gap that leaves is measurable: removing `aria-hidden` from the sighted copy
+    // — so the sentence is announced twice AND its insertion re-reads the whole
+    // assertive notice over the polite announcement, which is the #218/#236
+    // double-announcement in full — left this file, `write-notice-hygiene` and
+    // `library.test.tsx` all green. Rule E is static and only needs the literal
+    // present; nothing in the suite could see the pair.
+    const user = userEvent.setup();
+    let settle: () => void = () => {};
+    vi.mocked(deleteBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((r) => {
+          settle = () => r();
+        }),
+      );
+    renderRow();
+
+    await arm(user);
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+
+    const announcer = screen.getByTestId("library-delete-announcer");
+    await waitFor(() => expect(announcer).toHaveTextContent(/trying again/i));
+    expect(announcer).toHaveAttribute("role", "status");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
+    // `sr-only`, not `hidden`: a live region has to be rendered to be observed.
+    expect(announcer).toHaveClass("sr-only");
+    // Still a SIBLING of the alert while it is actually speaking, which is the
+    // state #218 was about — the empty-region spec above cannot see this one.
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    // Exactly one node carries the sentence to assistive technology, and it is
+    // the announcer. The sighted copy stays on screen, inside the notice, hidden.
+    expect(
+      screen.getAllByText(/trying again/i, { ignore: "[aria-hidden='true']" }),
+    ).toEqual([announcer]);
+
+    await act(async () => {
+      settle();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
   it("a second press while the write is in flight does not start a second delete", async () => {
     const user = userEvent.setup();
     let settle: () => void = () => {};
