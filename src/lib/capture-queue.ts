@@ -110,6 +110,30 @@ export const CAPTURE_QUEUE_MAX_ITEMS = 20;
  */
 export const CAPTURE_QUEUE_MAX_BYTES = 64 * 1024;
 
+/**
+ * Every refusal a queued capture can be marked with — **the one place the set is
+ * written down.**
+ *
+ * A list with the union derived from it, rather than a union with a list beside
+ * it, and that direction is the whole point: three separate things need to agree
+ * about these values — the type, the runtime guard in {@link isQueuedCapture},
+ * and {@link applyOutcome}, which turns an outcome into a mark — and a
+ * hand-copied list is what drifts the day a third refusal state is added. Same
+ * shape as `OWNER_BREAKDOWN_ALLOWLIST` in `constants.ts`, which derives
+ * `BreakdownModel` the same way.
+ *
+ * Exported because `capture-queue.test.ts` asserts the guard accepts every member
+ * from the outside — so a value added here is covered by that test the moment it
+ * exists, rather than when somebody remembers.
+ */
+export const CAPTURE_BLOCK_REASONS = [
+  "session-expired",
+  "account-revoked",
+] as const;
+
+/** Why the server last refused a queued capture. Derived, never re-listed. */
+export type CaptureBlockReason = (typeof CAPTURE_BLOCK_REASONS)[number];
+
 export type QueuedCapture = {
   /** Client-generated idempotency key. Sent to the server; unique per workspace. */
   clientKey: string;
@@ -146,8 +170,13 @@ export type QueuedCapture = {
    * whole reason this is a union.
    *
    * `undefined` means not refused, or refused for a reason that has since cleared.
+   *
+   * **Validated on the way in, exactly as the other four fields are** — see
+   * {@link isQueuedCapture}. It is the field a stored value is most likely to be
+   * wrong about, because it is the only one this module writes AFTER the capture
+   * was stored.
    */
-  blockedBy?: "session-expired" | "account-revoked";
+  blockedBy?: CaptureBlockReason;
 };
 
 /** Why an enqueue was refused. Each maps to something the user is told. */
@@ -189,15 +218,56 @@ export type ApplyFlushResult =
  * Deliberately one outcome per status rather than one per *behaviour*: 409 and 403
  * behave identically here (keep the capture) and still need telling apart, so
  * collapsing them at this boundary is what produced the bug the spec review found.
+ *
+ * The two refusals are spliced in from {@link CAPTURE_BLOCK_REASONS} rather than
+ * spelled again: an outcome that marks a capture and the mark it writes are the
+ * same value, and writing them twice is how one side would gain a third state the
+ * other had never heard of.
  */
-export type FlushOutcome =
-  "saved" | "duplicate" | "session-expired" | "account-revoked" | "retry";
+export type FlushOutcome = "saved" | "duplicate" | CaptureBlockReason | "retry";
 
 /** Bytes of a UTF-8 string, not characters — the quota is measured in bytes. */
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
+/**
+ * Is this one of the refusals {@link CAPTURE_BLOCK_REASONS} names?
+ *
+ * Narrowed through the list rather than by comparing the two literals a second
+ * time, so the guard cannot fall behind the union it is guarding.
+ */
+function isCaptureBlockReason(value: unknown): value is CaptureBlockReason {
+  return (
+    typeof value === "string" &&
+    CAPTURE_BLOCK_REASONS.some((reason) => reason === value)
+  );
+}
+
+/**
+ * Is this stored value really a `QueuedCapture`?
+ *
+ * Every field is checked, `blockedBy` included, because the answer is a **type
+ * predicate**: saying `true` for a value that is not one tells the compiler
+ * something false, and from there every exhaustive branch downstream is reasoning
+ * about a shape that does not exist. `blockedBy` is the field where that bites
+ * hardest — it selects the strip's copy AND the remedy offered, so a value with no
+ * branch leaves a capture on screen with nothing said about it and nothing to do.
+ *
+ * **Absent is valid and means "not yet refused"** — the field is optional, and the
+ * overwhelming majority of entries have never been refused at all.
+ *
+ * **Anything else, `null` included, loses the entry.** That is the deliberate
+ * choice and it is not free: this module drops words nowhere else. Two things make
+ * it the right one. A value outside the union cannot come from this module —
+ * `JSON.stringify` omits an absent optional and only ever writes what
+ * {@link applyOutcome} put there — so it means the stored value was edited,
+ * truncated, or written by something else on the origin, and there is nothing
+ * about such an entry left to trust. And the alternative, silently dropping just
+ * the mark, is worse in the one case that matters: an `account-revoked` capture
+ * would come back looking unrefused, be offered a Retry, and produce exactly the
+ * "sign in and these will save" promise #220 makes impossible to keep.
+ */
 function isQueuedCapture(value: unknown): value is QueuedCapture {
   if (typeof value !== "object" || value === null) return false;
   const c = value as Record<string, unknown>;
@@ -208,7 +278,8 @@ function isQueuedCapture(value: unknown): value is QueuedCapture {
     c.text.length > 0 &&
     typeof c.workspaceId === "string" &&
     typeof c.capturedAt === "number" &&
-    Number.isFinite(c.capturedAt)
+    Number.isFinite(c.capturedAt) &&
+    (c.blockedBy === undefined || isCaptureBlockReason(c.blockedBy))
   );
 }
 

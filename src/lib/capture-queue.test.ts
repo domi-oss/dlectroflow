@@ -3,6 +3,7 @@ import {
   CAPTURE_QUEUE_STORAGE_KEY,
   CAPTURE_QUEUE_MAX_ITEMS,
   CAPTURE_QUEUE_MAX_BYTES,
+  CAPTURE_BLOCK_REASONS,
   readQueue,
   enqueue,
   applyFlushOutcome,
@@ -157,6 +158,67 @@ describe("capture queue — reading (#175)", () => {
     expect(readQueue(store).map((c) => c.clientKey)).toEqual([
       "good",
       "also-good",
+    ]);
+  });
+
+  // ⚠️ `blockedBy` is not decoration: it selects the strip's copy AND the remedy
+  // offered, so a value outside the union drives the strip into a state it has no
+  // branch for. Worse than the display bug, a guard that returns `true` here has
+  // told the compiler this object is a `QueuedCapture` when it is not, and every
+  // exhaustive branch downstream is then built on that. Reachable with no
+  // attacker at all: `localStorage` is editable in devtools, survives a version
+  // change, and is shared with everything else on the origin.
+  it("drops an entry whose blockedBy is not one of the two refusals", () => {
+    for (const junk of ["banana", 3, null, "", true, ["session-expired"], {}]) {
+      const store = memoryStore({
+        [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify([
+          capture({ clientKey: "good" }),
+          { ...capture({ clientKey: "junk" }), blockedBy: junk },
+        ]),
+      });
+      expect(readQueue(store).map((c) => c.clientKey)).toEqual(["good"]);
+    }
+  });
+
+  // The negative control, and the half that actually matters. A guard that
+  // rejected EVERY `blockedBy` would pass the test above while silently losing
+  // every capture the server has already refused — which is the same words-lost
+  // bug approached from the other side, and the refused ones are precisely the
+  // captures that have nowhere else to be.
+  it("keeps an unmarked entry and an entry carrying either valid refusal", () => {
+    const store = seeded([
+      capture({ clientKey: "unmarked" }),
+      capture({ clientKey: "expired", blockedBy: "session-expired" }),
+      capture({ clientKey: "revoked", blockedBy: "account-revoked" }),
+    ]);
+
+    const q = readQueue(store);
+
+    expect(q.map((c) => c.clientKey)).toEqual([
+      "unmarked",
+      "expired",
+      "revoked",
+    ]);
+    expect(q.map((c) => c.blockedBy)).toEqual([
+      undefined,
+      "session-expired",
+      "account-revoked",
+    ]);
+  });
+
+  // Asserted through the exported list rather than against two literals, so a
+  // third refusal state added to `CAPTURE_BLOCK_REASONS` is covered by this test
+  // the moment it exists. The list is the guard's only source; this is the
+  // outside check that the pair cannot drift.
+  it("accepts every member of CAPTURE_BLOCK_REASONS, the guard's only source", () => {
+    const store = seeded(
+      CAPTURE_BLOCK_REASONS.map((reason) =>
+        capture({ clientKey: reason, blockedBy: reason }),
+      ),
+    );
+
+    expect(readQueue(store).map((c) => c.blockedBy)).toEqual([
+      ...CAPTURE_BLOCK_REASONS,
     ]);
   });
 
