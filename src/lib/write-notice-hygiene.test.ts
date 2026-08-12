@@ -553,16 +553,33 @@ const OWNERS: Record<string, string> = {
 };
 
 /**
- * Rule D runs over the notice surfaces, plus `focus-timer.tsx`.
+ * Notices with no row to lose, and therefore no `errorSave*` family: rules A–C do
+ * not enrol them, but rules D and E are exactly as load-bearing here — a
+ * mis-nested or missing announcement is the half that has actually shipped
+ * broken, three times.
  *
- * The timer's notice has no row and so no `errorSave*` family — it is not
- * enrolled by rules A–C — but it is where #218 was actually found, and the
- * comments in all three files say the shape must stay identical. Dropping it from
- * the one guard that can see the shape would leave the original site unwatched.
+ * `focus-timer.tsx` is where #218 was found. `library-done-delete.tsx` (#251) is
+ * a DELETE, which is the one write for which the row being gone is the goal
+ * rather than a failure — so the `timedOut × rowGone` matrix has two cells it
+ * could never honestly select, and it follows the timer's shape instead. The
+ * key each one announces its wait with is recorded because it is not derivable
+ * from a prefix the way `<prefix>.errorSaving` is.
+ */
+const NO_ROW_SURFACES: Record<string, string> = {
+  "src/components/focus/focus-timer.tsx": "focus.error.retrying",
+  "src/components/library/library-done-delete.tsx": "lib.error.retrying",
+};
+
+/**
+ * Rule D runs over the notice surfaces, plus every no-row surface above.
+ *
+ * The comments in all of these files say the shape must stay identical, so
+ * dropping any of them from the one guard that can see that shape would leave a
+ * site unwatched — which is how #218's original site nearly went unguarded.
  */
 const LIVE_REGION_FILES = [
   ...Object.values(OWNERS),
-  "src/components/focus/focus-timer.tsx",
+  ...Object.keys(NO_ROW_SURFACES),
 ];
 
 const read = (relative: string) =>
@@ -729,6 +746,33 @@ describe("every write notice announces its own wait (#218, #236)", () => {
               '`role="status" aria-live="polite" aria-atomic="true"` SIBLING of ' +
               "the alert, rendered with the notice and empty until there is " +
               "something to say — see focus-timer.tsx and inbox-view.tsx.\n",
+      ).not.toEqual([]);
+    },
+  );
+
+  /**
+   * The same rule for the notices that have no row and so no `errorSaving` key to
+   * derive. Without this, a no-row surface is watched by rule D (is anything
+   * nested?) and by nothing at all for the question rule E asks (is the wait
+   * announced by a live region, or only by a description nobody re-reads?) —
+   * which is the defect #236 found on a surface that passed every other check.
+   */
+  it.each(Object.entries(NO_ROW_SURFACES))(
+    "%s announces its own wait",
+    (file, key) => {
+      const announcers = politeAnnouncersOf(
+        read(file),
+        path.basename(file),
+        key,
+      );
+      expect(
+        announcers.map((a) => `${file}:${a.line}`),
+        announcers.length > 0
+          ? ""
+          : `\n${file} renders ${key} but no un-nested aria-live region does. ` +
+              'Add an `sr-only` `role="status" aria-live="polite" ' +
+              'aria-atomic="true"` SIBLING of the alert, rendered with the ' +
+              "notice and empty until there is something to say.\n",
       ).not.toEqual([]);
     },
   );

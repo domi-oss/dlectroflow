@@ -54,8 +54,13 @@ import {
   removeOwnLlmKey,
   ownLlmKeyPresent,
   deleteOwnAccount,
+  saveDisplayName,
 } from "./account";
 import { PURGE_GRACE_DAYS } from "@/lib/account-lifecycle";
+// #252 — the cap lives in constants, not beside the action: a `"use server"`
+// module may only export async functions. Read from there so the bound this file
+// asserts on is the one both the action and the field actually use.
+import { MAX_DISPLAY_NAME_LENGTH } from "@/lib/constants";
 
 const ME = "user_alice";
 const me = () => ({
@@ -64,6 +69,7 @@ const me = () => ({
   workspaceId: "ws_a",
   provider: "gitlab",
   handle: "alice",
+  displayName: null,
 });
 
 beforeEach(() => {
@@ -457,5 +463,134 @@ describe("deleteOwnAccount", () => {
       "revokedAt",
       "status",
     ]);
+  });
+});
+
+/**
+ * #252 — the writer for `User.displayName`.
+ *
+ * Same three rules the rest of this file asserts (no id parameter, the row is
+ * the session's row, one column) plus one specific to this field: it is the only
+ * free text a person can put into the header of every page, so what it refuses
+ * matters as much as what it stores.
+ */
+describe("saveDisplayName", () => {
+  it("writes the name to the CALLER's own row, and nothing else", async () => {
+    expect(await saveDisplayName("Domi")).toEqual({ ok: true });
+    const call = userUpdateMock.mock.calls[0][0];
+    // There is no id parameter on the action, so this is the session's row by
+    // construction rather than by review.
+    expect(call.where).toEqual({ id: ME });
+    expect(call.data).toEqual({ displayName: "Domi" });
+  });
+
+  it("trims the surrounding whitespace a paste brings with it", async () => {
+    await saveDisplayName("  Domi \n");
+    expect(userUpdateMock.mock.calls[0][0].data).toEqual({
+      displayName: "Domi",
+    });
+  });
+
+  // The clear path, and it must store NULL rather than "". `accountLabel()`
+  // guards against an empty string too, but a column with two ways to say
+  // "unset" is a column whose readers eventually disagree.
+  it("clears the name to null when given an empty or blank string", async () => {
+    for (const input of ["", "   ", "\t\n"]) {
+      userUpdateMock.mockClear();
+      expect(await saveDisplayName(input)).toEqual({ ok: true });
+      expect(userUpdateMock.mock.calls[0][0].data).toEqual({
+        displayName: null,
+      });
+    }
+  });
+
+  it("refuses a name longer than the cap, without writing", async () => {
+    const tooLong = "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1);
+    expect(await saveDisplayName(tooLong)).toEqual({
+      ok: false,
+      error: "invalid_name",
+    });
+    expect(userUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a name exactly at the cap", async () => {
+    expect(await saveDisplayName("a".repeat(MAX_DISPLAY_NAME_LENGTH))).toEqual({
+      ok: true,
+    });
+  });
+
+  // The length is counted AFTER trimming, so trailing whitespace cannot make an
+  // otherwise-fine name fail.
+  it("measures the trimmed length, not the pasted one", async () => {
+    const padded = ` ${"a".repeat(MAX_DISPLAY_NAME_LENGTH)} `;
+    expect(await saveDisplayName(padded)).toEqual({ ok: true });
+  });
+
+  // Control characters, including newlines. This string is rendered in the header
+  // on every page and travels into an `aria-label` and a `title`; a newline in it
+  // is a line the layout never budgeted for, and a control character is invisible
+  // in every surface an owner could inspect it through. Written as `\u` escapes
+  // for the reason `CONTROL_CHARS` gives: a literal one is invisible in a diff.
+  it("refuses control characters rather than storing them", async () => {
+    for (const input of [
+      "Do\u0000mi",
+      "Do\nmi",
+      "Do\tmi",
+      "Do\u007Fmi",
+      "Do\u001Bmi",
+    ]) {
+      userUpdateMock.mockClear();
+      expect(await saveDisplayName(input)).toEqual({
+        ok: false,
+        error: "invalid_name",
+      });
+      expect(userUpdateMock).not.toHaveBeenCalled();
+    }
+  });
+
+  // Emoji, accents and non-Latin scripts are names. Nothing here is an
+  // allowlist: refusing a script would be refusing people.
+  it("stores a name in any script, accents and emoji included", async () => {
+    for (const name of ["Zoë", "多美", "Домінік", "Domi 🌱"]) {
+      userUpdateMock.mockClear();
+      expect(await saveDisplayName(name)).toEqual({ ok: true });
+      expect(userUpdateMock.mock.calls[0][0].data).toEqual({
+        displayName: name,
+      });
+    }
+  });
+
+  it("refuses a caller with no session, and writes nothing", async () => {
+    currentUserMock.mockResolvedValue(null);
+    expect(await saveDisplayName("Domi")).toEqual({
+      ok: false,
+      error: "not_signed_in",
+    });
+    expect(userUpdateMock).not.toHaveBeenCalled();
+  });
+
+  // The name is rendered by the app SHELL, so revalidating /settings alone is
+  // not enough — every page carries the header. Revalidating the root as a
+  // layout is what makes the change visible without a full reload.
+  it("revalidates so the header stops showing the old label", async () => {
+    await saveDisplayName("Domi");
+    expect(revalidateMock).toHaveBeenCalledWith("/settings");
+    expect(revalidateMock).toHaveBeenCalledWith("/", "layout");
+  });
+
+  // P2025 = the row is gone (the account was deleted mid-request). Reported
+  // rather than thrown: the caller holds a verified session, so this is a real
+  // state. Same handling `saveOwnLlmKey` gives it.
+  it("reports a vanished row instead of throwing", async () => {
+    userUpdateMock.mockRejectedValueOnce({ code: "P2025" });
+    expect(await saveDisplayName("Domi")).toEqual({
+      ok: false,
+      error: "not_found",
+    });
+  });
+
+  it("rethrows anything that is not a missing row", async () => {
+    userUpdateMock.mockRejectedValueOnce(new Error("connection refused"));
+    await expect(saveDisplayName("Domi")).rejects.toThrow("connection refused");
   });
 });

@@ -117,6 +117,7 @@ import {
   maybeAwardTenStepsDay,
   maybeAwardInboxZero,
 } from "@/lib/rewards";
+import { TASK_WRITER_TX_BUDGET } from "@/lib/constants";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -577,6 +578,27 @@ describe("reopenItem", () => {
     });
   });
 
+  it("gives its transaction the shared writer budget rather than Prisma's 5s default", async () => {
+    // #251 review — the same gap `deleteBrainDumpItem` had, on the transaction
+    // beside it. Both take the `BrainDumpItem` row lock that `keepAsTask` and
+    // `ensureFocusStep` take, and both are documented as answering a second
+    // caller with `count: 0` rather than an error; at Prisma's 5s default a
+    // loser that waits longer than that for the lock is killed with `P2028
+    // Transaction already closed` and rolled back instead, which converts the
+    // promised no-op into an error raised at somebody who pressed Reopen twice.
+    // One defect class, so one fix — this is not a second issue.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      task: null,
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      TASK_WRITER_TX_BUDGET,
+    );
+  });
+
   it("guards ≥1 not-done: a subset covering nothing also resets the last step", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i4",
@@ -841,10 +863,18 @@ describe("reopenItem — Google Task sync (#196)", () => {
  * reward comes back when the same work could otherwise be paid for twice.
  */
 describe("reopenItem — reward reversal (#196)", () => {
+  /**
+   * When this to-do was finished. A fixed instant rather than `new Date()`, so
+   * the specs below can assert that the reversal's `stepDoneNotAfter` is the
+   * ITEM's own completion instant (#251 review) and not merely some date —
+   * "called with a Date" would pass for `new Date()` computed inside the action.
+   */
+  const COMPLETED_AT = new Date("2026-08-10T09:00:00.000Z");
+
   function reopened(overrides: Record<string, unknown> = {}) {
     return {
       id: "i1",
-      completedAt: new Date(),
+      completedAt: COMPLETED_AT,
       task: {
         id: "t1",
         googleTaskId: null,
@@ -879,7 +909,13 @@ describe("reopenItem — reward reversal (#196)", () => {
     await reopenItem("i1");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 2, includeTaskComplete: true },
+      {
+        stepDone: 2,
+        includeTaskComplete: true,
+        // #251 review — the item's own completion instant, so the rows that come
+        // back are the ones it banked rather than the newest in the workspace.
+        stepDoneNotAfter: COMPLETED_AT,
+      },
       txClient,
     );
   });
@@ -892,7 +928,11 @@ describe("reopenItem — reward reversal (#196)", () => {
     await reopenItem("i1", ["s1"]);
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 1, includeTaskComplete: true },
+      {
+        stepDone: 1,
+        includeTaskComplete: true,
+        stepDoneNotAfter: COMPLETED_AT,
+      },
       txClient,
     );
     expect(
@@ -915,7 +955,12 @@ describe("reopenItem — reward reversal (#196)", () => {
     await reopenItem("i1");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 2, includeTaskComplete: false },
+      {
+        stepDone: 2,
+        includeTaskComplete: false,
+        // No completion instant to bound by, so the unbounded behaviour stands.
+        stepDoneNotAfter: undefined,
+      },
       txClient,
     );
   });
@@ -938,7 +983,11 @@ describe("reopenItem — reward reversal (#196)", () => {
     await reopenItem("i1");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 0, includeTaskComplete: false },
+      {
+        stepDone: 0,
+        includeTaskComplete: false,
+        stepDoneNotAfter: COMPLETED_AT,
+      },
       txClient,
     );
   });
@@ -955,7 +1004,11 @@ describe("reopenItem — reward reversal (#196)", () => {
     await reopenItem("i1");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 1, includeTaskComplete: false },
+      {
+        stepDone: 1,
+        includeTaskComplete: false,
+        stepDoneNotAfter: COMPLETED_AT,
+      },
       txClient,
     );
   });
@@ -964,14 +1017,18 @@ describe("reopenItem — reward reversal (#196)", () => {
     const rewards = await import("@/lib/rewards");
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i2",
-      completedAt: new Date(),
+      completedAt: COMPLETED_AT,
       task: null,
     });
     const { reopenItem } = await import("./braindump");
     await reopenItem("i2");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
-      { stepDone: 0, includeTaskComplete: true },
+      {
+        stepDone: 0,
+        includeTaskComplete: true,
+        stepDoneNotAfter: COMPLETED_AT,
+      },
       txClient,
     );
     // No task, so no step write to gate on — and nothing to gate.

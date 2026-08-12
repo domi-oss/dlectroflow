@@ -125,14 +125,21 @@ vi.mock("@/lib/rewards", async (importOriginal) => {
   };
 });
 
-/** Bank one reward row of `type`, `n` times — what completing the to-do paid. */
-async function bank(type: RewardType, n: number) {
+/**
+ * Bank one reward row of `type`, `n` times — what completing the to-do paid.
+ *
+ * `at` dates them, which the #251-review case at the foot of this file needs: it
+ * asks which rows a reversal takes, and "the ones from an earlier day" is not
+ * expressible without writing `createdAt`.
+ */
+async function bank(type: RewardType, n: number, at?: Date) {
   if (!n) return;
   await prisma.rewardEvent.createMany({
     data: Array.from({ length: n }, () => ({
       type,
       points: RewardPoints[type],
       workspaceId: WS,
+      ...(at ? { createdAt: at } : {}),
     })),
   });
 }
@@ -141,7 +148,7 @@ async function bank(type: RewardType, n: number) {
  * A completed to-do with `doneSteps` closed steps and `openSteps` still open,
  * and the reward rows completing it would have banked.
  */
-async function seedCompletedItem(doneSteps: number, openSteps = 0) {
+async function seedCompletedItem(doneSteps: number, openSteps = 0, at?: Date) {
   const task = await prisma.task.create({
     data: {
       title: "Repaint the hall",
@@ -165,17 +172,34 @@ async function seedCompletedItem(doneSteps: number, openSteps = 0) {
       }),
     );
   }
+  const completedAt = at ?? new Date();
   const item = await prisma.brainDumpItem.create({
     data: {
       text: "Repaint the hall",
       workspaceId: WS,
       taskId: task.id,
       status: BrainDumpStatus.Triaged,
-      completedAt: new Date(),
+      completedAt,
     },
   });
-  await bank(RewardType.StepDone, doneSteps);
-  await bank(RewardType.TaskComplete, 1);
+  // `completeItem`'s own order, reproduced ALWAYS and not only for a dated
+  // fixture: it banks one `step_done` per step it closes BEFORE stamping
+  // `completedAt`, and the `task_complete` after it (measured on real Postgres at
+  // -2ms and +3ms). The rows used to be written after the stamp in every case,
+  // which is a state the app cannot produce — and once #251's review made
+  // `completedAt` an upper bound on which step rows come back, an unfaithful
+  // fixture stopped being merely untidy and started excluding the item's own
+  // rows, sending the reversal to an older unrelated one.
+  await bank(
+    RewardType.StepDone,
+    doneSteps,
+    new Date(completedAt.getTime() - 1000),
+  );
+  await bank(
+    RewardType.TaskComplete,
+    1,
+    new Date(completedAt.getTime() + 1000),
+  );
   return { task, item, steps };
 }
 
@@ -471,5 +495,69 @@ describe("two reopens of ONE to-do take back one payout, not two (#196, round 12
       { id: olderStep.id, type: RewardType.StepDone },
       { id: olderTask.id, type: RewardType.TaskComplete },
     ]);
+  });
+});
+
+/**
+ * #251 review — the reopen half of "which rows come back".
+ *
+ * `deleteBrainDumpItem` now passes `stepDoneNotAfter` so it takes back the step
+ * points the deleted to-do actually banked rather than the newest in the
+ * workspace, and `reverseItemCompletionRewards`' own docblock rests on the two
+ * routes asking this function the SAME question — "a user who reopens a to-do and
+ * then deletes it must end on the same balance as one who deletes it outright".
+ * A reopen that keeps reaching for today's rows makes that sentence half-true: the
+ * balance still matches, and the per-day view does not.
+ *
+ * And the per-day view is read. `getDashboardData().todayPoints` and
+ * `stepsDoneToday` both window on `startOfToday()`, and `gatherDayData` in
+ * `rollup.ts` does the same. Measured on real Postgres before this: reopening a
+ * to-do completed yesterday, with two of today's steps standing, moved
+ * `todayPoints` 20 → 0 and `stepsDoneToday` 2 → 0 — today's work, un-counted, by
+ * an action that touched none of it.
+ */
+describe("reopenItem takes back the item's OWN step points (#251 review)", () => {
+  const startOfToday = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const stepsToday = () =>
+    prisma.rewardEvent.count({
+      where: {
+        workspaceId: WS,
+        type: RewardType.StepDone,
+        createdAt: { gte: startOfToday() },
+      },
+    });
+
+  it("leaves today's step count alone when the to-do was completed yesterday", async () => {
+    const yesterday = new Date(Date.now() - 86_400_000);
+    const { item } = await seedCompletedItem(2, 0, yesterday);
+    await bank(RewardType.StepDone, 2); // today's work, still standing
+    expect(await countOf(RewardType.StepDone)).toBe(4);
+    expect(await stepsToday()).toBe(2);
+
+    const { reopenItem } = await import("./braindump");
+    await reopenItem(item.id);
+
+    // Same arithmetic as before — two step rows and the completion come back.
+    expect(await countOf(RewardType.StepDone)).toBe(2);
+    expect(await countOf(RewardType.TaskComplete)).toBe(0);
+    // …and the two that went were YESTERDAY's.
+    expect(await stepsToday()).toBe(2);
+  });
+
+  it("still takes today's rows when the to-do was completed today", async () => {
+    // The negative control: almost every reopen is of something finished the same
+    // day, and a bound that excluded the item's own rows would break that case
+    // while passing the one above.
+    const { item } = await seedCompletedItem(2);
+    expect(await stepsToday()).toBe(2);
+
+    const { reopenItem } = await import("./braindump");
+    await reopenItem(item.id);
+
+    expect(await stepsToday()).toBe(0);
   });
 });

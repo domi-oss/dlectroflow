@@ -257,6 +257,66 @@ describe("updateFocusTimerSettings", () => {
   });
 });
 
+/**
+ * #252 — the header's focus-timer shortcut, and the one place this action's
+ * optional fields are NOT all the same shape.
+ *
+ * `pauseTogether` coerces unconditionally, so omitting it writes `false`. That is
+ * argued for where it is written: `false` is the column default too, so an
+ * omission lands on the value a fresh row would have had.
+ *
+ * `focusQuickAccess` defaults **true**, which inverts the argument. Coercing an
+ * omission would write `false` — a silent move AWAY from the default, and the one
+ * a stale client bundle calling the previous deploy's payload shape would make on
+ * somebody who never touched the setting. So it follows `categories` instead: an
+ * absent key leaves the stored value alone. The difference between the two fields
+ * is the column default and nothing else.
+ */
+describe("updateFocusTimerSettings — the quick-access gate (#252)", () => {
+  const base = {
+    timerStyle: "ring",
+    minimalMode: false,
+    keepAwake: true,
+    alarmEnabled: true,
+    sound: "on",
+  } as const;
+
+  it("persists the gate in both directions when it is supplied", async () => {
+    for (const quickAccess of [true, false]) {
+      upsert.mockClear();
+      await updateFocusTimerSettings({ ...base, quickAccess });
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ focusQuickAccess: quickAccess }),
+          create: expect.objectContaining({ focusQuickAccess: quickAccess }),
+        }),
+      );
+    }
+  });
+
+  // The property that matters: an omission must not be a write. Turning the
+  // header shortcut off is a decision, and nobody makes it by changing the timer
+  // style from a browser holding last week's bundle.
+  it("does not write the column at all when it is omitted", async () => {
+    await updateFocusTimerSettings(base);
+    const call = upsert.mock.calls[0][0];
+    expect(call.update).not.toHaveProperty("focusQuickAccess");
+    expect(call.create).not.toHaveProperty("focusQuickAccess");
+  });
+
+  it("coerces truthy junk to a real boolean — the column is NOT NULL", async () => {
+    await updateFocusTimerSettings({
+      ...base,
+      quickAccess: "yes" as unknown as boolean,
+    });
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ focusQuickAccess: true }),
+      }),
+    );
+  });
+});
+
 describe("updateFocusShuffle (#68)", () => {
   it("persists the shuffle preference for the current workspace", async () => {
     await updateFocusShuffle(true);

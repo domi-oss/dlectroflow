@@ -94,10 +94,16 @@ describe("AccountMenu — the trigger", () => {
     expect(trigger()).toHaveAttribute("aria-expanded", "true");
   });
 
-  // A long provider handle must not be allowed to widen the header — the bar
-  // already collides at 390px (#72, #103). The cap is visual only; the popup
-  // and the title still carry the whole thing.
-  it("caps the visible handle's width, wider on desktop than on a phone", () => {
+  // A long label must not be allowed to widen the header — the bar already
+  // collides at phone widths (#72, #103). The cap is visual only; the popup and
+  // the title still carry the whole thing.
+  //
+  // #252 tightened the phone cap to `max-w-16` (64px). The 16px it gave back is
+  // the margin that lets the five-control bar fit a 360px viewport: measured
+  // there, the cluster is 330px at an 80px cap against 328px of content width,
+  // and 314px at a 64px one. `e2e/smoke/header-quick-access.spec.ts` is what
+  // actually measures it; this only pins the class so the two cannot drift.
+  it("caps the visible label's width, wider on desktop than on a phone", () => {
     render(
       <AccountMenu
         identity={{ ...OWNER, label: "a-very-long-provider-handle-indeed" }}
@@ -105,7 +111,7 @@ describe("AccountMenu — the trigger", () => {
     );
     const label = screen.getByText("a-very-long-provider-handle-indeed");
     expect(label.className).toContain("truncate");
-    expect(label.className).toContain("max-w-20");
+    expect(label.className).toContain("max-w-16");
     expect(label.className).toContain("sm:max-w-40");
   });
 });

@@ -31,6 +31,33 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **A name in the header, and one-tap access to the timer and the shopping list
+  (#252).** The bar greeted people by their **provider username** — the
+  lowercased handle the OAuth provider issued, else eight characters of an
+  account id — because nothing on the account held a name. `Account → Your name`
+  now sets one; it saves as you type, changes nothing about signing in, and
+  emptying it goes back to the username. An account that never sets one is
+  unchanged, which is every existing account: the new column is nullable and
+  nothing is backfilled.
+
+  The bar also carries a **timer button** and, when shopping-list mode is on, a
+  **trolley** — both previously reachable only by opening the menu and reading
+  seven labels. The timer shortcut is **on by default** and
+  `Focus timer → Shortcut in the header` hides it; hiding the button leaves the
+  focus timer in the menu. Neither shortcut costs a query: both gates were
+  already on the settings row the header reads.
+
+  Two things narrower phones get out of this. The bar is measured at **360px**
+  now rather than only at 390 — it had been overflowing a 360px viewport before
+  this change and nothing could see it — and below `sm` the brand shows its mark
+  with the wordmark kept for screen readers, which is what makes room for the
+  new controls.
+
+  Operators: one additive migration, both statements metadata-only.
+  `User.displayName` is nullable with no default; `Settings.focusQuickAccess` is
+  a boolean defaulting `true`, stored in the catalogue rather than written into
+  existing rows. No new environment variables.
+
 - **An alert about production that reaches a person, and cannot go quiet (#191).**
   Production once served code from two days earlier on **one replica instead of
   two** for roughly 24 hours before anyone noticed. Every signal existed — six

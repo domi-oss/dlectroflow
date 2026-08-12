@@ -59,6 +59,10 @@ export type ExportAccount = {
   id: string;
   provider: string;
   handle: string | null;
+  /** #252 — the name the person chose for themselves. Personal data they
+   *  supplied, so Art. 15/20 covers it exactly as it covers the address below;
+   *  `null` for an account that never set one. */
+  displayName: string | null;
   email: string | null;
   role: string;
   aiPolicy: string;

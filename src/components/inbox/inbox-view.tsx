@@ -287,9 +287,15 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    as though it had. That is why the defence lives in the actions, and
  *    `reopenItem` says so in as many words ("the same Done row open in two
  *    tabs"): see its reversal counted off what the writes CHANGED,
- *    `touchStreakOnCompletion`'s interactive-transaction row lock (proved
- *    against a real database in `rewards.integration.test.ts`) and
- *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *    `touchStreakOnCompletion`'s interactive-transaction row lock
+ *    (`rewards.ts:596`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *
+ *    ⚠️ Corrected #251: this used to say the row lock was "proved against a real
+ *    database in `rewards.integration.test.ts`". **That file does not exist**, and
+ *    `touchStreakOnCompletion` is mocked in every test that names it — so the lock
+ *    is implemented and unexercised. The three defences above are not equally
+ *    evidenced, and the one carrying a false citation was the one nobody checked.
+ *    Tracked on #233, which rested its severity table on the same sentence.
  *
  *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
  *    two truly simultaneous completions of one to-do could bank twice. It is
@@ -2117,6 +2123,48 @@ export function InboxView({
       () => deleteBrainDumpItem(id),
       { id, field: "delete" },
       itemsById.get(id)?.text ?? "",
+      // #251 — where focus goes once the control it was pressed in is gone.
+      //
+      // A confirmed delete withdraws TWO things: the confirming button unmounts
+      // with the state change above, and the row itself goes with the refresh.
+      // Either is enough for the browser to drop focus on `<body>`, which is the
+      // WCAG 2.4.3 fault the write notice's own hand-off exists to avoid — it was
+      // simply never wired for the success path, because until this issue every
+      // delete was of a row the user could re-create by typing it again. A
+      // completed to-do is the one they cannot.
+      //
+      // This used to add "(React re-uses the slot for the resting 🗑)" and that is
+      // true of the LIBRARY's copy, not this one — the two transitions are
+      // structurally opposite and the sentence cannot describe both (#251 review).
+      // `library-done-delete.tsx` reconciles `<span>` against `<span>`, so the
+      // node is reused and focus survives the collapse, which is why its
+      // `focusIsOursToMove` has to be a containment test rather than a `<body>`
+      // check. Here the resting control is a `<button>` and the armed pair is a
+      // `<span>`, so React unmounts and remounts: measured, focus is already on
+      // `<body>` at the ARM press, one press earlier than the sentence implied,
+      // and the resting node is gone from the document. The conclusion below is
+      // unaffected — `activeElement === document.body` at `onLanded` either way,
+      // so the capture field gets focus — but a comment two files now share must
+      // not assert the same mechanism about opposite shapes.
+      //
+      // In `onLanded` rather than beside the press, for two reasons. It replaces
+      // the default `router.refresh()` (see `attemptWrite`) and so has to make
+      // that call itself — done first, because the refresh is what the user
+      // asked for and the focus move is bookkeeping. And it runs only when the
+      // write LANDED: on a failure, focus must stay where it is so the notice's
+      // own hand-off can pull the user to the error, which is a decision it
+      // makes by observing that focus is on `<body>`. Repairing here would take
+      // that signal away and leave the failure unannounced.
+      //
+      // Repair, never steal: if the user moved focus somewhere real while the
+      // write was in flight — the capture field during a slow round trip — they
+      // stay there. The capture field is the fallback the notice's hand-off
+      // already uses for "nowhere to go back to", and it is the deleted row's
+      // nearest surviving neighbour.
+      () => {
+        router.refresh();
+        if (document.activeElement === document.body) inputRef.current?.focus();
+      },
     );
   };
 
@@ -2136,15 +2184,35 @@ export function InboxView({
   ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
+        {/* #251 — both confirm controls carry `touchTarget`, which they did not.
+            The armed pair REPLACES the 🗑 that opened it, and that button is
+            already 44px, so a 24px pair shrank the action line under the
+            pointer at exactly the moment a mis-tap deletes something. Sizing
+            them keeps the row from moving as well as clearing the house
+            minimum. `expectFullTargets` (inbox-view.test.tsx) measures every
+            control in `[data-row-actions]`, but only in the resting state — it
+            never opens a confirm, which is how these two stayed small while
+            every sibling was checked. */}
         <button
-          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          className={cn(
+            touchTarget,
+            "text-destructive rounded-md px-2.5 py-1 font-medium",
+          )}
           onClick={() => confirmDelete(itemId)}
         >
           {t("action.delete", voice)}
         </button>
-        <span className="text-muted-foreground">·</span>
+        {/* Decorative punctuation — hidden for the reason `library-rows.tsx` and
+            `library-done-delete.tsx` hide theirs, which this factory was missed
+            for (#251 review). */}
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
         <button
-          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          className={cn(
+            touchTarget,
+            "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1",
+          )}
           onClick={cancelDelete}
         >
           {t("action.cancel", voice)}
@@ -3654,7 +3722,16 @@ export function InboxView({
                             24px while every other bucket's CTA was checked.
                             The layout classes are duplicated from RowActions
                             deliberately-for-now — folding this into that
-                            component is worth doing and is not this issue. */}
+                            component is worth doing and is not this issue.
+
+                            #251 — "and none of the rest" no longer includes
+                            delete. Completing an item used to be a one-way door:
+                            this line offered Reopen and Move to… only, so a
+                            to-do completed while demoing the app stayed in the
+                            list for good. It is the same 🗑 the other buckets
+                            render, from the same `deleteControl` and sharing the
+                            one `confirmDeleteId`, so the two-step confirm and
+                            its wording cannot drift from theirs. */}
                         <div
                           data-row-actions=""
                           className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs"
@@ -3689,6 +3766,13 @@ export function InboxView({
                               moveItemToBucket(item.id, target)
                             }
                           />
+                          {/* Visible gap so 📥 Move to and 🗑 Delete don't sit
+                              flush — the same spacer RowActions puts between
+                              its end-cluster icons, for the same misclick. */}
+                          <span aria-hidden="true" className="w-3" />
+                          {deleteControl(item.id, "delete-done", {
+                            icon: true,
+                          })}
                         </div>
                         {pickingSteps && (
                           <ReopenStepPicker
@@ -4171,16 +4255,37 @@ function ItemRow({
   ) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
+        {/* #251 review — the FOURTH copy of the armed confirm, and the last one
+            still at 24px. #251 sized the other three and diagnosed why the guard
+            could not see any of them (`expectFullTargets` measures every control
+            in `[data-row-actions]` but never opens a confirm), then added
+            confirm-opening tests for two — leaving this one, which is rendered
+            for every untriaged inbox row and is therefore the busiest surface in
+            the app. The pair REPLACES the 44px 🗑 that opened it, so a small pair
+            shrinks the action line under the pointer at exactly the moment a
+            mis-tap deletes something (WCAG 2.5.5). */}
         <button
           onClick={onConfirmDelete}
-          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          className={cn(
+            touchTarget,
+            "text-destructive rounded-md px-2.5 py-1 font-medium",
+          )}
         >
           {t("action.delete", voice)}
         </button>
-        <span className="text-muted-foreground">·</span>
+        {/* Punctuation between two buttons, so it is hidden rather than read as
+            content — the treatment both library factories got in #251 and
+            neither inbox one, which had the same confirm reading "Delete ·
+            Cancel" here and "Delete Cancel" there. */}
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
         <button
           onClick={onCancelDelete}
-          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          className={cn(
+            touchTarget,
+            "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1",
+          )}
         >
           {t("action.cancel", voice)}
         </button>

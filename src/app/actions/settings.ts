@@ -260,6 +260,8 @@ export async function updateFocusTimerSettings(input: {
   sound: string;
   categories?: readonly string[];
   pauseTogether?: boolean;
+  /** #252 — Settings.focusQuickAccess, the header's focus shortcut. */
+  quickAccess?: boolean;
 }) {
   const workspaceId = await currentWorkspaceId();
   const styles = Object.values(FocusTimerStyle) as string[];
@@ -283,6 +285,16 @@ export async function updateFocusTimerSettings(input: {
     ...(input.categories === undefined
       ? {}
       : { focusSoundCategories: normaliseFocusCategories(input.categories) }),
+    // #252 — spread for the same reason, and NOT coerced like `pauseTogether`
+    // above. The difference between the two is the column default and nothing
+    // else: `focusPauseTogether` defaults false, so an omission lands on the
+    // value a fresh row would have had, while `focusQuickAccess` defaults TRUE,
+    // so coercing an omission would silently move a workspace off the default —
+    // which is exactly what a browser still holding the previous deploy's bundle
+    // would do to somebody who only changed their timer style.
+    ...(input.quickAccess === undefined
+      ? {}
+      : { focusQuickAccess: Boolean(input.quickAccess) }),
   };
   await prisma.settings.upsert({
     where: { workspaceId },
