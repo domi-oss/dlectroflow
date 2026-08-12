@@ -260,7 +260,18 @@ export function LibraryDoneDelete({
 
   if (confirming) {
     return (
-      <span className="flex items-center gap-2">
+      // `rootRef` on BOTH branches, and the confirming one is the branch that
+      // needs it (#251 review). React reconciles this `<span>` against the
+      // resting one, reuses the DOM node and detaches whatever ref the previous
+      // element carried — so a confirming render with no `ref` leaves
+      // `rootRef.current` null exactly while focus is inside this subtree, and
+      // `focusIsOursToMove()` collapses to "is focus on <body>". It is not: the
+      // reused button is holding it. The success hand-off was therefore skipped
+      // and `router.refresh()` then unmounted the row from under the user,
+      // dropping focus to <body> a moment later — the WCAG 2.4.3 fault this
+      // component's hand-off exists to close, reached from the very state the
+      // single-flight guard exists to tolerate (🗑 pressed again on a slow write).
+      <span ref={rootRef} className="flex items-center gap-2">
         <button
           type="button"
           className={cn(

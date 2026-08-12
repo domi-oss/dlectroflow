@@ -314,6 +314,52 @@ describe("LibraryDoneDelete — when the write does not land (#251)", () => {
     });
   });
 
+  it("still hands focus to the heading when the 🗑 was armed again mid-flight", async () => {
+    // #251 review — the state the single-flight guard exists to serve, which the
+    // hand-off could not survive.
+    //
+    // `confirm()` collapses the confirm and the resting 🗑 is live again while the
+    // write runs (deliberately — `inFlight` is what refuses a second delete, not
+    // `disabled`, because a disabled element cannot hold focus). So a user on a
+    // slow write taps 🗑 again, which ARMS the confirm even though it starts no
+    // second delete. React then reconciles the resting `<span>` against the
+    // confirming `<span>`, reuses the node and DETACHES `rootRef` — the confirming
+    // branch never carried it — so `rootRef.current` is null exactly while focus
+    // is sitting inside the subtree it is supposed to be measuring.
+    // `focusIsOursToMove()` collapses to "is focus on <body>", which it is not,
+    // the hand-off is skipped, and `router.refresh()` then unmounts the row out
+    // from under the user. That is the WCAG 2.4.3 fault `7405bed` was written to
+    // close, reached from the one press this control is designed to tolerate.
+    const user = userEvent.setup();
+    let settle: () => void = () => {};
+    vi.mocked(deleteBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((r) => {
+        settle = () => r();
+      }),
+    );
+    renderRow();
+
+    await user.click(screen.getByRole("button", { name: /^Delete/ })); // arm
+    await user.click(screen.getByRole("button", { name: /^Delete/ })); // confirm
+    // The second tap. It re-arms and starts nothing — asserted, so this stays a
+    // test about focus rather than about double-writes.
+    await user.click(screen.getByRole("button", { name: /^Delete/ }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(deleteBrainDumpItem).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settle();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        document.getElementById(LIB_PANEL_HEADING_ID),
+      ),
+    );
+  });
+
   it("says the verdict is unknown when the write never answers", async () => {
     // A timeout is not a failure: the delete may well have landed, so the copy
     // must not claim it did not. Retry stays on offer here — unlike the inbox and
