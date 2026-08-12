@@ -419,14 +419,20 @@ describe("capture queue — flush outcomes (#175)", () => {
     expect(readQueue(store)).toEqual([]);
   });
 
-  // Reaching a retryable failure proves the guard is no longer the obstacle, so a
-  // stale mark would keep asking for a sign-in that already happened.
-  it("clears either mark when a retry gets past the guard without saving yet", () => {
-    for (const was of ["session-expired", "account-revoked"] as const) {
-      const store = seeded([capture({ clientKey: "a", blockedBy: was })]);
-      applyFlushOutcome(store, "a", "retry");
-      expect(readQueue(store)[0].blockedBy).toBeUndefined();
-    }
+  // Reaching a retryable failure proves the SESSION guard is no longer the
+  // obstacle, so a stale `session-expired` would keep asking for a sign-in that
+  // already happened.
+  //
+  // ⚠️ This used to loop over both marks and assert both cleared. It was wrong
+  // about `account-revoked`, and asserting it kept the bug in place: a 500 or a
+  // dropped connection is no evidence an account was un-revoked. See the sticky
+  // block below for the sequence #220 makes routine.
+  it("clears session-expired when a retry gets past the guard without saving yet", () => {
+    const store = seeded([
+      capture({ clientKey: "a", blockedBy: "session-expired" }),
+    ]);
+    applyFlushOutcome(store, "a", "retry");
+    expect(readQueue(store)[0].blockedBy).toBeUndefined();
   });
 
   it("removes the storage key entirely once the queue empties", () => {
@@ -456,6 +462,181 @@ describe("capture queue — flush outcomes (#175)", () => {
     const result = applyFlushOutcome(store, "a", "saved");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.queue.map((c) => c.clientKey)).toEqual(["b"]);
+  });
+});
+
+// ⚠️ `account-revoked` is TERMINAL among the refusals, and #220 is what makes
+// that a requirement rather than a tidiness. Precedence is
+// `account-revoked` > `session-expired` > unmarked, and only a SUCCESSFUL outcome
+// clears it.
+//
+// The sequence, every step of it in this tree:
+//
+//  1. A revoked owner's queued capture flushes. `currentWorkspaceId()` finds
+//     `status !== active`, and `POST /api/braindump` answers 403 → the entry is
+//     marked `account-revoked`. The strip deliberately offers NO sign-in, because
+//     signing in cannot help.
+//  2. #220 clears the owner cookie inside that same request —
+//     `clearOwnerSession(jar)` runs immediately BEFORE the throw
+//     (`src/lib/workspace.ts`), and this is a Route Handler, where Next 16 lets
+//     the delete land (`cookies.md`: `.delete` may be called in a Route Handler;
+//     it is only the sealed jar of a Server Component render that refuses).
+//  3. So the NEXT flush carries no owner cookie. `/api/braindump` is neither
+//     public nor gated, so `src/proxy.ts` mints a guest sandbox and forwards it —
+//     and that sandbox cannot be the capture's declared `workspaceId`, so the
+//     route answers 409, `session-expired`.
+//  4. Overwriting the mark then puts "Your session expired. Sign in and these
+//     will save." in front of an account that can never save again — a promise the
+//     app cannot keep, and the exact collapse the spec split 403 from 409 to
+//     prevent.
+//
+// A `retry` (5xx, or the connection dropping) is the same bug in a milder
+// costume: it is no evidence an account was un-revoked.
+//
+// Stickiness is not a trap, and the `saved`/`duplicate` tests below are what say
+// so: if the owner un-freezes the account and the person signs in again, the
+// flush returns 201 or 200 and the entry leaves the queue whatever it was marked
+// with. The mark survives failure; it does not survive success.
+describe("capture queue — a revoked mark is terminal (#175, #220)", () => {
+  const two = [
+    capture({ clientKey: "a", capturedAt: 1 }),
+    capture({ clientKey: "b", capturedAt: 2 }),
+  ];
+
+  // Step 4 above, and the one #220 GUARANTEES rather than merely allows.
+  it("keeps account-revoked when the next flush comes back 409", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    const result = applyFlushOutcome(store, "a", "session-expired");
+
+    const q = readQueue(store);
+    expect(q.map((c) => c.clientKey)).toEqual(["a", "b"]);
+    expect(q[0].blockedBy).toBe("account-revoked");
+    // The caller renders the RETURNED queue without re-reading, so a fix that
+    // only got the store right would still show the downgraded copy once.
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.queue[0].blockedBy).toBe("account-revoked");
+  });
+
+  it("keeps account-revoked when the next flush is a retryable failure", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    applyFlushOutcome(store, "a", "retry");
+
+    expect(readQueue(store)[0].blockedBy).toBe("account-revoked");
+  });
+
+  // Repeated refusals are the normal case — the strip retries on reconnect — so
+  // the rule has to survive being applied more than twice.
+  it("holds the mark across a run of refusals in any order", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    for (const outcome of [
+      "session-expired",
+      "retry",
+      "session-expired",
+      "retry",
+    ] as const) {
+      applyFlushOutcome(store, "a", outcome);
+    }
+
+    expect(readQueue(store)[0].blockedBy).toBe("account-revoked");
+  });
+
+  // ⚠️ The pair that keeps stickiness from becoming a trap. An un-frozen account
+  // signing back in gets a 201 or a 200, and the entry leaves the queue regardless
+  // of its mark — which is why nothing needs a way to un-revoke a mark by hand.
+  it("removes a revoked capture that finally saves, mark and all", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    const result = applyFlushOutcome(store, "a", "saved");
+
+    expect(result.ok).toBe(true);
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual(["b"]);
+  });
+
+  it("removes a revoked capture the server turns out to already hold (200)", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    applyFlushOutcome(store, "a", "duplicate");
+
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual(["b"]);
+  });
+
+  // The UNCHANGED direction. Precedence has to be an ordering, not a freeze: a
+  // 409 seen before the account was frozen must still be upgradeable, or a
+  // capture would keep offering a sign-in after the 403 that proves it useless.
+  it("still upgrades session-expired to account-revoked", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "session-expired");
+    applyFlushOutcome(store, "a", "account-revoked");
+
+    expect(readQueue(store)[0].blockedBy).toBe("account-revoked");
+  });
+
+  it("still overwrites session-expired with session-expired", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "session-expired");
+    applyFlushOutcome(store, "a", "session-expired");
+
+    expect(readQueue(store)[0].blockedBy).toBe("session-expired");
+  });
+
+  it("still clears session-expired on a retryable failure", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "session-expired");
+    applyFlushOutcome(store, "a", "retry");
+
+    expect(readQueue(store)[0].blockedBy).toBeUndefined();
+  });
+
+  // Stickiness is per entry, not per queue: two captures flush independently, and
+  // a mark that leaked sideways would refuse a sign-in to a capture nothing has
+  // refused yet.
+  it("does not spread a revoked mark to the other captures", () => {
+    const store = seeded(two);
+
+    applyFlushOutcome(store, "a", "account-revoked");
+    applyFlushOutcome(store, "b", "session-expired");
+    applyFlushOutcome(store, "b", "retry");
+
+    const q = readQueue(store);
+    expect(q[0].blockedBy).toBe("account-revoked");
+    expect(q[1].blockedBy).toBeUndefined();
+  });
+
+  // A mark set before the reload a discarded Android tab forces is the case the
+  // field is persisted for, so the rule has to hold when the mark arrives from
+  // the STORE rather than from a call earlier in the same session.
+  it("holds a mark it read from storage rather than one it wrote itself", () => {
+    const store = seeded([
+      capture({ clientKey: "a", blockedBy: "account-revoked" }),
+    ]);
+
+    applyFlushOutcome(store, "a", "session-expired");
+
+    expect(readQueue(store)[0].blockedBy).toBe("account-revoked");
+  });
+
+  // The reconcile path: the mark this tab must not downgrade can be one the OTHER
+  // tab wrote between this tab's read and its write. `applyOutcome` sees it only
+  // because it re-reads, which is the same property the resurrection tests rely on.
+  it("holds a mark the other tab wrote while this tab was mid-flush", () => {
+    const store = contendedStore([capture({ clientKey: "a" })], (other) => {
+      applyFlushOutcome(other, "a", "account-revoked");
+    });
+
+    applyFlushOutcome(store, "a", "session-expired");
+
+    expect(readQueue(store)[0].blockedBy).toBe("account-revoked");
   });
 });
 

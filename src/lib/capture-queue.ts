@@ -117,10 +117,10 @@ export const CAPTURE_QUEUE_MAX_BYTES = 64 * 1024;
  * A list with the union derived from it, rather than a union with a list beside
  * it, and that direction is the whole point: three separate things need to agree
  * about these values — the type, the runtime guard in {@link isQueuedCapture},
- * and {@link applyOutcome}, which turns an outcome into a mark — and a
- * hand-copied list is what drifts the day a third refusal state is added. Same
- * shape as `OWNER_BREAKDOWN_ALLOWLIST` in `constants.ts`, which derives
- * `BreakdownModel` the same way.
+ * and {@link BLOCK_PERSISTENCE}, which decides which of them a later refusal may
+ * overwrite — and a hand-copied list is what drifts the day a third refusal state
+ * is added. Same shape as `OWNER_BREAKDOWN_ALLOWLIST` in `constants.ts`, which
+ * derives `BreakdownModel` the same way.
  *
  * Exported because `capture-queue.test.ts` asserts the guard accepts every member
  * from the outside — so a value added here is covered by that test the moment it
@@ -168,6 +168,11 @@ export type QueuedCapture = {
    * A first draft of this module collapsed both into `needsSignIn: boolean` under
    * the 409 wording. Caught in review of the spec (!332); the distinction is the
    * whole reason this is a union.
+   *
+   * ⚠️ **The two are not interchangeable in time either: `account-revoked` is
+   * sticky.** A later 409 or a retryable failure cannot downgrade it, because #220
+   * makes exactly that sequence routine — see {@link applyOutcome} and
+   * {@link BLOCK_PERSISTENCE}, where the mechanism is written out.
    *
    * `undefined` means not refused, or refused for a reason that has since cleared.
    *
@@ -450,6 +455,10 @@ export function enqueue(
  * `session-expired`, `account-revoked` and `retry` all KEEP the capture. Nothing in
  * this module ever drops words the server has not accounted for.
  *
+ * ⚠️ **The mark is not a plain overwrite.** `account-revoked` outranks both of the
+ * others and only a successful outcome clears it — see `applyOutcome` below for
+ * the #220 sequence that makes a later 409 a certainty rather than a possibility.
+ *
  * The removal or the mark is applied to the queue as it is in the store, not to
  * the one this tab last saw — `applyOutcome` below is where that matters and why.
  *
@@ -500,6 +509,39 @@ export function applyFlushOutcome(
  * tell "deliberately removed" apart from "not yet known to me". A capture another
  * tab flushed is simply absent from `queue`, so the filter and the map below are
  * each a no-op on it, which is exactly right.
+ *
+ * ── ⚠️ `account-revoked` is STICKY, and #220 is why (#175) ───────────────────
+ *
+ * Precedence is **`account-revoked` > `session-expired` > unmarked**, and only a
+ * SUCCESSFUL outcome clears the top of it. Written as a plain overwrite — which is
+ * what this was — a later refusal downgrades the mark in either direction, and
+ * #220 does not merely allow that sequence, it **guarantees** it:
+ *
+ *  1. A revoked owner's capture flushes, `currentWorkspaceId()` finds
+ *     `status !== active`, and the route answers **403** → `account-revoked`. The
+ *     strip offers no sign-in, deliberately, because signing in cannot help.
+ *  2. **#220 deletes the owner cookie inside that same request** —
+ *     `clearOwnerSession(jar)` runs immediately before the throw in
+ *     `src/lib/workspace.ts`, and `POST /api/braindump` is a Route Handler, where
+ *     the delete lands (it is only the sealed jar of a Server Component render
+ *     that refuses it).
+ *  3. So the **next** flush carries no owner cookie. `/api/braindump` is neither
+ *     public nor gated, so `src/proxy.ts` mints a guest sandbox — which cannot be
+ *     the capture's declared `workspaceId`, so the route answers **409**.
+ *  4. A plain overwrite then replaces `account-revoked` with `session-expired`,
+ *     and the strip goes back to "Your session expired. Sign in and these will
+ *     save." **That is a promise the app cannot keep, made to an account that can
+ *     never save again** — the exact collapse the spec split 403 from 409 to
+ *     prevent, arrived at from the one direction nothing was watching.
+ *
+ * A `retry` (5xx, or the connection dropping) is the same bug in a milder costume:
+ * a failed request is no evidence an account was un-revoked.
+ *
+ * **It is not a trap, and that is what `saved`/`duplicate` above are doing.** If
+ * the owner un-freezes the account and the person signs in, the flush returns 201
+ * or 200 and the entry leaves the queue whatever it was marked with — so nothing
+ * needs a way to un-revoke a mark, and no capture can be stranded by one. The mark
+ * survives failure; it does not survive success.
  */
 function applyOutcome(
   queue: QueuedCapture[],
@@ -511,15 +553,50 @@ function applyOutcome(
   }
   return queue.map((c) => {
     if (c.clientKey !== clientKey) return c;
-    if (outcome === "session-expired" || outcome === "account-revoked") {
-      return { ...c, blockedBy: outcome };
-    }
-    // `retry` — reaching a retryable failure proves the guard is no longer what
-    // is stopping this capture, so the mark must go. Left in place, the strip
-    // would keep asking for a sign-in that has already happened.
+
+    // A sticky mark outranks every unsuccessful outcome, including another copy
+    // of itself, so the entry is returned untouched.
+    if (isStickyBlock(c.blockedBy)) return c;
+
+    if (isCaptureBlockReason(outcome)) return { ...c, blockedBy: outcome };
+    // `retry` — reaching a retryable failure proves the SESSION guard is no
+    // longer what is stopping this capture, so a `session-expired` mark must go.
+    // Left in place, the strip would keep asking for a sign-in that has already
+    // happened. It does NOT prove anything about a revoked account, which is why
+    // the sticky check above comes first.
     const { blockedBy: _cleared, ...rest } = c;
     return rest;
   });
+}
+
+/**
+ * How firmly each refusal is held once written.
+ *
+ * `"sticky"` — only a successful outcome may clear it. `"transient"` — any later
+ * outcome may replace or clear it.
+ *
+ * A `Record<CaptureBlockReason, …>` rather than a second list of literals, and the
+ * exhaustiveness is the point: adding a third refusal state to
+ * {@link CAPTURE_BLOCK_REASONS} makes this object fail to compile until somebody
+ * says where it sits. That is the decision that actually matters — a hand-copied
+ * `=== "account-revoked"` somewhere in {@link applyOutcome} is precisely what lets
+ * the next state inherit "transient" by silence, which is how this bug reads: the
+ * default is the wrong one, so it must not be reachable by omission.
+ */
+const BLOCK_PERSISTENCE: Record<CaptureBlockReason, "sticky" | "transient"> = {
+  // 409 — the session moved on, and signing in again fixes it. A later outcome
+  // knows more than this one does: a 403 supersedes it, and a retryable failure
+  // proves the session is no longer the obstacle.
+  "session-expired": "transient",
+  // 403 — the account was revoked. Nothing short of the account being un-frozen
+  // changes that, and the only proof of THAT reaching this module is a 201 or a
+  // 200, both of which remove the entry outright.
+  "account-revoked": "sticky",
+};
+
+/** Is the mark this entry already carries one only a success may clear? */
+function isStickyBlock(held: CaptureBlockReason | undefined): boolean {
+  return held !== undefined && BLOCK_PERSISTENCE[held] === "sticky";
 }
 
 /**
