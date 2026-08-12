@@ -7,9 +7,14 @@
  *  - rewardStepDone routes the completion path through the same engagement fn.
  *  - maybeAwardInboxZero awards the once-ever Inbox-zero badge.
  *
- * The interactive-tx row lock itself is proven against a real DB in
- * rewards.integration.test.ts; here the tx is mocked to exercise the pure
- * once/day decision + badge fan-out.
+ * ⚠️ The interactive-tx row lock in `touchStreakOnCompletion` is NOT proven
+ * against a real DB anywhere — corrected #251, and this docblock previously
+ * claimed it was, citing `rewards.integration.test.ts`, a file that does not
+ * exist. `touchStreakOnCompletion` is mocked in every test that names it, so the
+ * `SELECT … FOR UPDATE` at `rewards.ts:596` is implemented but unexercised. The
+ * gap is tracked on #233, whose severity table rested on the same false
+ * citation. Here the tx is mocked to exercise the pure once/day decision +
+ * badge fan-out, which is all this file ever covered.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
