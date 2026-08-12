@@ -48,6 +48,23 @@ wait. It deliberately holds **one** failure notice rather than a queue.
 Verified against `main` at `8d5db9a`, 2026-08-11 — not inherited from the 2026-08-08 grounding note,
 two of whose line references had already rotted:
 
+⚠️ **Two different kinds of claim live in this document and review of it was right to say they had been
+blurred together. They are labelled from here on.**
+
+- **`main`-verified** — the table immediately below. True of the deployed tree, checkable by anyone.
+- **Sibling-branch verified** — anything describing `src/lib/capture-queue.ts`, `src/lib/capture-write.ts`
+  or `POST /api/braindump` as *existing code*: `byteLength`, `COMMIT_ATTEMPTS`, `newClientKey`'s three
+  tiers, `isQueuedCapture`, `MAX_BODY_BYTES`, and every measurement taken against them. **None of that is
+  on `main`.** It lives on `feat/175-capture-queue-server` — the branch of `!334`, still open — and this
+  spec's own sequencing says `!332` merges **first**.
+
+**So for a window after this document lands, its most concrete statements describe code a reader on `main`
+cannot find**, which is the mirror image of the dangling-reference problem the merge order exists to
+prevent: three files on `!334` cite *this* document. Both are resolved by `!334` following closely, and
+neither is resolved by pretending the other side already exists. **Where this document says "the code
+does X", read it as "the implementation on `!334` does X, and this design is what it was written
+against."**
+
 | Fact | Where |
 |---|---|
 | `createBrainDumpItem(text: string)` takes **only text**; the row id is a server-side `cuid()` | `src/app/actions/braindump.ts:53`, `prisma/schema.prisma:327` |
@@ -230,7 +247,11 @@ answer:**
    written yet, so the union puts it back permanently after the user was told it saved. The correct
    primitive is **re-applying this tab's own delta to the fresh read**. Measured: a union implementation
    passes **37 of 39** tests, including all 31 that predate this work, and fails only the two resurrection
-   cases.
+   cases. ⚠️ **That measurement is sibling-branch evidence, reproducible only on
+   `feat/175-capture-queue-server`** (`!334`) — `src/lib/capture-queue.test.ts` there, by replacing
+   `applyOutcome`'s delta with a union. Labelled because review of this spec correctly pointed out that a
+   test count cited as evidence cannot be checked from a docs-only MR, and an unverifiable number reads as
+   stronger than a described mechanism — the same trap as a citation to a file nobody opens.
 3. **No tombstones and no per-entry timestamps are needed** — which follows from (2). "Deliberately
    removed" never has to be *inferred*, because the only entry ever added is the one `enqueue` was handed,
    and the tab doing the removing removes from a read it took itself. A capture another tab flushed is
@@ -966,9 +987,13 @@ TDD, failing test first, in this order:
    retention on `409`/`403`/`5xx` **with the two `blockedBy` values asserted separately** (a test that
    only checks "it was kept" would pass the collapsed-state bug this spec was reviewed for), clearing
    `blockedBy` on `5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. No React, no DOM.
-   - **All three cap refusals are separate tests, because they have different remedies** and a single
-     "the capture was refused" assertion passes a collapsed implementation: the 20-item bound, the
-     queue **total** reaching 64 KB, and **one** capture exceeding 64 KB on its own. The middle one is
+   - **All three cap refusals get separate tests** — the 20-item bound, the queue **total** reaching 64 KB,
+     and **one** capture exceeding 64 KB on its own — because a single "the capture was refused" assertion
+     passes a collapsed implementation. ⚠️ **Why they are three states and not two is argued once, in the
+     byte-condition table above; it is deliberately not restated here.** Review of this spec flagged that
+     reasoning as appearing in three places, which is a drift trap: the copy for these states has already
+     been corrected twice, and three copies of the argument is how one of them ends up describing a rule
+     the other two no longer follow. The middle one is
      the case an earlier draft of this spec did not have a message for at all.
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
