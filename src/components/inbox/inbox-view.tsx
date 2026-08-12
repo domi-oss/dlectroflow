@@ -289,14 +289,25 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    `reopenItem` says so in as many words ("the same Done row open in two
  *    tabs"): see its reversal counted off what the writes CHANGED,
  *    `touchStreakOnCompletion`'s interactive-transaction row lock
- *    (`rewards.ts:596`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *    (`rewards.ts:677`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
  *
- *    ⚠️ Corrected #251: this used to say the row lock was "proved against a real
- *    database in `rewards.integration.test.ts`". **That file does not exist**, and
- *    `touchStreakOnCompletion` is mocked in every test that names it — so the lock
- *    is implemented and unexercised. The three defences above are not equally
- *    evidenced, and the one carrying a false citation was the one nobody checked.
- *    Tracked on #233, which rested its severity table on the same sentence.
+ *    ⚠️ Corrected #251, then again on #253: this used to say the row lock was
+ *    "proved against a real database in `rewards.integration.test.ts`". #251's
+ *    correction — **that file does not exist** — was true and read as though the
+ *    proof had never been written. It had. `src/lib/rewards.integration.test.ts`
+ *    existed from #21 (`ff9e88a`) until **#251's `783a6bf` deleted all 113 lines
+ *    of it**, in a commit whose message documents the inbox-zero gate it was
+ *    actually about and never mentions the deletion. So the accurate statement is
+ *    not "unproven" but "the proof was removed and the citation outlived it",
+ *    which is a different failure with a different fix.
+ *
+ *    The lock is therefore implemented and, right now, unexercised —
+ *    `touchStreakOnCompletion` is mocked in every test file that names it
+ *    (`grep -rl 'touchStreakOnCompletion: vi.fn()' src` returned 16 on
+ *    2026-08-12; the only non-mock references are `rewards.ts`, `braindump.ts`
+ *    and this comment). **A real-Postgres proof is being restored under #233**,
+ *    which rested its own severity table on the same sentence. Treat this bullet
+ *    as unsettled until that lands, not as one of three equal defences.
  *
  *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
  *    two truly simultaneous completions of one to-do could bank twice. It is
