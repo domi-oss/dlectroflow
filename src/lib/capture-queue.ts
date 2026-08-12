@@ -28,6 +28,58 @@
 // capture keeps its position until the server accounts for it; nothing here
 // re-sorts, because "the order I thought of them in" is the only order a brain
 // dump has.
+//
+// Two tabs break the tie by **write order, not by `capturedAt`**: whatever is in
+// the store keeps the order it has, and the incoming capture goes on the end. So
+// a capture typed earlier on a phone can land after one typed later on a laptop.
+// That is preferred to sorting the merged queue by `capturedAt`, for two reasons:
+// the two clocks are independent and can be skewed by minutes, and a re-sort
+// would move a capture the user is already watching in the strip.
+//
+// ── Two tabs, one origin: what the merge does, and what it does not ─────────
+//
+// `localStorage` is shared by every tab and window of the origin and has neither
+// a compare-and-swap nor a lock, so a read-modify-write against it is not safe:
+// the tab that writes second can drop what the tab that wrote first added. #233
+// established that this is the one kind of concurrency this app genuinely has —
+// two router instances, two tabs or a tab and a phone, which no in-memory guard
+// can span. It is ordinary rather than exotic here, because the target is Android
+// Chrome, which discards a backgrounded tab and reopens it, so overlapping
+// lifetimes are the normal case.
+//
+// Both writers below therefore **reconcile against the store instead of writing a
+// snapshot back over it**:
+//
+//  * Every cap check and every serialisation is done first, and only THEN is the
+//    stored string re-read; if it moved, the write is abandoned and recomputed
+//    against what is there now. So the only thing left inside the window is the
+//    `setItem` itself. That ordering is the point: serialising a 64 KB queue on a
+//    phone is the expensive part of this operation, and it used to sit in there.
+//  * `enqueue` adds its one entry to whatever it finds. `applyFlushOutcome`
+//    applies its own removal or mark to whatever it finds. Neither is a union of
+//    two queues — see `applyOutcome`, where the difference is the difference
+//    between losing a capture and RESURRECTING one the user was told had saved.
+//  * The caps are measured against the MERGED queue, so merging cannot become a
+//    way past 20 items or 64 KB. Over either, the incoming capture is the one
+//    refused and nothing already queued is touched — the same contract as the cap
+//    itself, including when another tab has already filled or overfilled the
+//    queue on its own.
+//
+// **The residual, and where the rest of it lives.** This narrows the window; it
+// does not close it, and no version of this module can. Two tabs can still
+// interleave inside the one read-compare-write pair, and worse, `getItem` carries
+// no ordering guarantee against another tab's `setItem` — a read can be out of
+// date the instant it returns, and no amount of re-reading detects that. Closing
+// it needs a tab to find out AFTER THE FACT that the queue no longer holds its own
+// pending capture, and to put it back: a `storage` event subscription plus somewhere
+// to keep "what I am still waiting on". `storage` fires only in the OTHER tabs and
+// never in the one that wrote (see `HYPER_FOCUS_EVENT` in `hyper-focus.ts` for the
+// same asymmetry), which is exactly what makes it the right signal — and it needs a
+// component lifecycle to subscribe and unsubscribe, so it belongs to the hook.
+//
+// **Deferred to MR 2, which owns the hook — not overlooked.** Same call as "no
+// flush-on-exit" above: named here so nobody later reads the gap as an oversight
+// and nobody closes it by putting an event listener in a pure module.
 
 /** The `localStorage` subset this needs. Lets tests hand over a plain object. */
 export type QueueStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
