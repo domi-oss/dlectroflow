@@ -128,6 +128,24 @@ type QueuedCapture = {
    * cleared". Cleared as soon as an attempt gets past the guard.
    */
   blockedBy?: "session-expired" | "account-revoked";
+  /**
+   * Has a flush been attempted for this capture AFTER a fresh sign-in?
+   *
+   * Only meaningful alongside `blockedBy: "session-expired"`, and it exists
+   * because a `409` does not distinguish "that workspace isn't yours" from "that
+   * workspace was purged" — deliberately, since telling a caller which one it is
+   * would leak the existence of a workspace to whoever supplied its id. A guest
+   * sandbox that has been purged can never be resolved again, so *"sign in and
+   * these will save"* becomes a promise the app cannot keep, repeated forever.
+   *
+   * The client cannot ask which case it is in, but it can notice that the remedy
+   * it offered has already failed: a `409` on a flush attempted after a sign-in
+   * has falsified the promise, and the copy stops offering the control. Persisted
+   * for the same reason `blockedBy` is — otherwise the distinction dies on the
+   * reload a discarded tab forces, and the user is told to sign in again by an app
+   * that has already watched them do it.
+   */
+  signInTried?: true;
 };
 ```
 
@@ -163,10 +181,29 @@ megabytes; the item cap exists to keep the strip legible and the wait comprehens
 length limit on capture text anywhere** — no `maxLength` on the input, no check in
 `createBrainDumpItem`, and `BrainDumpItem.text` is an unbounded Postgres `text`. So one pasted essay
 can be arbitrarily large, and without a byte bound a single capture could exhaust the quota and throw
-`QuotaExceededError` on the write this whole design depends on being reliable. 64 KB total, checked
-before enqueue, and a single capture over that bound is refused **with its own message** (below).
-Whether capture text should have a limit *at all* is a separate question and not this issue's to
-answer.
+`QuotaExceededError` on the write this whole design depends on being reliable. Whether capture text
+should have a limit *at all* is a separate question and not this issue's to answer.
+
+**64 KB is a bound on the total, and it therefore fails in two different ways — which is three refusal
+states, not two.** An earlier draft of this section said "64 KB total … and a single capture over that
+bound is refused with its own message", which reads as though there were one byte check. There are two,
+they have different remedies, and the wording table below carries a separate sentence for each:
+
+| Byte condition | Why it is different | Remedy the copy must offer |
+|---|---|---|
+| **One capture exceeds 64 KB on its own** | Nothing that is already queued is relevant; this capture cannot ever fit | Shorten *this* one, or copy it elsewhere |
+| **The queue total is at 64 KB and a further capture, however short, does not fit** | This capture is fine; the queue is full | Wait for some to save — **shortening will not help** |
+
+Collapsing them repeats round 1's defect in a new place: telling someone whose two-word capture was
+refused to *"shorten it"* is advice that cannot work, in exactly the way telling someone who pasted one
+essay that *"20 captures are already waiting"* was a number that may well be zero. **A refusal message
+whose remedy the user cannot act on is the same defect as a refusal message with the wrong number in
+it.**
+
+Note the item cap and the total-byte cap are *not* the same state either, even though both mean "the
+queue is full": the item cap can state a number the user recognises (20), and the byte cap cannot,
+because a byte total is not something anyone can count in their own queue. So the byte-total copy says
+what to do without quoting a figure.
 
 **The two caps do not share a message.** An earlier draft said an over-large single
 capture was "refused on the same message", which would tell someone who pasted one
@@ -323,16 +360,46 @@ it. It says what is true, and each state gets its own sentence because each has 
 | State | What it says |
 |---|---|
 | waiting | *"3 waiting to save"* |
-| `blockedBy: "session-expired"` (409) | *"Your session expired. Sign in and these will save."* |
+| `blockedBy: "session-expired"` (409), sign-in not yet tried | *"Your session expired. Sign in and these will save."* |
+| `blockedBy: "session-expired"` (409), **and it 409'd again after a sign-in** | *"These can't be saved to this account any more. Your words are still here — copy them somewhere safe."* — no sign-in offered, because it has already been tried and did not work |
 | `blockedBy: "account-revoked"` (403) | *"This account can no longer save. Your words are still here — copy them somewhere safe."* — no sign-in offered, because signing in will not help |
 | item cap reached | *"20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to."* |
-| byte cap reached | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
+| **one capture** over the byte bound | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
+| **queue total** at the byte bound | *"There's no room to hold more until some of these save. Your words are still in the box; copy them somewhere safe if you need to."* — no "shorten it", because the capture's own length is not the problem |
+
+**Why `409` needs two sentences and not one: a purged guest sandbox makes the sign-in promise false.**
+A guest workspace is a real workspace **with a TTL**. If it is purged, signing in does not restore it —
+a fresh guest sandbox gets a **new** `workspaceId`, so the queued capture's declared `workspaceId` can
+never be resolved again and the flush 409s **forever**. *"Sign in and these will save"* is then a
+promise the app cannot keep, and repeating it indefinitely is the same defect as the `409`/`403`
+collapse round 1 caught: **copy that sends the user to a remedy which cannot work.**
+
+**The fix is client-side, and deliberately so.** The server must not distinguish "that workspace was
+purged" from "that workspace isn't yours" in its response — the two are the same `409` precisely because
+telling a caller which one it is would leak the existence of a workspace to someone who supplied its id,
+and this route's whole security property is that the declared `workspaceId` can only ever *narrow*
+access. So the server keeps saying `409` and says nothing more.
+
+What the client knows without asking is whether **a sign-in has happened since the block**. The promise
+is therefore made **once**: a `409` that arrives on a flush attempted *after* a fresh sign-in has
+falsified it, and the copy moves to the second sentence and stops offering a control that has already
+been shown not to work. No new server state, no new response code, no existence oracle — just refusing
+to repeat a claim the app has already watched fail.
+
+⚠️ **This is not the same as `403`**, even though the two second sentences are nearly identical. `403`
+knows on the first attempt that sign-in cannot help. The `409`-after-sign-in state only learns it by
+trying, which is why it is a transition rather than a state the server can hand over — and why
+`blockedBy` alone cannot encode it. The persisted queue entry needs to record that a sign-in has been
+attempted for it, or the distinction dies on the reload a discarded tab forces, which is the same
+argument that made `blockedBy` persisted rather than component state.
 
 **a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
 `role="status"` announces the waiting count (a background count is not an interruption); an assertive
-`role="alert"` announces both `blockedBy` states and both cap-reached states. Each element's `role` is
-**fixed for the lifetime of the strip**, and each is **mounted empty from the strip's first paint** and
-then filled.
+`role="alert"` announces **every refusal state** — the two `blockedBy` values, the `409`-after-sign-in
+transition, and all three cap-reached states. Each element's `role` is **fixed for the lifetime of the
+strip**, and each is **mounted empty from the strip's first paint** and then filled. (Stated as "every
+refusal" rather than by counting them, because the count has now changed twice under review and a
+sentence that enumerates states goes stale the moment one is added.)
 
 Both halves of that are load-bearing:
 
@@ -384,14 +451,22 @@ date moves. That gate is the reason this cannot be forgotten.
 
 TDD, failing test first, in this order:
 
-1. **Queue module** (`src/lib/capture-queue.ts`, pure) — enqueue, ordering, refusal at the 20-item
-   bound, refusal at the 64 KB bound, refusal of a single over-large capture, removal on `200`/`201`,
+1. **Queue module** (`src/lib/capture-queue.ts`, pure) — enqueue, ordering, removal on `200`/`201`,
    retention on `409`/`403`/`5xx` **with the two `blockedBy` values asserted separately** (a test that
    only checks "it was kept" would pass the collapsed-state bug this spec was reviewed for), clearing
-   `blockedBy` on `5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. The
-   20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with the
-   words still in the field**, which is the assertion that stops the cap becoming silent eviction in a
-   later refactor. No React, no DOM.
+   `blockedBy` on `5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. No React, no DOM.
+   - **All three cap refusals are separate tests, because they have different remedies** and a single
+     "the capture was refused" assertion passes a collapsed implementation: the 20-item bound, the
+     queue **total** reaching 64 KB, and **one** capture exceeding 64 KB on its own. The middle one is
+     the case an earlier draft of this spec did not have a message for at all.
+   - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
+     the words still in the field**, which is the assertion that stops the cap becoming silent eviction
+     in a later refactor.
+   - **`signInTried` is asserted as a transition, not a state:** a `409` sets
+     `blockedBy: "session-expired"` and offers a sign-in; a second `409` on a flush attempted after a
+     sign-in sets `signInTried` and the copy stops offering it. A test that only checks "a 409 keeps
+     the capture" passes an implementation that promises a sign-in forever to a user whose guest
+     sandbox was purged and can never be resolved again.
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
