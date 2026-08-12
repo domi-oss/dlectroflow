@@ -615,7 +615,13 @@ describe("findWeakFocusIndicators", () => {
       "input.ts",
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].reason).toContain("2.4.11");
+    // The criterion a colour swap misses is **2.4.13 Focus Appearance (AAA)** —
+    // it has no indicator area and no focused/unfocused contrast. Re-pointed
+    // from "2.4.11" by #258, which was the wrong number AND the wrong level; the
+    // message now has to carry the level too, because "you are failing AA" and
+    // "you are below a bar this project chose" are different instructions.
+    expect(findings[0].reason).toContain("2.4.13");
+    expect(findings[0].reason).toContain("AAA");
     expect(findings[0].reason).toContain("focus-visible:bg-accent");
   });
 
@@ -797,6 +803,14 @@ describe("findWeakFocusIndicators", () => {
     );
     expect(findings).toHaveLength(1);
     expect(findings[0].reason).toContain("no visible focus indicator");
+    // #258 — the two messages must name DIFFERENT criteria, because the two
+    // failures are different: nothing at all is 2.4.7 Focus Visible, which is AA
+    // and non-negotiable; a colour swap is 2.4.13, which is AAA and a project
+    // choice. A developer acts differently on those two, so a message that
+    // blurred them would be the defect #258 fixed, reintroduced.
+    expect(findings[0].reason).toContain("2.4.7");
+    expect(findings[0].reason).toContain("AA");
+    expect(findings[0].reason).not.toContain("2.4.13");
   });
 });
 
@@ -858,9 +872,272 @@ describe("src/ WCAG-AA class hygiene (#109, #117)", () => {
     );
   });
 
-  it("replaces every removed focus outline with a real indicator (#117, WCAG 2.4.11)", () => {
+  it("replaces every removed focus outline with a real indicator (#117, WCAG 2.4.7)", () => {
     expect(
       repoOffenders(findWeakFocusIndicators, REVIEWED_FOCUS_INDICATORS),
     ).toEqual([]);
+  });
+});
+
+// ── Criterion citations ────────────────────────────────────────────────────
+//
+// #258 — the three focus criteria of WCAG 2.2, read off the specification rather
+// than recalled:
+//
+//   2.4.7   Focus Visible                  AA    (since WCAG 2.0)
+//   2.4.11  Focus Not Obscured (Minimum)   AA    (new in 2.2)
+//   2.4.13  Focus Appearance               AAA   (new in 2.2)
+//
+// So "2.4.11 Focus Appearance" is not a criterion at all: it welds one
+// criterion's number to a different one's name. **The level then follows the
+// name**, which is why this was not a typo — the weld reported a AAA bar as an AA
+// obligation in five places in `a11y-class-hygiene.ts`, in `CLAUDE.md`, and in
+// fourteen component comments that had copied it, before it reached a design spec
+// in !332 and Duo caught it there.
+//
+// It is asserted mechanically rather than left as a note to be careful, because
+// the propagation is the actual failure mode: every one of those fourteen sites
+// was written by somebody reading a neighbouring file. The repo has already paid
+// for this once in the target-size family — `note-field.tsx` and
+// `row-menu-viewport-fit.spec.ts` both had to correct 2.5.8 (Minimum, AA, 24x24)
+// having been cited for a voluntary 44x44, which is 2.5.5 (Enhanced, AAA).
+//
+// ── The invariant, and why it is not a list of banned strings ──────────────
+//
+// The first draft of this guard banned the two known welds by pattern, with a
+// 40-character window between number and name. It reported the whole focus family
+// as broken **including the corrected enumeration above**, because a list that
+// names three criteria in a row puts one number within 40 characters of the next
+// one's name. A guard that fires on the fix is worse than no guard: the obvious
+// way to quiet it is to stop enumerating, which is exactly the prose #258 needed
+// to add.
+//
+// So the invariant is inverted and stated positively: **where one of these
+// numbers is directly followed by a criterion name, it must be its own name, and
+// any level stated alongside must be its own level.** That flags every weld,
+// including welds nobody has thought of yet, and it cannot fire on a correct
+// citation however many are listed together.
+//
+// Bare numbers stay legal, deliberately. "nothing checks 2.4.11" is an honest and
+// necessary sentence — this module's own gap 5 is one — and only a number wearing
+// the wrong name is a defect.
+//
+// Numbers and levels below are from the WCAG 2.2 specification, checked for #258.
+// Only criteria actually verified are policed: an unverified entry here would be
+// the same defect as the one being fixed, wearing a guard's authority.
+const CRITERION_SPEC: Record<string, { name: string; level: string }> = {
+  "1.4.11": { name: "Non-text Contrast", level: "AA" },
+  "2.4.3": { name: "Focus Order", level: "A" },
+  "2.4.7": { name: "Focus Visible", level: "AA" },
+  "2.4.11": { name: "Focus Not Obscured", level: "AA" }, // (Minimum)
+  "2.4.12": { name: "Focus Not Obscured", level: "AAA" }, // (Enhanced)
+  "2.4.13": { name: "Focus Appearance", level: "AAA" },
+  "2.5.3": { name: "Label in Name", level: "A" },
+  "2.5.5": { name: "Target Size", level: "AAA" }, // (Enhanced)
+  "2.5.8": { name: "Target Size", level: "AA" }, // (Minimum)
+};
+
+// A policed number, an optional `(Minimum)`/`(Enhanced)` qualifier, then a
+// criterion-name-shaped phrase. The name must follow the number directly — only a
+// bracket, dash, colon or comma may sit between — which is what keeps an
+// enumeration legal. Ordinary prose after a number ("2.4.7 has no threshold")
+// starts lowercase, captures nothing, and is skipped rather than flagged.
+//
+// `in` is the ONLY lowercase word allowed inside a name, because "Label in Name"
+// is the only policed criterion that contains one. A first draft also allowed
+// `of` and `for` on the assumption that some name would need them; none does, and
+// the cost was immediate — `note-field.tsx`'s correct "WCAG 2.5.3 Label in Name
+// for voice control" captured "Label in Name for" and was reported as a misweld.
+// A guard's alternation is not the place for speculative generality: every extra
+// word it accepts is a sentence it can misread.
+const CITED_CRITERION =
+  /\b([12]\.[45]\.\d{1,2})\s*(?:\((?:Minimum|Enhanced)\)\s*)?(?:[-—:,]\s*)?((?:Non-text|[A-Z][a-z]+)(?:[ -](?:Non-text|in|[A-Z][a-z]+)){0,3})/g;
+
+/** `AA`, `AAA` or `A` stated close enough to a citation to be read as its level. */
+const STATED_LEVEL = /\b(AAA|AA|A)\b/;
+
+/**
+ * Every criterion citation in one window, with what is wrong about it.
+ *
+ * Returns the corrections rather than a boolean so the failure names the right
+ * answer at the point of failure. A guard that says only "line 729 is wrong"
+ * makes the next person repeat the specification lookup that produced #258.
+ */
+function citationFaults(window: string): string[] {
+  const faults: string[] = [];
+  for (const match of window.matchAll(CITED_CRITERION)) {
+    const [whole, number, name] = match;
+    const spec = CRITERION_SPEC[number];
+    if (!spec) continue;
+    if (name !== spec.name) {
+      const owner = Object.entries(CRITERION_SPEC).find(
+        ([, value]) => value.name === name,
+      );
+      faults.push(
+        `${number} is "${spec.name}" (${spec.level}), not "${name}"` +
+          (owner ? ` — "${name}" is ${owner[0]}, ${owner[1].level}` : ""),
+      );
+      continue;
+    }
+    // The level is the half that misleads hardest, so it is checked wherever it
+    // is stated: told they fail AA a developer treats it as non-negotiable, told
+    // AAA they know it is a project's choice. Only the FIRST level token in the
+    // 40 characters after this citation counts — beyond that it is somebody
+    // else's level.
+    //
+    // Sliced from the match's OWN index, not from `indexOf(name)`. Two citations
+    // of the same name in one sentence — "2.5.5 Target Size (Enhanced) is AAA;
+    // 2.5.8 Target Size (Minimum) is AA" — both resolve `indexOf` to the first
+    // one, so the second read the first one's level and was reported as wrong.
+    // Caught by the honest-citation half of the control below, which is the half
+    // that would have been quietly dropped as "too strict" if it had not been
+    // written down as a requirement first.
+    const from = (match.index ?? 0) + whole.length;
+    const stated = STATED_LEVEL.exec(window.slice(from, from + 40));
+    if (stated && stated[1] !== spec.level) {
+      faults.push(
+        `${number} ${spec.name} is ${spec.level}, stated here as ${stated[1]}`,
+      );
+    }
+  }
+  return faults;
+}
+
+/**
+ * Every file whose prose a developer reads while deciding whether a change is
+ * compliant — source, specs and the repo's own docs. Wider than
+ * {@link scannedFiles}, which walks `src/` only and skips tests, because the
+ * mislabel spread through exactly the files that one excludes: two test
+ * docblocks, an e2e spec and `CLAUDE.md`.
+ */
+function citationScannedFiles(): string[] {
+  const files = ["CLAUDE.md", "CHANGELOG.md", "AGENTS.md", "README.md"];
+  for (const root of ["src", "e2e", "docs"]) {
+    for (const entry of readdirSync(root, {
+      recursive: true,
+      encoding: "utf8",
+    })) {
+      if (!/\.(ts|tsx|mts|md)$/.test(entry)) continue;
+      files.push(path.join(root, entry));
+    }
+  }
+  // This file cannot scan itself: the table above names the mislabel in order to
+  // ban it, and the prose explaining why names it too. Same trade-off — and same
+  // resolution — as `SELF` above, and nothing is lost, because a citation in a
+  // guard's own rule table is not a citation anybody reads for guidance.
+  return files.filter((file) => file !== CITATION_SELF);
+}
+
+const CITATION_SELF = path.join("src", "lib", "a11y-class-hygiene.test.ts");
+
+/**
+ * A line joined to the one after it, with comment markers and indentation
+ * flattened away.
+ *
+ * Matching line by line is not good enough and this is measured, not
+ * hypothetical: the first version of this guard reported six of the eight welded
+ * citations in the tree and called the rest clean, because `add-note-button.tsx`
+ * and `note-field.tsx` had both wrapped the citation at 80 columns —
+ * `WCAG 2.4.11 Focus` / `// Appearance`. Prettier's `printWidth` guarantees that
+ * happens, so a per-line scan is structurally unable to police an 80-column repo.
+ *
+ * The same failure as `regexp-source-hygiene`'s first version, which silently
+ * missed four files and called them clean, and the reason that guard now asserts
+ * its own reach. A pairwise window is the cheap fix: it keeps a usable line
+ * number, where flattening the whole file would not.
+ *
+ * Each line is stripped of its comment marker **before** the join, not after.
+ * Stripping after leaves the second line's `//` sitting between the two halves of
+ * a wrapped name, so `WCAG 2.4.11 Focus` + `// Appearance` reads as
+ * `2.4.11 Focus // Appearance` and the name never matches. That is not a
+ * hypothetical either — it is how the version of this function written five
+ * minutes earlier missed `add-note-button.tsx`, whose wrap falls inside the name
+ * rather than before it. The positive control below is what caught it.
+ */
+function joinedWithNext(lines: string[], index: number): string {
+  return [lines[index], lines[index + 1] ?? ""]
+    .map((line) => (line ?? "").replace(/^\s*(\/\/|\/\*+|\*)\s*/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ");
+}
+
+describe("WCAG criterion citations (#258)", () => {
+  it("welds no criterion number to another criterion's name or level", () => {
+    const offenders: string[] = [];
+    for (const file of citationScannedFiles()) {
+      const lines = readFileSync(file, "utf8").split("\n");
+      lines.forEach((_line, index) => {
+        for (const fault of citationFaults(joinedWithNext(lines, index))) {
+          offenders.push(`${file}:${index + 1} — ${fault}`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("still SEES a misweld (the citation scan is not a no-op)", () => {
+    // Guards the guard, the same way the two assertions above do for the class
+    // scanner. A clean run of the test above has to mean "looked and found
+    // nothing" — a path typo or a broken pattern would otherwise report the
+    // repo clean by reading nothing at all, which is the exact shape of failure
+    // that let #109's eight sites ship green.
+    expect(citationScannedFiles().length).toBeGreaterThan(300);
+
+    // The exact sentence #258 was filed about, plus the mirrored weld and a wrong
+    // level on an otherwise correct pair. All three are the defect this exists to
+    // stop, so a guard that misses any of them is not doing the job.
+    for (const broken of [
+      "// WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2",
+      "// WCAG 2.4.13 Focus Not Obscured (Minimum) is AA",
+      "// a ring is needed for WCAG 2.4.13 Focus Appearance, which is AA",
+      // The target-size family, where the same weld has already cost this repo
+      // two corrections. 2.5.5 Target Size (Enhanced) is AAA — calling it AA is
+      // what makes a voluntary 44x44 read as an obligation.
+      "// the shared 44x44 floor, WCAG 2.5.5 Target Size, which is AA",
+    ]) {
+      expect(citationFaults(broken), broken).not.toEqual([]);
+    }
+
+    // The wrapped forms, which the first version of this guard missed on two real
+    // files. Asserted through `joinedWithNext` rather than against a hand-joined
+    // string, so the window builder is what is proven and not the pattern alone —
+    // the bug was in the builder, and a pattern-only assertion passed straight
+    // through it.
+    //
+    // Both wrap positions are covered because they fail differently: `note-field`
+    // wraps BEFORE the name, `add-note-button` wraps INSIDE it, and only the
+    // second is defeated by a comment marker left in the middle.
+    for (const wrapped of [
+      [
+        "// swap, because WCAG 2.4.11",
+        "// Focus Appearance needs more than hue",
+      ],
+      [
+        "// not a colour swap: WCAG 2.4.11 Focus",
+        "// Appearance is not satisfied",
+      ],
+    ]) {
+      expect(
+        citationFaults(joinedWithNext(wrapped, 0)),
+        wrapped.join(" ⏎ "),
+      ).not.toEqual([]);
+    }
+
+    // And the honest citations stay legal, so the guard cannot be satisfied by
+    // deleting the numbers — which would lose the only thing that tells a reader
+    // what bar they are being held to. The enumeration is here because the first
+    // draft of this guard flagged it: three criteria in one sentence is precisely
+    // the prose #258 added, and a guard that fires on the fix gets deleted.
+    for (const honest of [
+      "// no visible focus indicator (WCAG 2.4.7 Focus Visible, AA)",
+      "// nothing here checks 2.4.11 Focus Not Obscured (Minimum), which is AA",
+      "// a ring clears 2.4.13 Focus Appearance (AAA) by construction",
+      "// not 2.4.7 Focus Visible, not 2.4.11 Focus Not Obscured, not 2.4.13 Focus Appearance",
+      "// 2.5.5 Target Size (Enhanced) is AAA; 2.5.8 Target Size (Minimum) is AA",
+      "// WCAG 2.4.11 — the UA outline is removed, so the ring has to paint",
+      "// 2.4.7 has no threshold of its own, which is the whole problem",
+    ]) {
+      expect(citationFaults(honest), honest).toEqual([]);
+    }
   });
 });
