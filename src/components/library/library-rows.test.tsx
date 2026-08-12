@@ -114,6 +114,15 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     expect(refresh).toHaveBeenCalled();
   });
 
+  // #253 — Delete is reached from the ▾ list. The inline 🗑 went with the trailing
+  // icon cluster, and the list entry (which was already there as a mirror) is now
+  // the route. The two-step confirm itself is unchanged, and the ARMED pair still
+  // renders in the ▾ popup where the entry was.
+  const armDelete = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+  };
+
   it("Delete is a two-step confirm (first tap arms, second tap deletes)", async () => {
     const user = userEvent.setup();
     render(
@@ -127,7 +136,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     );
 
     // First tap: arms the confirm — nothing deleted yet, Cancel now visible.
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await armDelete(user);
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
@@ -150,11 +159,11 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await armDelete(user);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
-    // Back to the armed-again state: the 🗑 Delete control is present once more.
+    // Back to the resting state: the ▾ list offers Delete once more.
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
@@ -510,10 +519,13 @@ describe("LibraryRows — every control in the action group is a 44px target", (
   });
 
   it("and the armed delete confirm, which replaces a 44px control", async () => {
-    // The pair takes the 🗑's place, so a smaller pair shrinks the action line
-    // under the pointer at exactly the moment a mis-tap deletes something.
+    // The pair takes the place of the ▾ entry that opened it — itself 44px via
+    // `rowMenuEntry` since #253 made it the only route to delete — so a smaller
+    // pair shrinks the line under the pointer at exactly the moment a mis-tap
+    // deletes something.
     const user = userEvent.setup();
     renderTab("plated");
+    await user.click(screen.getByRole("button", { name: "All options" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     for (const name of ["Delete", "Cancel"]) {
       const control = screen.getByRole("button", { name });

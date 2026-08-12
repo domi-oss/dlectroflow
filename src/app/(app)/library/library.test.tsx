@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import LibraryPage from "./page";
 import { LIB_PANEL_HEADING_ID } from "@/components/library/library-done-delete";
 
@@ -259,8 +260,17 @@ describe("LibraryPage — deleting a Done row (#251)", () => {
   it("leaves the in-flight tabs' own delete alone", async () => {
     // `plated` renders <LibraryRows>, which has had a delete since Task 7. The
     // Done island must not have grown a second one into it.
+    //
+    // #253 moved that delete off the row and into its ▾ list, so the count is taken
+    // with the list open. Still exactly one, which is the claim.
+    const user = userEvent.setup();
     await renderTab("plated");
     const row = screen.getByText("Reply to Sam's email").closest("li")!;
+    expect(
+      within(row).queryByRole("button", { name: "Delete" }),
+      "a resting library row should offer no inline Delete",
+    ).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "All options" }));
     expect(within(row).getAllByRole("button", { name: "Delete" })).toHaveLength(
       1,
     );

@@ -491,7 +491,10 @@ describe("#163 screen-reader announcements", () => {
     renderInbox([makeItem({ id: "a6", text: "buy oat milk" })]);
 
     const row = screen.getByText("buy oat milk").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    // #253 — the compact 📥 went with the trailing icon cluster. The move menu is
+    // reached from the row's ▾ list, under the full "Move to…" label.
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(
       await within(row).findByRole("menuitem", { name: /^Completed$/ }),
     );
@@ -508,7 +511,15 @@ describe("#163 the keyboard path", () => {
   // fallback any more — it IS the keyboard and assistive-technology path, and
   // it is what makes the drag surface satisfy WCAG 2.1.1 (Keyboard) and 2.5.7
   // (Dragging Movements). Every draggable row must carry one.
-  it("gives every row with a grip a move control that is not a drag", () => {
+  //
+  // #253 moved it one press further away on the `RowActions` rows: the compact 📥
+  // went with the icon cluster, so the route is the row's ▾ list → "Move to…".
+  // Both are buttons, so the path is still keyboard-reachable throughout, which is
+  // the property this spec exists to hold — and #253's Bar says in as many words
+  // that no action may exist only behind a gesture. The Done bucket hand-rolls its
+  // line and keeps its inline 📥, so BOTH shapes have to be accepted here.
+  it("gives every row with a grip a move control that is not a drag", async () => {
+    const user = userEvent.setup();
     const { container } = renderInbox([
       makeItem({ id: "k1", text: "review row" }),
       makeItem({ id: "k2", text: "todo row", status: "triaged" }),
@@ -528,11 +539,23 @@ describe("#163 the keyboard path", () => {
     const grips = container.querySelectorAll("[data-drag-grip]");
     expect(grips.length).toBeGreaterThan(0);
     for (const grip of Array.from(grips)) {
-      const row = grip.closest("li");
+      const row = grip.closest("li") as HTMLElement | null;
       expect(row, "a grip outside a row").not.toBeNull();
+      const scope = within(row!);
+      // Inline 📥 (the hand-rolled Done line) …
+      if (scope.queryByRole("button", { name: "Move to" })) continue;
+      // … or the ▾ list's "Move to…" entry, which is the RowActions shape.
+      const overflow = scope.queryByRole("button", { name: "All options" });
       expect(
-        within(row as HTMLElement).queryByRole("button", { name: "Move to" }),
+        overflow,
+        `no move control and no ▾ trigger on the row holding ${grip.getAttribute("data-drag-grip") ?? "a grip"}`,
       ).not.toBeNull();
+      await user.click(overflow!);
+      expect(
+        scope.queryByRole("button", { name: "Move to…" }),
+        "the ▾ list offers no move control",
+      ).not.toBeNull();
+      await user.keyboard("{Escape}");
     }
   });
 
@@ -541,7 +564,14 @@ describe("#163 the keyboard path", () => {
     renderInbox([makeItem({ id: "k5", text: "keyboard row" })]);
 
     const row = screen.getByText("keyboard row").closest("li")!;
-    const trigger = within(row).getByRole("button", { name: "Move to" });
+    // #253 — reached through the ▾ list. Opened with the keyboard too, so the whole
+    // route stays a keyboard proof rather than half a pointer one.
+    const overflow = within(row).getByRole("button", { name: "All options" });
+    overflow.focus();
+    await user.keyboard("{Enter}");
+    const trigger = await within(row).findByRole("button", {
+      name: "Move to…",
+    });
     trigger.focus();
     expect(trigger).toHaveFocus();
 

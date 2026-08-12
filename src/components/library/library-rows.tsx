@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn, touchTarget } from "@/lib/utils";
 import { RowActions } from "@/components/inbox/row-actions";
+import { rowMenuEntry } from "@/components/ui/anchored-popup";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import {
   ensureFocusStep,
@@ -144,24 +145,20 @@ export function LibraryRows({
       if (stepId) router.push(`/focus/${stepId}`);
     });
 
-  // Two-step delete confirm — one shared `confirmDeleteId` drives both the
-  // end-cluster 🗑 icon and the ▾-menu entry, so confirming/cancelling either
-  // keeps the other in sync (matches the Inbox rows).
+  // Two-step delete confirm, driven by one shared `confirmDeleteId` (matches the
+  // Inbox rows).
   //
-  // #251 — all three controls now carry `touchTarget`, which none of them did.
-  // #184 sized every end-cluster icon in the Inbox and this file's copy of the
-  // same factory was missed, so the hub shipped a 24px 🗑 sitting next to a 44px
-  // note trigger. The armed pair matters for a second reason: it REPLACES the 🗑,
-  // so a smaller pair shrank the action line under the pointer at exactly the
-  // moment a mis-tap deletes something.
-  const deleteControl = (
-    id: string,
-    key: string,
-    {
-      fullWidth = false,
-      icon = false,
-    }: { fullWidth?: boolean; icon?: boolean } = {},
-  ) =>
+  // #251 sized the armed pair with `touchTarget`. #184 had sized every
+  // end-cluster icon in the Inbox and this file's copy of the same factory was
+  // missed, so the hub shipped a 24px 🗑 sitting next to a 44px note trigger. The
+  // armed pair matters for a second reason: it REPLACES the resting control, so a
+  // smaller pair shrank the action line under the pointer at exactly the moment a
+  // mis-tap deletes something.
+  //
+  // #253 removed the `icon` variant along with the end cluster it was the only
+  // caller of. Delete is now reached from the ▾ list, whose entry is 44px via
+  // `rowMenuEntry` — the resting target did not shrink, it moved.
+  const deleteControl = (id: string, key: string) =>
     confirmDeleteId === id ? (
       <span key={key} className="flex items-center gap-2">
         <button
@@ -189,26 +186,13 @@ export function LibraryRows({
           {t("action.cancel", voice)}
         </button>
       </span>
-    ) : icon ? (
-      <button
-        key={key}
-        aria-label={t("action.delete", voice)}
-        title={t("action.delete", voice)}
-        className={cn(
-          touchTarget,
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-        )}
-        onClick={() => setConfirmDeleteId(id)}
-      >
-        🗑
-      </button>
     ) : (
       <button
         key={key}
-        className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
-        )}
+        // Colours unchanged from the ▾-menu variant this replaces: muted at rest,
+        // `hover:text-foreground` on the accent background. #253 changed WHERE the
+        // resting delete lives, not how it reads.
+        className={rowMenuEntry("text-muted-foreground hover:text-foreground")}
         onClick={() => setConfirmDeleteId(id)}
       >
         {t("action.delete", voice)}
@@ -333,28 +317,36 @@ export function LibraryRows({
                           // a null simply contributes nothing.
                           trigger,
                         ]}
-                        del={deleteControl(item.id, "delete", { icon: true })}
-                        menu={[
-                          <button
-                            key="focus-m"
-                            type="button"
-                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                            onClick={() => focusOnItem(item.id)}
-                          >
-                            {t("step.startFocusTimer", voice)}
-                          </button>,
-                          <button
-                            key="complete-m"
-                            type="button"
-                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                            onClick={() => run(() => completeItem(item.id))}
-                          >
-                            {t("action.completeFull", voice)}
-                          </button>,
-                          deleteControl(item.id, "delete-m", {
-                            fullWidth: true,
-                          }),
-                        ]}
+                        /* #253 — the ▾ list holds only what is NOT already on the
+                           row. "Start focus timer" and "Mark as completed" fired
+                           the exact same handlers as the inline ▶ Start focusing
+                           and Complete two pixels away, so they were height in a
+                           popup that is now the sole route to what remains. Both
+                           inline labels are at least as clear as the entries they
+                           replace, which is the condition #253's Bar puts on
+                           dropping a mirror.
+
+                           ── #213's library leg, decided here ──────────────────
+                           Schedule does NOT arrive on library rows in this MR, and
+                           the reason is not scope: there is nothing to preserve.
+                           `LibraryRows` never passed `schedule=`, so no affordance
+                           is lost by deleting the icon cluster that prop rendered
+                           through — #213's checkbox described a prop whose only
+                           render path was `row-actions.tsx:504`, which is why it
+                           could not be written independently of this change.
+
+                           Making it real needs three things this surface has none
+                           of: Google connection state resolved in
+                           `library/page.tsx` (which resolves none), a per-row
+                           in-flight flag, and somewhere to PUT a failure. That
+                           last one is the blocker — library rows have no
+                           failure-notice surface at all, which is the open defect
+                           in #230. Adding a network write to the one surface that
+                           cannot report a failed write ships #230's bug again in a
+                           new place, so #213's library leg is re-specified (add a
+                           `ScheduleControl variant="menu"` entry + plumb the
+                           state) and sequenced after #230, not closed here. */
+                        menu={[deleteControl(item.id, "delete-m")]}
                       />
                       {body}
                     </>

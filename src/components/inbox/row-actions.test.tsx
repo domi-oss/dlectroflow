@@ -30,7 +30,6 @@ describe("RowActions", () => {
             Second
           </button>,
         ]}
-        schedule={null}
         menu={[]}
       />,
     );
@@ -42,55 +41,57 @@ describe("RowActions", () => {
     expect(onSecond).not.toHaveBeenCalled();
   });
 
-  it("end cluster renders in order: schedule, delete, then ▾", () => {
+  // ── #253 — the trailing icon cluster is gone ─────────────────────────────
+  //
+  // `move` / `schedule` / `del` used to render 📥 / 📅 / 🗑 in a `flex-nowrap`
+  // group pinned right of the inline actions. All three were duplicates of menu
+  // entries the ▾ list already carried, and at 360px the group wrapped onto a
+  // band of its own — a third row of controls on every card, for nothing new.
+  //
+  // The props are REMOVED rather than left rendering nothing. A prop that is
+  // still accepted but has no render site is how #213 came to describe a fix in
+  // terms of `schedule=`, whose only render path was `row-actions.tsx:504`.
+  it("renders exactly one control of its own: the ▾ trigger, after the inline actions", () => {
     render(
       <RowActions
         inline={[<button key="a">First</button>]}
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-        del={<button key="d">Delete</button>}
-        menu={[]}
+        menu={[<button key="m">Delete</button>]}
       />,
     );
     const names = screen
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label") ?? b.textContent);
-    expect(names).toEqual(["First", "Schedule", "Delete", "All options"]);
+    expect(names).toEqual(["First", "All options"]);
   });
 
-  it("mobile-wrap fix: the end cluster (move/schedule/delete/▾) shares one flex-nowrap ancestor so it wraps as a unit, never splitting the ▾ trigger off alone (owner mobile-screenshot bug)", () => {
-    render(
+  it("the ▾ trigger is pinned right on its OWN wrapper — no cluster group around it", () => {
+    const { container } = render(
       <RowActions
         inline={[<button key="a">First</button>]}
-        move={<button key="mv">Move</button>}
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-        del={<button key="d">Delete</button>}
-        menu={[]}
+        menu={[<button key="m">Move to…</button>]}
       />,
     );
-    const moveBtn = screen.getByRole("button", { name: "Move" });
-    const scheduleBtn = screen.getByRole("button", { name: /schedule/i });
-    const deleteBtn = screen.getByRole("button", { name: "Delete" });
-    const menuBtn = screen.getByRole("button", { name: "All options" });
-    // Nearest common ancestor of the first and last end-cluster controls must
-    // be the same nowrap group — i.e. move's parent chain includes the exact
-    // element that also contains the ▾ trigger.
-    const nowrapGroup = moveBtn.closest(".flex-nowrap");
-    expect(nowrapGroup).not.toBeNull();
-    expect(nowrapGroup).toContainElement(scheduleBtn);
-    expect(nowrapGroup).toContainElement(deleteBtn);
-    expect(nowrapGroup).toContainElement(menuBtn);
-  });
-
-  it("del is omitted from the end cluster when not provided", () => {
-    render(<RowActions inline={[]} schedule={null} menu={[]} />);
-    expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
+    const line = container.querySelector("[data-row-actions]")!;
+    const trigger = screen.getByRole("button", { name: "All options" });
+    // `data-row-menu` is the stable hook the popup's markup is asserted through,
+    // replacing the `.flex-nowrap` class the old cluster was found by — a class
+    // is a styling decision and this is a structural one, which is the same
+    // reasoning `data-row-actions` carries on the line itself.
+    const pinned = trigger.closest("[data-row-menu]");
+    expect(pinned).not.toBeNull();
+    expect(pinned!.className).toContain("ml-auto");
+    expect(pinned!.className).toContain("shrink-0");
+    expect(line.lastElementChild).toBe(pinned);
+    // The `flex-nowrap` group existed to stop the cluster splitting mid-way and
+    // stranding this trigger with a mis-anchored popover. One control cannot
+    // split, so the group is gone rather than kept as a one-child wrapper.
+    expect(trigger.closest(".flex-nowrap")).toBeNull();
   });
 
   it("▾ trigger is labeled 'All options' and opens the dismissable list of menu entries verbatim", () => {
     render(
       <RowActions
         inline={[]}
-        schedule={null}
         menu={[
           <button key="m1">Move to…</button>,
           <button key="m2">Snooze 1h</button>,
@@ -109,11 +110,7 @@ describe("RowActions", () => {
 
   it("Escape closes the ▾ popover (dismissable-popover idiom)", () => {
     render(
-      <RowActions
-        inline={[]}
-        schedule={null}
-        menu={[<button key="m1">Move to…</button>]}
-      />,
+      <RowActions inline={[]} menu={[<button key="m1">Move to…</button>]} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
     expect(
@@ -130,11 +127,7 @@ describe("RowActions", () => {
   it("outside click closes the ▾ popover (dismissable-popover idiom)", async () => {
     render(
       <div>
-        <RowActions
-          inline={[]}
-          schedule={null}
-          menu={[<button key="m1">Move to…</button>]}
-        />
+        <RowActions inline={[]} menu={[<button key="m1">Move to…</button>]} />
         <button>Outside</button>
       </div>,
     );
@@ -151,11 +144,7 @@ describe("RowActions", () => {
   // ── #92 popup wiring ──────────────────────────────────────────────────────
   it("the 🔽 popover is a named dialog its trigger points at", () => {
     render(
-      <RowActions
-        inline={[]}
-        schedule={null}
-        menu={[<button key="m1">Move to…</button>]}
-      />,
+      <RowActions inline={[]} menu={[<button key="m1">Move to…</button>]} />,
     );
     const trigger = screen.getByRole("button", { name: "All options" });
     expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
@@ -175,11 +164,7 @@ describe("RowActions", () => {
 
   it("the 📅 duration popover is a named dialog, and only exists when there is a duration to pick", () => {
     const { unmount } = render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-      />,
+      <ScheduleControl state="ready_steps" onScheduleSteps={vi.fn()} />,
     );
     // ready_steps acts immediately — no popup, so nothing to advertise.
     expect(
@@ -188,11 +173,7 @@ describe("RowActions", () => {
     unmount();
 
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     expect(
@@ -204,24 +185,21 @@ describe("RowActions", () => {
   // is invalid markup (and would close an enclosing `<p>` early).
   it("renders the 🔽 popover out of phrasing-content elements only", () => {
     const { container } = render(
-      <RowActions
-        inline={[]}
-        schedule={null}
-        menu={[<button key="m1">Move to…</button>]}
-      />,
+      <RowActions inline={[]} menu={[<button key="m1">Move to…</button>]} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
-    const cluster = container.querySelector(".flex-nowrap")!;
-    expect(cluster.querySelectorAll("div")).toHaveLength(0);
+    // #253 — anchored on `data-row-menu` now that the `.flex-nowrap` cluster
+    // this used to find is gone. Same question, and it still has to be asked of
+    // the element the popup is PORTALED into: Base UI renders the positioner and
+    // popup inside that container, so a `div` appearing there is what would
+    // break the enclosing phrasing content.
+    const menuHost = container.querySelector("[data-row-menu]")!;
+    expect(menuHost.querySelectorAll("div")).toHaveLength(0);
   });
 
   it('never renders role="menu", even with the ▾ popover open', () => {
     render(
-      <RowActions
-        inline={[]}
-        schedule={null}
-        menu={[<button key="m1">Move to…</button>]}
-      />,
+      <RowActions inline={[]} menu={[<button key="m1">Move to…</button>]} />,
     );
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
@@ -230,26 +208,14 @@ describe("RowActions", () => {
 
   it("ready_steps: 📅 fires onScheduleSteps immediately", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ready_steps", onScheduleSteps: fn }}
-      />,
-    );
+    render(<ScheduleControl state="ready_steps" onScheduleSteps={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("needs_duration: 📅 opens the popover; picking 30 fires onScheduleSingle(30)", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
-      />,
-    );
+    render(<ScheduleControl state="needs_duration" onScheduleSingle={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
     expect(fn).toHaveBeenCalledWith(30);
@@ -257,11 +223,7 @@ describe("RowActions", () => {
 
   it("Duo a11y fix: needs_duration 📅 uses aria-haspopup='dialog' (focus-capturing popover, no role=menu)", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     expect(screen.getByRole("button", { name: /schedule/i })).toHaveAttribute(
       "aria-haspopup",
@@ -271,13 +233,7 @@ describe("RowActions", () => {
 
   it("custom duration input schedules with the typed minutes", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
-      />,
-    );
+    render(<ScheduleControl state="needs_duration" onScheduleSingle={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.change(screen.getByRole("spinbutton"), {
       target: { value: "25" },
@@ -289,10 +245,10 @@ describe("RowActions", () => {
   it("pending disables the 📅 control, closing the double-submit race", () => {
     const fn = vi.fn();
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ready_steps", onScheduleSteps: fn, pending: true }}
+      <ScheduleControl
+        state="ready_steps"
+        onScheduleSteps={fn}
+        pending={true}
       />,
     );
     const scheduleButton = screen.getByRole("button", { name: /schedule/i });
@@ -303,13 +259,7 @@ describe("RowActions", () => {
 
   it("custom duration input has min/max/step bounds and visibly refuses minutes over 480", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
-      />,
-    );
+    render(<ScheduleControl state="needs_duration" onScheduleSingle={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     const input = screen.getByRole("spinbutton");
     expect(input).toHaveAttribute("min", "1");
@@ -326,13 +276,7 @@ describe("RowActions", () => {
 
   it("Duo fix: a fractional custom duration below 1 (e.g. 0.5) is out of range", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
-      />,
-    );
+    render(<ScheduleControl state="needs_duration" onScheduleSingle={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.change(screen.getByRole("spinbutton"), {
       target: { value: "0.5" },
@@ -345,11 +289,7 @@ describe("RowActions", () => {
 
   it("clears the custom duration input when the popover is dismissed + reopened (Duo review)", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.change(screen.getByRole("spinbutton"), {
@@ -365,11 +305,7 @@ describe("RowActions", () => {
   // review test above doesn't: clicking away, and re-clicking the trigger.
   it("clears the custom duration input when the popover is closed by an outside click", async () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.change(screen.getByRole("spinbutton"), {
@@ -383,11 +319,7 @@ describe("RowActions", () => {
 
   it("clears the custom duration input when the trigger itself closes the popover", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     const trigger = screen.getByRole("button", { name: /schedule/i });
     fireEvent.click(trigger);
@@ -402,10 +334,9 @@ describe("RowActions", () => {
   it("clears the custom duration input after a preset is picked", () => {
     const onScheduleSingle = vi.fn();
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle }}
+      <ScheduleControl
+        state="needs_duration"
+        onScheduleSingle={onScheduleSingle}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
@@ -419,74 +350,32 @@ describe("RowActions", () => {
   });
 
   it("reconnect state renders the OAuth link, not a button", () => {
-    render(
-      <RowActions inline={[]} menu={[]} schedule={{ state: "reconnect" }} />,
-    );
+    render(<ScheduleControl state="reconnect" />);
     expect(
       screen.getByRole("link", { name: /reconnect google/i }),
     ).toHaveAttribute("href", "/api/google/oauth/start");
   });
 
-  it("no schedule prop → no 📅 control (guest rows)", () => {
-    render(
-      <RowActions
-        inline={[]}
-        schedule={null}
-        menu={[<span key="a">Edit</span>]}
-      />,
-    );
-    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
-  });
-
-  it("v6: end cluster with a move slot renders in order: move, schedule, delete, then 🔽 (All options)", () => {
-    render(
-      <RowActions
-        inline={[<button key="a">First</button>]}
-        move={
-          <button key="mv" aria-label="Move to">
-            📥
-          </button>
-        }
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-        del={<button key="d">Delete</button>}
-        menu={[]}
-      />,
-    );
-    const names = screen
-      .getAllByRole("button")
-      .map((b) => b.getAttribute("aria-label") ?? b.textContent);
-    expect(names).toEqual([
-      "First",
-      "Move to",
-      "Schedule",
-      "Delete",
-      "All options",
-    ]);
-  });
+  // #253 removed "no schedule prop → no 📅 control (guest rows)" and the v6
+  // "end cluster … renders in order: move, schedule, delete, then 🔽" ordering
+  // test. Both asserted the shape of a cluster this component no longer has, and
+  // the guest case they protected is now structural: there is no 📅 on any row,
+  // connected or not. What replaces them is the pair at the top of this describe
+  // ("renders exactly one control of its own" + "pinned right on its OWN
+  // wrapper"), plus the caller-level assertions in inbox-view.test.tsx that every
+  // one of the three dropped icons is still reachable from the ▾ list.
 });
 
 describe("ScheduleControl — ICS states", () => {
   it("ics_ready_steps: 📅 fires onScheduleIcs() immediately (icon variant, aria 'Add to calendar')", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ics_ready_steps", onScheduleIcs: fn }}
-      />,
-    );
+    render(<ScheduleControl state="ics_ready_steps" onScheduleIcs={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
     expect(fn).toHaveBeenCalledWith();
   });
   it("ics_needs_duration: opens the popover; picking 30 fires onScheduleIcs(30)", () => {
     const fn = vi.fn();
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ics_needs_duration", onScheduleIcs: fn }}
-      />,
-    );
+    render(<ScheduleControl state="ics_needs_duration" onScheduleIcs={fn} />);
     fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
     fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
     expect(fn).toHaveBeenCalledWith(30);
@@ -510,16 +399,14 @@ describe("ScheduleControl — ICS states", () => {
 
 describe("RowActions — Scheduled indicator", () => {
   it("renders 'Scheduled ✓' when scheduled, hides it otherwise", () => {
-    const { rerender } = render(
-      <RowActions inline={[]} schedule={null} menu={[]} scheduled />,
-    );
+    const { rerender } = render(<RowActions inline={[]} menu={[]} scheduled />);
     expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
-    rerender(<RowActions inline={[]} schedule={null} menu={[]} />);
+    rerender(<RowActions inline={[]} menu={[]} />);
     expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
   });
 
   it("a11y: 'Scheduled ✓' uses AA-tuned per-theme emerald (not the sub-AA emerald-600)", () => {
-    render(<RowActions inline={[]} schedule={null} menu={[]} scheduled />);
+    render(<RowActions inline={[]} menu={[]} scheduled />);
     const el = screen.getByText(/scheduled ✓/i);
     expect(el.className).toContain("text-emerald-700");
     expect(el.className).toContain("dark:text-emerald-400");
@@ -532,20 +419,14 @@ describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
     el.className.includes("min-h-11") && el.className.includes("min-w-11");
 
   it("📅 schedule icon button has a ≥44px hit area", () => {
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-      />,
-    );
+    render(<ScheduleControl state="ready_steps" onScheduleSteps={vi.fn()} />);
     expect(
       hasMinTarget(screen.getByRole("button", { name: /schedule/i })),
     ).toBe(true);
   });
 
   it("🔽 All-options icon button has a ≥44px hit area", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={null} />);
+    render(<RowActions inline={[]} menu={[]} />);
     expect(
       hasMinTarget(screen.getByRole("button", { name: "All options" })),
     ).toBe(true);
@@ -553,11 +434,7 @@ describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
 
   it("duration preset + Go pill buttons have a ≥44px hit area", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
-      />,
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     expect(
@@ -571,13 +448,7 @@ describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
 
 describe("shape consistency: 📅 + ▾ carry the same ghost hover as Complete/Add-to-do (Duo shape fix)", () => {
   it("📅 schedule icon (ready_steps) is a borderless, hover-accent ghost control — same treatment as CompleteButton", () => {
-    render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
-      />,
-    );
+    render(<ScheduleControl state="ready_steps" onScheduleSteps={vi.fn()} />);
     const btn = screen.getByRole("button", { name: /schedule/i });
     expect(btn.className).toContain("hover:bg-accent");
     expect(btn.className).toContain("rounded-md");
@@ -585,7 +456,7 @@ describe("shape consistency: 📅 + ▾ carry the same ghost hover as Complete/A
   });
 
   it("▾ All-options trigger is a borderless, hover-accent ghost control", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={null} />);
+    render(<RowActions inline={[]} menu={[]} />);
     const btn = screen.getByRole("button", { name: "All options" });
     expect(btn.className).toContain("hover:bg-accent");
     expect(btn.className).toContain("rounded-md");
@@ -645,15 +516,11 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
   it("opens the menu instead of firing immediately when steps are ready", async () => {
     const onScheduleSteps = vi.fn();
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          taskTitle: "do flex training",
-          scheduleIntent: intent,
-          onScheduleSteps,
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        taskTitle="do flex training"
+        scheduleIntent={intent}
+        onScheduleSteps={onScheduleSteps}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
@@ -670,15 +537,11 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
 
   it("advertises the popup on the trigger, as the duration popover does", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          taskTitle: "t",
-          scheduleIntent: intent,
-          onScheduleSteps: vi.fn(),
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        taskTitle="t"
+        scheduleIntent={intent}
+        onScheduleSteps={vi.fn()}
       />,
     );
     expect(screen.getByRole("button", { name: "Schedule" })).toHaveAttribute(
@@ -692,14 +555,10 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
   it("falls back to firing immediately when no intent has loaded yet", async () => {
     const onScheduleSteps = vi.fn();
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          scheduleIntent: null,
-          onScheduleSteps,
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        scheduleIntent={null}
+        onScheduleSteps={onScheduleSteps}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
@@ -712,15 +571,11 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
   it("still fires the .ics path immediately — no menu, no regression for guests", async () => {
     const onScheduleIcs = vi.fn();
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ics_ready_steps",
-          taskTitle: "t",
-          scheduleIntent: intent,
-          onScheduleIcs,
-        }}
+      <ScheduleControl
+        state="ics_ready_steps"
+        taskTitle="t"
+        scheduleIntent={intent}
+        onScheduleIcs={onScheduleIcs}
       />,
     );
     await userEvent.click(
@@ -730,17 +585,59 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // #253 — the regression guard for the branch reorder. The 📅 icon was the ONLY
+  // route to this dialog until #253 deleted it, so without this the whole of #106
+  // would have become unreachable from an inbox row while every label still read
+  // correctly and every existing test still passed.
+  it("the ▾-list entry opens the same dialog, so #253 did not delete #106", async () => {
+    const onScheduleSteps = vi.fn();
+    render(
+      <ScheduleControl
+        variant="menu"
+        label="Schedule"
+        state="ready_steps"
+        taskTitle="do flex training"
+        scheduleIntent={intent}
+        onScheduleSteps={onScheduleSteps}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    const dialog = screen.getByRole("dialog", { name: /do flex training/i });
+    expect(onScheduleSteps).not.toHaveBeenCalled();
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /^schedule$/i }),
+    );
+    expect(onScheduleSteps).toHaveBeenCalledWith(
+      expect.objectContaining({ priority: "high", hours: "work" }),
+    );
+  });
+
+  // With no intent resolved yet the ▾ entry keeps firing immediately, exactly as
+  // the icon did — a control that is dead while data is in flight is worse than
+  // one that pushes the server-resolved defaults.
+  it("the ▾-list entry still fires immediately when no intent has loaded", async () => {
+    const onScheduleSteps = vi.fn();
+    render(
+      <ScheduleControl
+        variant="menu"
+        label="Schedule"
+        state="ready_steps"
+        scheduleIntent={null}
+        onScheduleSteps={onScheduleSteps}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(onScheduleSteps).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("keeps the ≥44px touch target on the menu's trigger", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          taskTitle: "t",
-          scheduleIntent: intent,
-          onScheduleSteps: vi.fn(),
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        taskTitle="t"
+        scheduleIntent={intent}
+        onScheduleSteps={vi.fn()}
       />,
     );
     const btn = screen.getByRole("button", { name: "Schedule" });
@@ -750,16 +647,12 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
 
   it("pending disables the trigger and says why, so the menu cannot be opened mid-push", () => {
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          taskTitle: "t",
-          scheduleIntent: intent,
-          onScheduleSteps: vi.fn(),
-          pending: true,
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        taskTitle="t"
+        scheduleIntent={intent}
+        onScheduleSteps={vi.fn()}
+        pending={true}
       />,
     );
     const trigger = screen.getByRole("button", { name: /^Schedule\b/ });
@@ -783,15 +676,11 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
     // The other half of the pair: the reason must appear only while it is
     // true, or it is just noise on every row of the list (#169).
     render(
-      <RowActions
-        inline={[]}
-        menu={[]}
-        schedule={{
-          state: "ready_steps",
-          taskTitle: "t",
-          scheduleIntent: intent,
-          onScheduleSteps: vi.fn(),
-        }}
+      <ScheduleControl
+        state="ready_steps"
+        taskTitle="t"
+        scheduleIntent={intent}
+        onScheduleSteps={vi.fn()}
       />,
     );
     const trigger = screen.getByRole("button", { name: "Schedule" });
@@ -827,9 +716,7 @@ describe("ScheduleControl — the pick-your-account hint (#128)", () => {
     // would be the same paragraph a dozen times down the page, so the compact
     // control keeps the guidance as its accessible description via `title`
     // (the same tooltip mechanism the 📅 / Scheduled ✓ controls already use).
-    render(
-      <RowActions inline={[]} menu={[]} schedule={{ state: "connect" }} />,
-    );
+    render(<ScheduleControl state="connect" />);
     const link = screen.getByRole("link", { name: /connect google/i });
     expect(link).toHaveAttribute("title", GOOGLE_ACCOUNT_HINT);
     expect(link).not.toHaveAttribute("aria-describedby");

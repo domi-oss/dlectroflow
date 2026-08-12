@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 
@@ -120,15 +126,40 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     expect(screen.queryByTitle("Send to review")).not.toBeInTheDocument();
   });
 
-  it("the 🔽 dropdown lists all five entries", async () => {
+  // #253 — three entries, not five. "Start focus timer" pointed at the same
+  // `/focus/${id}` as the inline ▶ Start Focus and "Complete step" called the same
+  // `complete(id)` as the inline Complete, so both were height in a list that is
+  // now the only route to what is left. Asserted as an exact set rather than three
+  // `getByText` calls: a re-added mirror is the regression, and presence checks
+  // cannot see one.
+  it("the 🔽 dropdown lists the three entries that are NOT on the row", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
-    expect(screen.getByText("Start focus timer")).toBeInTheDocument();
-    expect(screen.getByText("Complete step")).toBeInTheDocument();
-    expect(screen.getByText("Edit time estimate")).toBeInTheDocument();
-    expect(screen.getByText("Edit step title")).toBeInTheDocument();
-    expect(screen.getByText("Send back to review")).toBeInTheDocument();
+    const popup = screen.getByRole("dialog", { name: "All options" });
+    expect(
+      within(popup)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Edit time estimate", "Edit step title", "Send back to review"]);
+    expect(within(popup).queryByText("Start focus timer")).toBeNull();
+    expect(within(popup).queryByText("Complete step")).toBeNull();
+  });
+
+  // Every ▾ entry is the sole route to its action now, so each carries the 44px
+  // minimum the row controls have always had (`rowMenuEntry`). Height only: a
+  // full-width entry is already far past 44px wide.
+  it("every 🔽 entry carries the 44px minimum height", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await openMenu(user);
+    const entries = within(
+      screen.getByRole("dialog", { name: "All options" }),
+    ).getAllByRole("button");
+    expect(entries).toHaveLength(3);
+    for (const entry of entries) {
+      expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+    }
   });
 
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
@@ -138,8 +169,10 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     );
     expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
+    // #253 — the dropdown half of this pair went with the mirror. The inline CTA
+    // is the only Resume/Start affordance now, so that is where the label lives.
     await openMenu(user);
-    expect(screen.getByText("Resume focus timer")).toBeInTheDocument();
+    expect(screen.queryByText("Resume focus timer")).not.toBeInTheDocument();
     expect(screen.queryByText("Start focus timer")).not.toBeInTheDocument();
   });
 
@@ -386,11 +419,14 @@ describe("TaskSteps — complete step", () => {
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 
-  it("the dropdown Complete step entry calls completeStep", async () => {
+  // #253 replaced the dropdown mirror with the inline control it duplicated. The
+  // behaviour under test — a press reaches `completeStep` with this step's id —
+  // is kept and re-pointed rather than deleted, because that is the assertion, not
+  // the button it was made through.
+  it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Complete step"));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 });

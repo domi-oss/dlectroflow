@@ -126,6 +126,22 @@ import {
 } from "@/app/actions/braindump";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 
+/**
+ * #253 — Move to, Schedule, Add to calendar and Delete are ▾-list entries now.
+ * The trailing icon cluster that carried them inline is gone, so a test that
+ * reached one of them directly has to open the row's list first — which is the
+ * route a user takes too. A named helper rather than an inlined click, so the
+ * reason appears once instead of at every call site.
+ *
+ * Deliberately NOT used for the Completed bucket: that line is hand-rolled (it
+ * needs Reopen where the primary CTA goes) rather than a `RowActions` row, so its
+ * 🗑 was never in the cluster and stays inline.
+ */
+const openRowMenu = (
+  user: ReturnType<typeof userEvent.setup>,
+  row: HTMLElement,
+) => user.click(within(row).getByRole("button", { name: "All options" }));
+
 const settings: AgingSettings = {
   agingThresholdMinutes: 30,
   demoOverrideSeconds: null,
@@ -637,9 +653,12 @@ describe("InboxView — a capture that fails (#210)", () => {
     const input = renderInbox([makeItem({ id: "abc", text: "delete me" })]);
     await capture(input, "buy milk");
 
+    // Any focusable control on another row will do; #253 moved Delete into the ▾
+    // list, so the inline CTA is the nearest stable one that needs no interaction
+    // to reach (opening a popup would move focus itself and confuse the subject).
     const elsewhere = within(
       screen.getByText("delete me").closest("li")!,
-    ).getByRole("button", { name: "Delete" });
+    ).getByRole("button", { name: /Break into steps/ });
     elsewhere.focus();
     await clickRetry();
 
@@ -1193,8 +1212,10 @@ describe("InboxView — inline delete confirm", () => {
         resumeStep={null}
       />,
     );
-    // v5: Delete lives inline in the row's end cluster (no menu needed).
+    // #253: Delete is reached from the row's ▾ list. The armed confirm still
+    // renders in place of the entry, so the two-step behaviour is unchanged.
     const row = screen.getByText("delete me").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
     expect(
@@ -2695,13 +2716,20 @@ describe("InboxView — single to-do ▶ Focus", () => {
       />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
-    // Inline stays the short "▶ Focus"; the dropdown carries the full label.
-    await user.click(within(row).getByRole("button", { name: "All options" }));
+    // #253 — the dropdown mirror is gone. It called the identical expression as
+    // the inline CTA (`focusOnItem(item.id, item.text)`), so it was pure height in
+    // a list that is now the only route to what is left. The assertion is the same
+    // one: a press ensures a step and lands on that step's timer.
     await user.click(
-      within(row).getByRole("button", { name: "Start visual focus timer" }),
+      within(row).getByRole("button", { name: "▶ Start Focus" }),
     );
     expect(ensureFocusStep).toHaveBeenCalledWith("s1");
     expect(push).toHaveBeenCalledWith("/focus/step-9");
+    // …and the mirror really is gone, not merely unqueried.
+    await openRowMenu(user, row);
+    expect(
+      within(row).queryByRole("button", { name: "Start visual focus timer" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -2733,15 +2761,19 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(
       within(row).getByRole("button", { name: /Break into steps/ }),
     ).toBeInTheDocument();
+    // #253 — Add to-do and Delete are ▾ entries now; Save and Complete stay on
+    // the row. Four inline actions, which is the point of the issue.
     expect(
-      within(row).getByRole("button", { name: "Add to-do" }),
+      within(row).getByRole("button", { name: "Save for later" }),
     ).toBeInTheDocument();
     expect(
       within(row).getByRole("button", { name: "Complete" }),
     ).toBeInTheDocument();
-    expect(
-      within(row).getByRole("button", { name: "Delete" }),
-    ).toBeInTheDocument();
+    await openRowMenu(user, row);
+    for (const name of ["Add as single task to do", "Delete"]) {
+      expect(within(row).getByRole("button", { name })).toBeInTheDocument();
+    }
+    await user.keyboard("{Escape}");
 
     await user.click(within(row).getByRole("button", { name: "stored thing" }));
     expect(
@@ -2770,17 +2802,22 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(row.className).not.toContain("opacity-70"); // …never the row/CTA
 
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    // v6: short inline buttons + icon end-cluster (📥 "Move to", 🗑 "Delete").
-    for (const name of [
-      /Break into steps/,
-      "Add to-do",
-      "Save",
-      "Complete",
-      "Move to",
-      "Delete",
-    ]) {
+    // #253 — four inline actions (main CTA, Save, Complete, Note); Add to-do,
+    // Move to and Delete are ▾ entries. "Save for later" is the inline Save's
+    // accessible name, carried so the dropped full-label entry is not a downgrade.
+    for (const name of [/Break into steps/, "Save for later", "Complete"]) {
       expect(within(row).getByRole("button", { name })).toBeInTheDocument();
     }
+    for (const name of ["Add to-do", "Move to"]) {
+      expect(
+        within(row).queryByRole("button", { name }),
+      ).not.toBeInTheDocument();
+    }
+    await openRowMenu(user, row);
+    for (const name of ["Add as single task to do", "Move to…", "Delete"]) {
+      expect(within(row).getByRole("button", { name })).toBeInTheDocument();
+    }
+    await user.keyboard("{Escape}");
     expect(
       within(row).queryByRole("button", { name: "Review now" }),
     ).not.toBeInTheDocument();
@@ -2812,7 +2849,12 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     );
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    await user.click(within(row).getByRole("button", { name: "Save" }));
+    // #253 — the visible label is still "Save"; the accessible name is now the
+    // full "Save for later", because the ▾ entry that carried it was dropped as a
+    // mirror. WCAG 2.5.3 holds: the visible string is a prefix of the name.
+    await user.click(
+      within(row).getByRole("button", { name: "Save for later" }),
+    );
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("sv1", 60);
     expect(
       within(row).getByRole("button", { name: "Review now" }),
@@ -2833,7 +2875,10 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     );
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "stored thing" }));
-    await user.click(within(row).getByRole("button", { name: "Add to-do" }));
+    await openRowMenu(user, row);
+    await user.click(
+      within(row).getByRole("button", { name: "Add as single task to do" }),
+    );
     expect(keepAsTask).toHaveBeenCalledWith("sv1");
   });
 
@@ -2852,6 +2897,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     );
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(del).not.toHaveBeenCalled(); // first click only reveals confirm
     await user.click(within(row).getByRole("button", { name: "Delete" }));
@@ -2942,6 +2988,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
+    await openRowMenu(user, row);
     expect(
       within(row).getByRole("button", { name: /schedule/i }),
     ).toBeInTheDocument();
@@ -2981,6 +3028,10 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
+    // #253 — reached from the ▾ list now that the 📅 icon is gone. This is the
+    // spec that proves the layout change did not delete #106: the entry has to
+    // open the dialog, not fall back to pushing the server-resolved defaults.
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
 
     // Portaled into the row, so a row-scoped query still finds it.
@@ -3017,6 +3068,9 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
+    // #253 — the ▾ entry's presets expand in normal flow inside the list column
+    // (see ScheduleControl's `menu` variant), rather than in an anchored popover.
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
     expect(scheduleSingleTask).toHaveBeenCalledWith("st1", 30);
@@ -3044,6 +3098,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("needs a plan").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^15 min$/i }));
     expect(scheduleSingleTask).toHaveBeenCalledWith("aw1", 15);
@@ -3065,6 +3120,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
+    await openRowMenu(user, row);
     expect(
       within(row).getByRole("button", { name: /schedule/i }),
     ).toBeInTheDocument();
@@ -3092,6 +3148,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
     expect(
@@ -3099,7 +3156,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
   });
 
-  it("S0 guest (google={null}): rows show an ENABLED 'Add to calendar' control per row (not hidden, not disabled)", () => {
+  it("S0 guest (google={null}): rows show an ENABLED 'Add to calendar' control per row (not hidden, not disabled)", async () => {
     render(
       <InboxView
         now={Date.now()}
@@ -3116,15 +3173,25 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // S0 (#29): guests now schedule via .ics (no Google needed) — there's no
     // "Schedule" control at all; every schedulable row exposes an enabled
     // "Add to calendar" affordance instead of the old guest-locked 📅.
+    //
+    // #253 — that affordance is a ▾ entry rather than an inline icon, so the rows
+    // are opened one at a time. Still "one per row", which is the claim: a
+    // per-row loop cannot pass by finding two on the same row.
+    const user = userEvent.setup();
     expect(screen.queryByRole("button", { name: /^schedule$/i })).toBeNull();
-    const icsButtons = screen.getAllByRole("button", {
-      name: /add to calendar/i,
-    });
-    expect(icsButtons.length).toBeGreaterThanOrEqual(2); // one 📅 per row (menus closed)
-    icsButtons.forEach((b) => expect(b).toBeEnabled());
+    for (const text of ["plan trip", "single todo"]) {
+      const row = screen.getByText(text).closest("li")!;
+      await openRowMenu(user, row);
+      const ics = within(row).getAllByRole("button", {
+        name: /add to calendar/i,
+      });
+      expect(ics, `no Add to calendar on the "${text}" row`).toHaveLength(1);
+      expect(ics[0]).toBeEnabled();
+      await user.keyboard("{Escape}");
+    }
   });
 
-  it("S0 guest: the ▾ dropdown also carries an 'Add to calendar' entry (enabled)", async () => {
+  it("S0 guest: the ▾ dropdown carries the 'Add to calendar' entry (enabled)", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -3140,14 +3207,16 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
+    // #253 — ONE entry, not two. The pair was the inline 📅 plus its own full-text
+    // mirror; the icon went with the end cluster, so the mirror became the control.
     const icsEntries = within(row).getAllByRole("button", {
       name: /add to calendar/i,
     });
-    expect(icsEntries).toHaveLength(2); // inline 📅 + full-text menu mirror
+    expect(icsEntries).toHaveLength(1);
     icsEntries.forEach((b) => expect(b).toBeEnabled());
   });
 
-  it("needsReconnect: rows show the Reconnect link instead of the 📅 button", () => {
+  it("needsReconnect: rows show the Reconnect link instead of the 📅 button", async () => {
     const needsReconnect = {
       configured: true,
       connected: false,
@@ -3166,13 +3235,22 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
+    // #253 — one Reconnect link per row, in the row's own ▾ list rather than
+    // inline. Opened per row so "per row" is what is actually measured.
+    const user = userEvent.setup();
     expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
-    expect(
-      screen.getAllByRole("link", { name: /reconnect google/i }),
-    ).toHaveLength(2);
+    for (const text of ["plan trip", "single todo"]) {
+      const row = screen.getByText(text).closest("li")!;
+      await openRowMenu(user, row);
+      expect(
+        within(row).getAllByRole("link", { name: /reconnect google/i }),
+        `no Reconnect link on the "${text}" row`,
+      ).toHaveLength(1);
+      await user.keyboard("{Escape}");
+    }
   });
 
-  it("not configured: rows show the Connect link instead of the 📅 button", () => {
+  it("not configured: rows show the Connect link instead of the 📅 button", async () => {
     const notConfigured = {
       configured: false,
       connected: false,
@@ -3190,12 +3268,14 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
+    const user = userEvent.setup();
+    await openRowMenu(user, screen.getByText("single todo").closest("li")!);
     expect(
       screen.getByRole("link", { name: /connect google/i }),
     ).toBeInTheDocument();
   });
 
-  it("Duo fix: configured but NOT connected → Connect link, not a live 📅 button", () => {
+  it("Duo fix: configured but NOT connected → Connect link, not a live 📅 button", async () => {
     const configuredNotConnected = {
       configured: true,
       connected: false,
@@ -3213,6 +3293,8 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
+    const user = userEvent.setup();
+    await openRowMenu(user, screen.getByText("single todo").closest("li")!);
     expect(
       screen.getByRole("link", { name: /connect google/i }),
     ).toBeInTheDocument();
@@ -3238,6 +3320,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     expect(
       await within(row).findByRole("link", { name: /reconnect google/i }),
@@ -3282,11 +3365,18 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
+    // #253 — Schedule is a ▾ entry now, so each row's list is opened in turn.
+    // Escape rather than clicking elsewhere: an outside press would dismiss the
+    // OTHER row's popup and unmount the control this spec is holding a handle to.
     const rowA = screen.getByText("single todo").closest("li")!;
     const rowB = screen.getByText("plan trip").closest("li")!;
-    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
-    expect(scheduleB).toBeEnabled();
+    await openRowMenu(user, rowB);
+    expect(
+      within(rowB).getByRole("button", { name: /schedule/i }),
+    ).toBeEnabled();
+    await user.keyboard("{Escape}");
 
+    await openRowMenu(user, rowA);
     await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
     await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
 
@@ -3295,11 +3385,15 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const scheduleA = within(rowA).getByRole("button", { name: /schedule/i });
     expect(scheduleA).toBeDisabled();
     expect(scheduleA).toHaveAccessibleName(/already in progress for this row/i);
+    await user.keyboard("{Escape}");
 
     // Row B: never a party to row A's push, so its press must land.
+    await openRowMenu(user, rowB);
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
     expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
     expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
+    await user.keyboard("{Escape}");
 
     // Settle the transition before returning. An unresolved action outliving
     // the spec fires its state update during or after `afterEach(cleanup)`,
@@ -3308,7 +3402,12 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // live again is the observable end of the transition, so waiting on it
     // needs no arbitrary timeout.
     release({ ok: true });
-    await waitFor(() => expect(scheduleA).toBeEnabled());
+    await openRowMenu(user, rowA);
+    await waitFor(() =>
+      expect(
+        within(rowA).getByRole("button", { name: /schedule/i }),
+      ).toBeEnabled(),
+    );
   });
 
   it("renaming a row disables no Schedule control at all — the live half of #169", async () => {
@@ -3348,9 +3447,14 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
+    // #253 — Schedule is a ▾ entry; Escape closes rather than an outside press,
+    // which would dismiss the popup this spec still needs.
     const rowB = screen.getByText("plan trip").closest("li")!;
-    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
-    expect(scheduleB).toBeEnabled();
+    await openRowMenu(user, rowB);
+    expect(
+      within(rowB).getByRole("button", { name: /schedule/i }),
+    ).toBeEnabled();
+    await user.keyboard("{Escape}");
 
     const rowA = screen.getByText("old name").closest("li")!;
     await user.click(
@@ -3366,9 +3470,14 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // itself still reads "old name": there is no optimistic update, the row
     // re-reads from the server on `router.refresh()`.)
     const renamingRow = screen.getByText("old name").closest("li")!;
+    await openRowMenu(user, renamingRow);
     expect(
       within(renamingRow).getByRole("button", { name: /schedule/i }),
     ).toBeEnabled();
+    await user.keyboard("{Escape}");
+
+    await openRowMenu(user, rowB);
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
     expect(scheduleB).toBeEnabled();
 
     // And the press that used to vanish now lands.
@@ -3408,13 +3517,19 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     );
     // Row A (single to-do) fails with an inline error.
     const rowA = screen.getByText("single todo").closest("li")!;
+    await openRowMenu(user, rowA);
     await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
     await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
     expect(
       await within(rowA).findByText(/Reclaim-synced Google Tasks list/i),
     ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     // Row B (multi-step) then hits the workspace-wide reconnect_required condition.
+    // #253 — the error itself is NOT in the popup: it renders under the row, so it
+    // stays readable with every list closed. That is what lets this spec assert
+    // both halves at one instant below.
     const rowB = screen.getByText("plan trip").closest("li")!;
+    await openRowMenu(user, rowB);
     const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
     // This used to be `await waitFor(() => expect(scheduleB).toBeEnabled())`,
     // carrying a long comment about row A's in-flight action disabling row B's
@@ -3474,6 +3589,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
 
@@ -3514,6 +3630,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
     expect(
@@ -3542,6 +3659,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     // The detailed "available lists" message wins over the generic dictionary
     // copy for the same reason ("Couldn't find your Reclaim-synced...").
@@ -3582,6 +3700,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
       />,
     );
     const user = userEvent.setup();
+    await openRowMenu(user, screen.getByText("Call dentist").closest("li")!);
     const btn = screen.getByRole("button", { name: /add to calendar/i });
     expect(btn).toBeEnabled();
     await user.click(btn);
@@ -3666,60 +3785,71 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
 });
 
 describe("InboxView — needs-review rows adopt the v6 inline-actions frame", () => {
-  it("renders SHORT inline buttons: Break into steps, Add to-do, Save, Complete (full labels live in ▾)", () => {
+  // #253 — the frame that replaced v6's. Asserted as the EXACT list of controls
+  // on the resting row, not as four presence checks: the whole claim is that the
+  // row carries four actions and a ▾, and a presence check cannot see a fifth.
+  it("renders exactly four inline actions plus the ▾ trigger", () => {
     render(
       <InboxView
         now={Date.now()}
-        initialItems={[makeItem({ id: "n1", text: "capture me" })]}
+        initialItems={[
+          makeItem({ id: "n1", text: "capture me", taskId: "t-n1" }),
+        ]}
         settings={settings}
         welcomeVisible={false}
         resumeStep={null}
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
+    const group = row.querySelector<HTMLElement>("[data-row-actions]")!;
     expect(
-      within(row).getByRole("button", { name: /Break into steps/ }),
-    ).toBeInTheDocument();
-    expect(
-      within(row).getByRole("button", { name: "Add to-do" }),
-    ).toBeInTheDocument();
-    expect(
-      within(row).getByRole("button", { name: "Save" }),
-    ).toBeInTheDocument();
-    expect(
-      within(row).getByRole("button", { name: "Complete" }),
-    ).toBeInTheDocument();
-    // The full "Save for later" is the dropdown mirror, not an inline button.
-    expect(
-      within(row).queryByRole("button", { name: "Save for later" }),
-    ).not.toBeInTheDocument();
+      Array.from(group.querySelectorAll<HTMLElement>("button")).map(
+        (b) => b.getAttribute("aria-label") ?? b.textContent,
+      ),
+    ).toEqual([
+      "Break into steps →",
+      // The visible label is "Save"; the accessible name is the full "Save for
+      // later", because #253 dropped the ▾ entry that carried it.
+      "Save for later",
+      "Complete",
+      "Note for capture me",
+      "All options",
+    ]);
+    // None of the three cluster icons survives anywhere on the resting row.
+    for (const name of ["Move to", "Schedule", "Delete", "Add to-do"]) {
+      expect(
+        within(row).queryByRole("button", { name }),
+        `"${name}" is still on the row`,
+      ).not.toBeInTheDocument();
+    }
   });
 
-  it("v6: shows a 📥 Move-to icon (aria 'Move to') in the end cluster, distinct from the ▾ 'Move to…' entry", async () => {
+  // Every action the cluster carried is still reachable, and reachable by
+  // KEYBOARD — the ▾ trigger is a button and the entries are ordinary buttons in
+  // a dialog, so nothing here is gesture-only (#253's Bar).
+  it("Move to, Schedule and Delete are all reachable from the ▾ list", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
         welcomeVisible={false}
         resumeStep={null}
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
-    expect(
-      within(row).getByRole("button", { name: "Move to" }),
-    ).toBeInTheDocument();
-    expect(
-      within(row).queryByRole("button", { name: "Move to…" }),
-    ).not.toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "All options" }));
-    expect(
-      within(row).getByRole("button", { name: "Move to…" }),
-    ).toBeInTheDocument();
+    await openRowMenu(user, row);
+    for (const name of ["Move to…", "Schedule", "Delete"]) {
+      expect(
+        within(row).getByRole("button", { name }),
+        `"${name}" is not reachable from the ▾ list`,
+      ).toBeInTheDocument();
+    }
   });
 
-  it("v6: with Google connected, the ▾ menu adds a full-text 'Schedule' entry alongside the 📅 icon", async () => {
+  it("with Google connected, the ▾ list is where the 'Schedule' entry lives", async () => {
     const user = userEvent.setup();
     const connected = {
       configured: true,
@@ -3737,16 +3867,18 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
+    // #253 — ONE Schedule control, in the ▾ list. It was two (the 📅 icon plus its
+    // full-text mirror) until the icon went with the end cluster.
     expect(
-      within(row).getAllByRole("button", { name: "Schedule" }),
-    ).toHaveLength(1); // 📅 icon only
+      within(row).queryByRole("button", { name: "Schedule" }),
+    ).not.toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: "All options" }));
     expect(
       within(row).getAllByRole("button", { name: "Schedule" }),
-    ).toHaveLength(2); // + full-text menu entry
+    ).toHaveLength(1);
   });
 
-  it("clicking Add as single to-do (Keep-as-task) fires directly, no menu involved", async () => {
+  it("Add as single task to do (Keep-as-task) fires from the ▾ list", async () => {
     const { keepAsTask } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(
@@ -3759,7 +3891,11 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Add to-do" }));
+    // #253 — Add to-do moved off the row into the ▾ list, under its full label.
+    await openRowMenu(user, row);
+    await user.click(
+      within(row).getByRole("button", { name: "Add as single task to do" }),
+    );
     expect(keepAsTask).toHaveBeenCalledWith("n1");
   });
 
@@ -3776,7 +3912,11 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Save" }));
+    // #253 — visible "Save", accessible name "Save for later" (the dropped ▾
+    // entry's label), which is what keeps the swap from being a downgrade.
+    await user.click(
+      within(row).getByRole("button", { name: "Save for later" }),
+    );
     // The move went through moveItemToBucket → dropPlan(needsReview → savedLater)…
     expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
     // …whose savedLater action lands the item in the Saved bucket
@@ -3784,7 +3924,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
   });
 
-  it("the ▾ menu's full-label 'Save for later' dispatches the same Saved-bucket move as the inline 'Save'", async () => {
+  it("'Save for later' is the inline button, and stays distinct from Snooze 1h", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -3796,18 +3936,24 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
-    // Inline short button is "Save"; the dropdown carries the full "Save for later".
+    // #253 — the ▾ mirror is gone; the inline button carries its full label as the
+    // accessible name instead, and Snooze 1h stays a separate entry so the two
+    // genuinely-different writes still read as different.
+    await openRowMenu(user, row);
     expect(
-      within(row).getByRole("button", { name: "Save" }),
+      within(row).queryByRole("button", { name: "Save for later" }),
+    ).toBeInTheDocument(); // the inline one, visible through the open list
+    expect(
+      within(row).getByRole("button", { name: "Snooze 1h" }),
     ).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "All options" }));
+    await user.keyboard("{Escape}");
     await user.click(
       within(row).getByRole("button", { name: "Save for later" }),
     );
     expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
   });
 
-  it("delete is inline in the end cluster and still requires a two-step confirm", async () => {
+  it("delete is a ▾ entry and still requires a two-step confirm", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -3819,45 +3965,91 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
+    await openRowMenu(user, row);
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(deleteBrainDumpItem).toHaveBeenCalledWith("n1");
   });
 
-  it("▾ All options mirrors the actions in full: Move to… (pinned first), full labels, Snooze 1h, Edit task title", async () => {
+  // #253 — the ▾ list stopped being a mirror. Ten entries became seven, and the
+  // order is the agreed one: the action that MOVED here leads, then Move to, then
+  // the two time-shifting actions, then the calendar pair, then Edit, with the
+  // destructive one last.
+  //
+  // Asserted as an exact ordered list. The old version searched for "Move to…" and
+  // checked the entry after it, which could not see a re-added mirror anywhere else
+  // in the list — and re-added mirrors are exactly what this issue removes.
+  it("the ▾ list is the seven actions that are NOT on the row, in the agreed order", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
         welcomeVisible={false}
         resumeStep={null}
       />,
     );
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    const menuButtons = within(row).getAllByRole("button");
-    const moveToIndex = menuButtons.findIndex(
-      (b) => b.textContent === "Move to…",
-    );
-    expect(moveToIndex).toBeGreaterThan(-1);
-    // Move to… is pinned first; the next entry is the FULL-label breakdown.
-    expect(menuButtons[moveToIndex + 1]).toHaveTextContent(
-      /Break into smaller steps/,
-    );
+    const popup = within(row).getByRole("dialog", { name: "All options" });
     expect(
-      within(row).getByRole("button", { name: "Snooze 1h" }),
-    ).toBeInTheDocument();
-    // v6: the dropdown edit entry is the text "Edit task title"; the ✏️ pencil
-    // beside the title stays (aria-label "Edit capture me").
-    expect(
-      within(row).getByRole("button", { name: "Edit task title" }),
-    ).toBeInTheDocument();
+      within(popup)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([
+      "Add as single task to do",
+      "Move to…",
+      "Snooze 1h",
+      "Schedule",
+      "Add to calendar (.ics)",
+      "Edit task title",
+      "Delete",
+    ]);
+    // The three dropped mirrors, named so a re-add fails here rather than merely
+    // making the popup taller again.
+    for (const gone of [
+      "Break into smaller steps",
+      "Save for later",
+      "Mark as completed",
+    ]) {
+      expect(
+        within(popup).queryByText(gone),
+        `"${gone}" is back in the ▾ list`,
+      ).toBeNull();
+    }
+    // The ✏️ pencil beside the title is NOT in the list and stays on the row.
     expect(
       within(row).getAllByRole("button", { name: "Edit capture me" }),
     ).toHaveLength(1);
+  });
+
+  // Every ▾ entry is the sole route to its action now, so each carries the 44px
+  // minimum (`rowMenuEntry`). Height only — a full-width entry is already well
+  // past 44px wide. jsdom computes no layout, so the classes are what is checked.
+  it("every ▾ entry carries the 44px minimum height", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeItem({ id: "n1", text: "capture me" })]}
+        settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("capture me").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const entries = within(
+      within(row).getByRole("dialog", { name: "All options" }),
+    ).getAllByRole("button");
+    expect(entries).toHaveLength(7);
+    for (const entry of entries) {
+      expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+    }
   });
 
   it("Snooze 1h in the ▾ menu is a SEPARATE direct snooze — it does not go through the move dispatcher", async () => {
@@ -4220,8 +4412,11 @@ describe("InboxView — row action group target size (#184)", () => {
       />,
     );
 
+    // #253 — the review row's Delete is a ▾ entry; the Done bucket hand-rolls its
+    // action line and keeps its inline 🗑, so only one of the two needs opening.
     for (const text of ["review row", "finished thing"]) {
       const row = screen.getByText(text).closest("li")!;
+      if (text === "review row") await openRowMenu(user, row);
       await user.click(within(row).getByRole("button", { name: "Delete" }));
       // Really armed, so a pass cannot come from having measured the resting
       // state twice.
@@ -4263,6 +4458,8 @@ describe("InboxView — row action group target size (#184)", () => {
     );
     for (const text of ["review row", "finished thing"]) {
       const row = screen.getByText(text).closest("li")!;
+      // #253 — see the note on the spec above: only the `RowActions` row moved.
+      if (text === "review row") await openRowMenu(user, row);
       await user.click(within(row).getByRole("button", { name: "Delete" }));
       const pair = within(row)
         .getByRole("button", { name: "Cancel" })

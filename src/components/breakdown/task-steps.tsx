@@ -13,6 +13,7 @@ import {
 } from "@/app/actions/focus";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
+import { rowMenuEntry } from "@/components/ui/anchored-popup";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
@@ -451,10 +452,6 @@ export function TaskSteps({
           s.resumable ? "step.resumeFocus" : "step.startFocus",
           voice,
         );
-        const focusMenuLabel = t(
-          s.resumable ? "step.resumeFocusTimer" : "step.startFocusTimer",
-          voice,
-        );
         return (
           <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
             {/* Title line — mirrors the inbox ItemRow's title row. */}
@@ -545,22 +542,21 @@ export function TaskSteps({
                       />,
                       trigger,
                     ]}
+                    /* #253 — the ▾ list holds only what is NOT already on the row.
+                       "Start/Resume focus timer" pointed at the same
+                       `/focus/${s.id}` as the inline CTA and "Complete step" called
+                       the same `complete(s.id)` as the inline Complete, so both were
+                       height in a popup that is now the sole route to what remains.
+                       Each inline label is at least as clear as the entry it
+                       replaces — "▶ Start Focus" for "Start focus timer", and
+                       "Complete" on a step row, where the step IS the context — which
+                       is the condition #253's Bar puts on dropping a mirror.
+
+                       This file's `RowActions` call never passed `move`, `schedule`
+                       or `del`, so the icon cluster #253 deleted rendered nothing
+                       here: no affordance moved, and the three surviving entries are
+                       the same three as before. */
                     menu={[
-                      <Link
-                        key="focus-m"
-                        href={`/focus/${s.id}`}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {focusMenuLabel}
-                      </Link>,
-                      <button
-                        key="complete-m"
-                        type="button"
-                        onClick={() => complete(s.id)}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {t("step.complete", voice)}
-                      </button>,
                       <button
                         key="edit-est-m"
                         type="button"
@@ -568,7 +564,7 @@ export function TaskSteps({
                           setEditTitleId(null);
                           setEditEstId(s.id);
                         }}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                        className={rowMenuEntry()}
                       >
                         {t("step.editEstimate", voice)}
                       </button>,
@@ -579,7 +575,7 @@ export function TaskSteps({
                           setEditEstId(null);
                           setEditTitleId(s.id);
                         }}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                        className={rowMenuEntry()}
                       >
                         {t("step.editTitle", voice)}
                       </button>,
@@ -587,7 +583,7 @@ export function TaskSteps({
                         key="review-m"
                         type="button"
                         onClick={() => sendToReview(s.id)}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                        className={rowMenuEntry()}
                       >
                         {t("step.sendToReview", voice)}
                       </button>,

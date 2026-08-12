@@ -86,6 +86,7 @@ import {
 import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
+import { rowMenuEntry } from "@/components/ui/anchored-popup";
 import {
   RowActions,
   ScheduleControl,
@@ -1691,7 +1692,7 @@ export function InboxView({
       key={`edit-menu-${item.id}`}
       type="button"
       onClick={() => setEditingId(item.id)}
-      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+      className={rowMenuEntry()}
     >
       {t("action.editTitle", voice)}
     </button>
@@ -2168,12 +2169,16 @@ export function InboxView({
     );
   };
 
-  // v5: 🗑 delete lives inline in every row's end cluster AND (per the "▾
-  // lists ALL the row's options including duplicates" rule) a second time
-  // inside the ▾ menu — both instances share the same confirmDeleteId state,
-  // so confirming/cancelling either one keeps the other in sync. `fullWidth`
-  // switches on the menu-entry styling (menu items are left-aligned, full
-  // width rows; the end-cluster one is a compact inline button).
+  // Delete, in three shapes, all sharing one `confirmDeleteId` so confirming or
+  // cancelling either resting variant keeps the other in sync.
+  //
+  // #253 retired the "▾ lists ALL the row's options including duplicates" rule
+  // this factory was written for: the ▾ list now holds only what is not already
+  // on the row, so `fullWidth` is the ROUTE to delete on every `RowActions` row
+  // rather than a mirror of the 🗑 beside it. `icon` survives for one caller —
+  // the Done bucket hand-rolls its action line (it needs Reopen where the primary
+  // CTA goes) and is not a `RowActions` row, so its 🗑 was never in the cluster
+  // #253 deleted.
   const deleteControl = (
     itemId: string,
     key: string,
@@ -2238,10 +2243,15 @@ export function InboxView({
     ) : (
       <button
         key={key}
-        className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
-        )}
+        // Colours unchanged: muted at rest, `hover:text-foreground` on the accent
+        // background. #253 changed WHERE the resting delete lives, not how it reads.
+        className={
+          fullWidth
+            ? rowMenuEntry("text-muted-foreground hover:text-foreground")
+            : cn(
+                "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+              )
+        }
         onClick={() => requestDelete(itemId)}
       >
         {t("action.delete", voice)}
@@ -2808,18 +2818,6 @@ export function InboxView({
                               }
                             />
                           }
-                          moveIcon={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
                           dragGrip={<DragGrip id={item.id} text={item.text} />}
                           editButton={pencil(item)}
                           editMenuItem={editMenuItem(item)}
@@ -3049,39 +3047,25 @@ export function InboxView({
                                         trigger,
                                       ]
                                 }
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                schedule={schedule}
-                                del={deleteControl(item.id, "delete", {
-                                  icon: true,
-                                })}
+                                /* #253 — no `move` / `schedule` / `del`: the icon
+                                   cluster is gone and all three are reached from the ▾
+                                   list below, which is where they already were.
+                                   `Mark as completed` and the awaiting row's
+                                   `Break now` left it as well — each fired the same
+                                   handler as the inline button two pixels away. Order
+                                   is row-specific actions, then Move to, then the
+                                   calendar pair, then Edit, with the destructive one
+                                   last. */
                                 menu={[
-                                  <MoveToMenu
-                                    key="move"
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />,
                                   // Rows with steps: view the broken-down list (inline
-                                  // expand) + jump to the task page to focus a step —
-                                  // above "Mark as completed". Hidden while awaiting.
+                                  // expand) + jump to the task page to focus a step.
+                                  // Hidden while awaiting a breakdown, which is also
+                                  // when this row's inline CTA becomes Break now.
                                   !awaitingBreakdown ? (
                                     <button
                                       key="view-list-m"
                                       type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      className={rowMenuEntry()}
                                       onClick={() =>
                                         setExpandedId(expanded ? null : item.id)
                                       }
@@ -3093,7 +3077,7 @@ export function InboxView({
                                     <button
                                       key="focus-list-m"
                                       type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      className={rowMenuEntry()}
                                       // Guard rather than assert: a multi-step row's Task always
                                       // exists by construction, but a data inconsistency must not
                                       // navigate to `/tasks/null` (Duo review).
@@ -3105,33 +3089,14 @@ export function InboxView({
                                       Start visual focus timer
                                     </button>
                                   ) : null,
-                                  awaitingBreakdown ? (
-                                    <button
-                                      key="break-now-m"
-                                      type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      onClick={() =>
-                                        breakdown(item.id, item.text)
-                                      }
-                                    >
-                                      {t("prompt.breakNow", voice)}
-                                    </button>
-                                  ) : (
-                                    <button
-                                      key="complete-m"
-                                      type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      onClick={() =>
-                                        run(
-                                          () => completeItem(item.id),
-                                          { id: item.id, field: "done" },
-                                          item.text,
-                                        )
-                                      }
-                                    >
-                                      {t("action.completeFull", voice)}
-                                    </button>
-                                  ),
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
                                   schedule ? (
                                     <ScheduleControl
                                       key="schedule-m"
@@ -3301,22 +3266,14 @@ export function InboxView({
                                   />,
                                   trigger,
                                 ]}
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                schedule={schedule}
-                                del={deleteControl(item.id, "delete", {
-                                  icon: true,
-                                })}
+                                /* #253 — no `move` / `schedule` / `del`, and no
+                                   `Start visual focus timer` / `Mark as completed`:
+                                   the first three moved into the ▾ list they were
+                                   already duplicated in, and the last two called the
+                                   identical handlers as this row's inline ▶ Start
+                                   Focus and Complete. `focusOnItem(item.id,
+                                   item.text)` was literally the same expression in
+                                   both places. */
                                 menu={[
                                   <MoveToMenu
                                     key="move"
@@ -3326,30 +3283,6 @@ export function InboxView({
                                       moveItemToBucket(item.id, target)
                                     }
                                   />,
-                                  <button
-                                    key="focus-m"
-                                    type="button"
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() =>
-                                      focusOnItem(item.id, item.text)
-                                    }
-                                  >
-                                    Start visual focus timer
-                                  </button>,
-                                  <button
-                                    key="complete-m"
-                                    type="button"
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() =>
-                                      run(
-                                        () => completeItem(item.id),
-                                        { id: item.id, field: "done" },
-                                        item.text,
-                                      )
-                                    }
-                                  >
-                                    {t("action.completeFull", voice)}
-                                  </button>,
                                   schedule ? (
                                     <ScheduleControl
                                       key="schedule-m"
@@ -3488,24 +3421,21 @@ export function InboxView({
                                   >
                                     {t("action.breakdown", voice)} →
                                   </button>,
-                                  <button
-                                    key="keep"
-                                    className={cn(
-                                      touchTarget,
-                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                                    )}
-                                    onClick={() =>
-                                      run(
-                                        () => keepAsTask(item.id),
-                                        { id: item.id, field: "triage" },
-                                        item.text,
-                                      )
-                                    }
-                                  >
-                                    {t("action.addTodo", voice)}
-                                  </button>,
+                                  // #253 — Add to-do left the row for the ▾ list, so
+                                  // this frame is the same four as every other bucket:
+                                  // main CTA, Save, Complete, Note.
                                   <button
                                     key="save"
+                                    // The full label as the accessible name. #253 drops
+                                    // the "Save for later" menu entry this button
+                                    // mirrors, and its Bar only allows that if the
+                                    // survivor is at least as clear — "Save" alone is
+                                    // not ("save WHAT?"). WCAG 2.5.3 (Label in Name) is
+                                    // satisfied in both voices, because the visible
+                                    // string is a prefix of the full one: "Save" ⊂
+                                    // "Save for later", "🥫 Save" ⊂ "🥫 Save for later".
+                                    aria-label={t("action.saveForLater", voice)}
+                                    title={t("action.saveForLater", voice)}
                                     className={cn(
                                       touchTarget,
                                       "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
@@ -3536,39 +3466,15 @@ export function InboxView({
                                   // settled for every list row.
                                   trigger,
                                 ]}
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                del={deleteControl(item.id, "delete-saved", {
-                                  icon: true,
-                                })}
+                                /* #253 — Add to-do is the only entry here that is NOT
+                                   on the row, so it leads. `Break into smaller steps`,
+                                   `Save for later` and `Mark as completed` all left:
+                                   each fired the same handler as an inline button, and
+                                   on THIS row `save-m` was the same re-snooze as the
+                                   inline Save rather than a distinct action (unlike the
+                                   needs-review row, where Snooze 1h and Save for later
+                                   genuinely differ). */
                                 menu={[
-                                  <MoveToMenu
-                                    key="move"
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />,
-                                  <button
-                                    key="breakdown-m"
-                                    onClick={() =>
-                                      breakdown(item.id, item.text)
-                                    }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.breakdownFull", voice)}
-                                  </button>,
                                   <button
                                     key="keep-m"
                                     onClick={() =>
@@ -3578,37 +3484,18 @@ export function InboxView({
                                         item.text,
                                       )
                                     }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                    className={rowMenuEntry()}
                                   >
                                     {t("action.addTodoFull", voice)}
                                   </button>,
-                                  <button
-                                    key="save-m"
-                                    onClick={() => {
-                                      setSavedOptionsId(null);
-                                      run(
-                                        () => snoozeBrainDumpItem(item.id, 60),
-                                        { id: item.id, field: "snooze" },
-                                        item.text,
-                                      );
-                                    }}
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.saveForLater", voice)}
-                                  </button>,
-                                  <button
-                                    key="complete-m"
-                                    onClick={() =>
-                                      run(
-                                        () => completeItem(item.id),
-                                        { id: item.id, field: "done" },
-                                        item.text,
-                                      )
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
                                     }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.completeFull", voice)}
-                                  </button>,
+                                  />,
                                   editMenuItem(item),
                                   deleteControl(item.id, "delete-saved-m", {
                                     fullWidth: true,
@@ -4183,7 +4070,6 @@ function ItemRow({
   icsMenu,
   scheduleError,
   moveMenu,
-  moveIcon,
   dragGrip,
   editButton,
   editMenuItem,
@@ -4219,8 +4105,6 @@ function ItemRow({
   icsMenu?: React.ReactNode;
   scheduleError?: string;
   moveMenu?: React.ReactNode;
-  /** v6: 📥 Move-to icon for the end cluster (compact MoveToMenu). */
-  moveIcon?: React.ReactNode;
   dragGrip?: React.ReactNode;
   editButton?: React.ReactNode;
   /** v6: "Edit task title" text entry for the ▾ dropdown (title line keeps editButton). */
@@ -4247,12 +4131,13 @@ function ItemRow({
     settings,
     now,
   );
-  // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
-  // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
-  const deleteControl = (
-    key: string,
-    { fullWidth = false, icon = false } = {},
-  ) =>
+  // #253 — one resting shape, not two. This factory had an `icon` variant for the
+  // end cluster and a `fullWidth` one for the ▾ list, both driven by the same
+  // `confirmingDelete`; the cluster is gone, so the ▾ entry is the route and the
+  // `icon` branch had no caller left. `rowMenuEntry` keeps it at 44px, which the
+  // old mirror-only entry never was — it did not need to be while a 44px 🗑 sat
+  // beside it.
+  const deleteControl = (key: string) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
         {/* #251 review — the FOURTH copy of the armed confirm, and the last one
@@ -4290,29 +4175,12 @@ function ItemRow({
           {t("action.cancel", voice)}
         </button>
       </span>
-    ) : icon ? (
-      <button
-        key={key}
-        aria-label={t("action.delete", voice)}
-        title={t("action.delete", voice)}
-        className={cn(
-          // End-cluster icon — ghost hover + a slightly bigger glyph, same
-          // treatment as 📅/▾/📥 (owner: mobile icons read too tiny). Also
-          // picks up the ≥44px touchTarget this variant was missing.
-          "text-muted-foreground hover:bg-accent hover:text-destructive rounded-md px-2 py-1 text-sm",
-          touchTarget,
-        )}
-        onClick={onRequestDelete}
-      >
-        🗑
-      </button>
     ) : (
       <button
         key={key}
-        className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
-        )}
+        // Colours unchanged from the ▾ entry this replaces: muted at rest,
+        // `hover:text-foreground` on the accent background.
+        className={rowMenuEntry("text-muted-foreground hover:text-foreground")}
         onClick={onRequestDelete}
       >
         {t("action.delete", voice)}
@@ -4397,19 +4265,24 @@ function ItemRow({
               >
                 {t("action.breakdown", voice)} →
               </button>,
-              <button
-                key="keep"
-                onClick={onKeep}
-                className={cn(
-                  touchTarget,
-                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                )}
-              >
-                {t("action.addTodo", voice)}
-              </button>,
+              // #253 — Add to-do left the row for the ▾ list. Four inline actions
+              // remain, and they are the four every bucket sharing this shape now
+              // shows: main CTA, Save, Complete, Note.
               <button
                 key="save-for-later"
                 onClick={onSaveForLater}
+                // The full label as the accessible name, because #253 drops the
+                // "Save for later" ▾ entry this mirrors and its Bar only allows that
+                // if the survivor is at least as clear — "Save" alone is not.
+                // WCAG 2.5.3 (Label in Name) holds in both voices: the visible
+                // string is a prefix of this one ("Save" ⊂ "Save for later",
+                // "🥫 Save" ⊂ "🥫 Save for later").
+                //
+                // It also keeps this button DISTINCT from Snooze 1h, which stays a
+                // separate ▾ entry — the two are genuinely different writes and
+                // collapsing them would be the regression the note below warns of.
+                aria-label={t("action.saveForLater", voice)}
+                title={t("action.saveForLater", voice)}
                 className={cn(
                   touchTarget,
                   "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
@@ -4427,48 +4300,39 @@ function ItemRow({
               // item's id, which `RowActions` renders as nothing.
               noteTrigger,
             ]}
-            move={moveIcon}
-            schedule={schedule}
             scheduled={scheduled}
-            del={deleteControl("delete", { icon: true })}
+            /* #253 — ten entries down to seven, and none of the seven is on the row.
+               Add to-do leads because it is the one that MOVED here; then Move to,
+               then the two time-shifting actions, then the calendar pair, then Edit,
+               with the destructive one last.
+       
+               Dropped as mirrors of permanently-visible inline buttons:
+               `Break into smaller steps` (inline "Break into steps →"),
+               `Save for later` (inline "Save", which now carries the full label as
+               its accessible name) and `Mark as completed` (inline "Complete").
+               Each survivor is at least as clear as the entry it replaced, which is
+               the condition #253's Bar puts on the swap; "Complete" is the label
+               the whole app uses for this act across eight call sites, and
+               `action.completeFull` only ever existed as a longer dropdown mirror.
+       
+               `moveMenu` sits second rather than first: the "Move to… pinned first"
+               convention came from the era when the ▾ list was a full mirror of the
+               row, and the row no longer has a 📥. */
             menu={[
-              moveMenu,
-              <button
-                key="breakdown-m"
-                onClick={onBreakdown}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.breakdownFull", voice)}
-              </button>,
-              <button
-                key="keep-m"
-                onClick={onKeep}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
+              <button key="keep-m" onClick={onKeep} className={rowMenuEntry()}>
                 {t("action.addTodoFull", voice)}
               </button>,
-              <button
-                key="save-for-later-m"
-                onClick={onSaveForLater}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.saveForLater", voice)}
-              </button>,
-              <button
-                key="complete-m"
-                onClick={onComplete}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.completeFull", voice)}
-              </button>,
-              // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
-              // "Save for later": snooze is the literal 1-hour timer
-              // (snoozeBrainDumpItem), Save for later is a direct move to the
-              // Saved bucket via the shared moveItemToBucket dispatcher.
+              moveMenu,
+              // "Snooze 1h" lives only here — a SEPARATE action from "Save for
+              // later": snooze is the literal 1-hour timer (snoozeBrainDumpItem),
+              // Save for later is a direct move to the Saved bucket via the shared
+              // moveItemToBucket dispatcher. #253 kept both, deliberately: the
+              // inline Save's accessible name is "Save for later", so the two read
+              // as the different writes they are.
               <button
                 key="snooze-m"
                 onClick={onSnooze}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                className={rowMenuEntry()}
               >
                 Snooze 1h
               </button>,
@@ -4482,7 +4346,7 @@ function ItemRow({
               ) : null,
               icsMenu,
               editMenuItem,
-              deleteControl("delete-m", { fullWidth: true }),
+              deleteControl("delete-m"),
             ]}
           />
           {scheduleError && (

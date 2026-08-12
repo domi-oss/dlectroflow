@@ -88,3 +88,41 @@ export function popupSurface(className?: string): string {
     className,
   );
 }
+
+/**
+ * One row-action menu entry.
+ *
+ * #253 — this exists because that issue **promoted** these entries. The ▾ list
+ * used to be a full mirror: every entry it held was also a 44px control on the
+ * row itself (📥 move, 📅 schedule, 🗑 delete) or a permanently-visible inline
+ * button. Deleting the trailing icon cluster leaves the list as the ONLY route to
+ * Move to, Snooze, Schedule, Add to calendar, Edit and Delete — so an entry that
+ * was a convenience at ~24px is now the whole affordance, and one of them deletes
+ * a task.
+ *
+ * `min-h-11` + `min-w-11` rather than `touchTarget`, which also sets
+ * `justify-center` and would centre the label in a left-aligned list. The width
+ * floor is redundant against `w-full` and kept anyway, because the target-size
+ * guards in `inbox-view.test.tsx` and `library-rows.test.tsx` measure BOTH
+ * dimensions of every control inside `[data-row-actions]` — and the popup is
+ * portaled in there, so an open list is in scope. A guard that has to be told to
+ * skip these entries is a guard that stops seeing them. Shaped to match
+ * `nav/account-menu.tsx`'s and `nav/app-menu.tsx`'s `ENTRY` strings, which
+ * already solved this for the header popups — the two of them are hoisted for
+ * exactly this reason and #117 exists because they had drifted.
+ *
+ * ── Deliberately NOT everything in a row popup ─────────────────────────────
+ *
+ * `MoveToMenu`'s nested bucket items keep their existing size. They were already
+ * the sole route to a given bucket before #253 — both the compact 📥 and the text
+ * "Move to…" open the same nested list — so nothing this issue does changes their
+ * reachability. Sizing them is #205's sweep, not this one. The line drawn here is
+ * "entries whose sole-route status THIS change creates", which is checkable
+ * against the diff rather than a matter of taste.
+ */
+export function rowMenuEntry(className?: string): string {
+  return cn(
+    "hover:bg-accent flex min-h-11 w-full min-w-11 items-center rounded-md px-2.5 py-1 text-left",
+    className,
+  );
+}

@@ -13,6 +13,7 @@ import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
+  rowMenuEntry,
 } from "@/components/ui/anchored-popup";
 import {
   GoogleAccountHint,
@@ -44,10 +45,12 @@ export type ScheduleControlProps = {
   /** True while a schedule call for this row is in flight — disables the 📅
    * button/popover Go so a slow request can't be double-submitted. */
   pending?: boolean;
-  /** v6: "icon" (default) = the 📅 end-cluster button with an absolute popover.
-   * "menu" = a full-width text entry for the ▾ dropdown's full mirror — the
-   * duration presets expand inline (in normal flow) instead of in an absolute
-   * popover, so it nests cleanly inside the dropdown column. */
+  /** "icon" = the 📅 button with its own anchored popover; since #253 deleted the
+   * row's end cluster its only caller is `breakdown/task-schedule.tsx`, the task
+   * working view's bordered pill. "menu" = a full-width text entry for a row's ▾
+   * list, which is now the ONLY Schedule affordance on a row — the duration presets
+   * expand inline (in normal flow) rather than in an anchored popover, so they
+   * reflow the dropdown column instead of floating inside it. */
   variant?: "icon" | "menu";
   /** Menu-variant trigger text (voice-resolved by the caller). Defaults to "Schedule". */
   label?: string;
@@ -163,12 +166,14 @@ export function ScheduleControl({
         // Never both: `aria-describedby` already wins as the accessible
         // description, and a tooltip repeating it is noise on hover.
         title={describedBy ? undefined : GOOGLE_ACCOUNT_HINT}
-        className={cn(
+        className={
           isMenu
-            ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium"
-            : "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-          !isMenu && touchTarget,
-        )}
+            ? rowMenuEntry("font-medium")
+            : cn(
+                "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                touchTarget,
+              )
+        }
       >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
@@ -229,15 +234,19 @@ export function ScheduleControl({
   // A disabled element is skipped by most screen readers, so the reason has to
   // ride on the name itself; `aria-busy` is the machine-readable half.
   const busyProps = pending ? ({ "aria-busy": true } as const) : {};
-  const triggerClassName = cn(
-    isMenu
-      ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
-      : // End-cluster icon: ghost hover (matches Complete/▾) + a slightly
-        // bigger glyph than the surrounding text-xs row (owner: mobile
-        // icons read too tiny) — the label stays `font-medium` text-xs.
+  // #253 — the `menu` variant is now the ONLY Schedule affordance on a row (the
+  // 📅 icon it used to mirror went with the end cluster), so it takes the shared
+  // 44px `rowMenuEntry`. The `icon` variant keeps its own sizing for its one
+  // remaining caller, `breakdown/task-schedule.tsx`.
+  const triggerClassName = isMenu
+    ? rowMenuEntry("font-medium disabled:opacity-50")
+    : cn(
+        // Ghost hover (matches Complete/▾) + a slightly bigger glyph than the
+        // surrounding text-xs row (owner: mobile icons read too tiny) — the label
+        // stays `font-medium` text-xs.
         "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium disabled:opacity-50",
-    !isMenu && touchTarget,
-  );
+        touchTarget,
+      );
 
   const durationFields = (
     <>
@@ -311,6 +320,63 @@ export function ScheduleControl({
     </>
   );
 
+  // #106 — the Google steps path asks first: deadline, priority, work-or-personal.
+  //
+  // ⚠️ This branch is ABOVE the `isMenu` one, and #253 is why. It used to sit
+  // below, so the `menu` variant never reached it: the note here said a floating
+  // popup must not nest inside the 🔽 popup, and while the 📅 icon existed that
+  // cost nothing, because the icon was the surface people actually used.
+  //
+  // #253 deletes the icon. Left as it was, "all three cluster actions already
+  // exist as menu entries" would have been true of the LABEL and false of the
+  // BEHAVIOUR — Schedule would have silently fallen back to pushing with the
+  // server-resolved defaults, and #106 (choose a deadline, a priority, and
+  // work-or-personal before the push) would have become unreachable from any inbox
+  // row. That is a feature deleted by a layout change, which is the worst shape a
+  // regression can take because nothing fails.
+  //
+  // The nesting concern turned out to be already solved rather than real:
+  // `MoveToMenu` is a Base UI `Menu` portaled into its own wrapper inside this
+  // same 🔽 popup, and `e2e/smoke/row-menu-viewport-fit.spec.ts` asserts that a
+  // press inside it still dispatches ("the 🔽 popup's nested Move-to menu still
+  // dispatches a move"). `ScheduleMenu` uses the identical idiom — its own doc
+  // comment says it follows row-actions.tsx's — so it nests on the same terms.
+  //
+  // The .ics path still keeps its one click. A guest with no Reclaim has nothing
+  // to choose that the menu could offer beyond a deadline, and turning their
+  // download into a two-step dialog would be a regression, not a feature. With no
+  // intent yet (a row whose parent has not resolved one) the control also stays
+  // immediate, so it is never dead while data is in flight.
+  if (state === "ready_steps" && scheduleIntent) {
+    return (
+      <ScheduleMenu
+        taskTitle={taskTitle ?? ""}
+        intent={scheduleIntent}
+        // Always true here: this branch is the Google path by construction, and
+        // priority/hours are exactly the fields an .ics VEVENT cannot carry.
+        showReclaimFields
+        pending={pending}
+        onSchedule={(chosen) => onScheduleSteps?.(chosen)}
+        trigger={
+          <button
+            type="button"
+            // The menu variant is named by its visible text, so an `aria-label` is
+            // written only when `pending` appends the busy reason — same contract
+            // as the plain menu trigger below (WCAG 2.5.3: a name that dropped the
+            // visible label would break Label in Name).
+            aria-label={isMenu ? menuBusyLabel : iconBusyLabel}
+            title={isMenu ? menuBusyLabel : iconBusyLabel}
+            disabled={pending}
+            {...busyProps}
+            className={triggerClassName}
+          >
+            {isMenu ? label : "📅"}
+          </button>
+        }
+      />
+    );
+  }
+
   // ▾-dropdown variant: presets expand inline, in normal flow, so the column
   // reflows around them. Nothing floats, nothing can be clipped.
   if (isMenu) {
@@ -340,39 +406,6 @@ export function ScheduleControl({
           </span>
         )}
       </span>
-    );
-  }
-
-  // #106 — the Google steps path asks first: deadline, priority, work-or-personal.
-  //
-  // The .ics path deliberately keeps its one click. A guest with no Reclaim has
-  // nothing to choose that the menu could offer beyond a deadline, and turning
-  // their download into a two-step dialog would be a regression, not a feature.
-  // With no intent yet (a row whose parent has not resolved one) the control also
-  // stays immediate, so it is never dead while data is in flight.
-  if (state === "ready_steps" && scheduleIntent) {
-    return (
-      <ScheduleMenu
-        taskTitle={taskTitle ?? ""}
-        intent={scheduleIntent}
-        // Always true here: this branch is the Google path by construction, and
-        // priority/hours are exactly the fields an .ics VEVENT cannot carry.
-        showReclaimFields
-        pending={pending}
-        onSchedule={(chosen) => onScheduleSteps?.(chosen)}
-        trigger={
-          <button
-            type="button"
-            aria-label={iconBusyLabel}
-            title={iconBusyLabel}
-            disabled={pending}
-            {...busyProps}
-            className={triggerClassName}
-          >
-            📅
-          </button>
-        }
-      />
     );
   }
 
@@ -437,29 +470,46 @@ export function ScheduleControl({
 }
 
 /**
- * The action line shared by every task row (v5): visible `inline` actions in
- * order, a flex spacer, then the end cluster — 📅 (omitted when `schedule` is
- * null, e.g. guest rows), `del` (omitted when not provided), and the ▾ trigger
- * which opens a dismissable (Escape / outside-click) list of ALL of the row's
- * options — `menu`, rendered verbatim, caller-ordered (Move to… pinned first
- * by the caller). This is a plain dismissable popover, not an ARIA menu — no
- * `role="menu"` anywhere here, since `menu` entries are ordinary buttons/links,
- * not menuitems with roving-focus semantics.
+ * The action line shared by every task row (v7): visible `inline` actions in
+ * order, then the ▾ trigger pinned right, which opens a dismissable (Escape /
+ * outside-click) list of the row's remaining options — `menu`, rendered
+ * verbatim, caller-ordered. This is a plain dismissable popover, not an ARIA
+ * menu — no `role="menu"` anywhere here, since `menu` entries are ordinary
+ * buttons/links, not menuitems with roving-focus semantics.
+ *
+ * ── #253: v6's trailing icon cluster is gone ────────────────────────────────
+ *
+ * v5/v6 rendered 📥 move / 📅 schedule / 🗑 delete in a `flex-nowrap` group after
+ * the inline actions, from `move` / `schedule` / `del` props. All three were
+ * duplicates of entries the ▾ list already carried, and the group's own comment
+ * recorded that it wraps onto a band of its own on a narrow row — which is a
+ * third line of controls on every card, buying nothing the menu did not already
+ * offer. On the owner's 360px screenshot one Needs-review row occupied roughly
+ * seven stacked bands and this was two of them (the wrapped inline text plus the
+ * icons).
+ *
+ * The three props are **removed**, not left accepting a value that renders
+ * nothing. `schedule` was the cautionary case: it only ever rendered through
+ * `{schedule && <ScheduleControl {...schedule} />}` inside that group, and #213
+ * had already been written as "pass `schedule=` on library rows" — a fix
+ * describing a prop with no render path. A silently-inert prop is worse than a
+ * compile error, because it reads as wired.
+ *
+ * `ScheduleControl` is unaffected and still exported. Its `menu` variant is what
+ * every row's ▾ list uses, and its `icon` variant still has a caller —
+ * `breakdown/task-schedule.tsx`, the task working view's bordered pill.
+ *
+ * The nowrap group is not kept as a one-child wrapper. It existed to stop the
+ * cluster splitting mid-way and stranding this trigger with a mis-anchored
+ * popover (owner: mobile screenshot); one control cannot split.
  */
 export function RowActions({
   inline,
-  move,
-  schedule,
-  del,
   menu,
   scheduled = false,
   className,
 }: {
   inline: ReactNode[];
-  /** v6: 📥 Move-to icon, first in the end cluster (omitted when not provided). */
-  move?: ReactNode;
-  schedule?: ScheduleControlProps | null;
-  del?: ReactNode;
   menu: ReactNode[];
   /** Renders a "Scheduled ✓" indicator when the row's task has a scheduledAt
    *  marker (any method). */
@@ -492,51 +542,49 @@ export function RowActions({
         </span>
       )}
       {inline}
-      {/* End cluster (📥 move / 📅 schedule / 🗑 delete / ▾ overflow) is ONE
-          `flex-nowrap` unit, pinned right via `ml-auto` instead of a `flex-1`
-          spacer. On a narrow row the whole group wraps to its own line
-          together — it never splits mid-cluster, which used to leave the ▾
-          trigger stranded alone with its `absolute right-0` popover
-          mis-anchored (owner: mobile screenshot). `shrink-0` keeps every
-          control at its full ≥44px touch target instead of being squeezed. */}
-      <span className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">
-        {move}
-        {schedule && <ScheduleControl {...schedule} />}
-        {/* Visible gap so 📅 Schedule and 🗑 Delete don't sit flush — avoids misclicks. */}
-        {del && <span aria-hidden="true" className="w-3" />}
-        {del}
-        {/* #92 — a Popover, not `absolute right-0`: this ~288px popup used to
-            hang past the bottom edge from any row low on a phone screen. Still
-            NOT an ARIA menu (see the doc comment above): Popover.Popup is a
-            `dialog`, and `menu` entries stay ordinary buttons/links. Portaled
-            into `menuRef` rather than <body> so a press on a nested control
-            (the "Move to…" menu) is still a press inside this popup, and so
-            row-scoped queries keep meaning "this row's options". */}
-        <span ref={menuRef} className="relative">
-          <Popover.Root>
-            <Popover.Trigger
-              aria-label="All options"
-              className={cn(
-                "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium",
-                touchTarget,
-              )}
-            >
-              🔽
-            </Popover.Trigger>
-            <Popover.Portal container={menuRef} render={<span />}>
-              <Popover.Positioner {...ANCHORED_POSITIONER} render={<span />}>
-                <Popover.Popup
-                  render={<span />}
-                  // The dialog's accessible name (axe aria-dialog-name).
-                  aria-label="All options"
-                  className={popupSurface("min-w-40 gap-1 p-1")}
-                >
-                  {menu}
-                </Popover.Popup>
-              </Popover.Positioner>
-            </Popover.Portal>
-          </Popover.Root>
-        </span>
+      {/* #92 — a Popover, not `absolute right-0`: this ~288px popup used to
+          hang past the bottom edge from any row low on a phone screen. Still
+          NOT an ARIA menu (see the doc comment above): Popover.Popup is a
+          `dialog`, and `menu` entries stay ordinary buttons/links. Portaled
+          into `menuRef` rather than <body> so a press on a nested control
+          (the "Move to…" menu) is still a press inside this popup, and so
+          row-scoped queries keep meaning "this row's options".
+
+          #253 — `ml-auto shrink-0` moved here from the deleted cluster span, so
+          the trigger is still pinned right of the wrapped inline actions and
+          still keeps its full ≥44px target rather than being squeezed.
+          `data-row-menu` is a stable structural hook for the popup's markup, the
+          same contract `data-row-actions` carries on the line: the tests used to
+          find this group by its `.flex-nowrap` class, which is a styling
+          decision and rots on any layout change. */}
+      <span
+        ref={menuRef}
+        data-row-menu=""
+        className="relative ml-auto shrink-0"
+      >
+        <Popover.Root>
+          <Popover.Trigger
+            aria-label="All options"
+            className={cn(
+              "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium",
+              touchTarget,
+            )}
+          >
+            🔽
+          </Popover.Trigger>
+          <Popover.Portal container={menuRef} render={<span />}>
+            <Popover.Positioner {...ANCHORED_POSITIONER} render={<span />}>
+              <Popover.Popup
+                render={<span />}
+                // The dialog's accessible name (axe aria-dialog-name).
+                aria-label="All options"
+                className={popupSurface("min-w-40 gap-1 p-1")}
+              >
+                {menu}
+              </Popover.Popup>
+            </Popover.Positioner>
+          </Popover.Portal>
+        </Popover.Root>
       </span>
     </div>
   );

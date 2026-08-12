@@ -68,7 +68,12 @@ export function MoveToMenu({
                 // + slightly bigger glyph as the row's other icon controls (📅/▾
                 // in row-actions.tsx) instead of a bare, hover-less glyph.
                 "text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-sm font-medium"
-              : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs",
+              : // #253 — the ▾ list is the only route to this menu now that the
+                // compact 📥 has gone with the end cluster, so the text trigger takes
+                // the same 44px minimum every other entry in that list has. Not
+                // `rowMenuEntry`: this one keeps its border, which is what
+                // distinguishes a nested submenu trigger from a plain entry.
+                "text-muted-foreground hover:text-foreground flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 py-1 text-xs",
             compact && touchTarget,
           )}
         >
