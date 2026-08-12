@@ -491,17 +491,24 @@ describe("#163 screen-reader announcements", () => {
     renderInbox([makeItem({ id: "a6", text: "buy oat milk" })]);
 
     const row = screen.getByText("buy oat milk").closest("li")!;
-    // #253 — the compact 📥 went with the trailing icon cluster. The move menu is
-    // reached from the row's ▾ list, under the full "Move to…" label.
+    // #253 — `Save for later`, not the nested picker, and the choice of entry is the
+    // point rather than a convenience. The picker is gone; the ▾ names its
+    // destinations directly. But only the entries that dispatch through
+    // `moveItemToBucket` announce, because that is where `movedAnnouncement` lives —
+    // so this spec has to press one of THOSE, or it would assert the property against
+    // a control that never had it.
+    //
+    // `Save for later` is that entry on this row: `dropPlan(needsReview → savedLater)`
+    // → `snooze`. `Mark as completed` next to it calls `completeItem` directly and is
+    // deliberately NOT the subject here.
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(
-      await within(row).findByRole("menuitem", { name: /^Completed$/ }),
+      within(row).getByRole("button", { name: "Save for later" }),
     );
 
     expect(announcer()).toHaveTextContent(/buy oat milk/);
     expect(announcer()).toHaveTextContent(/Needs review/);
-    expect(announcer()).toHaveTextContent(/Completed/);
+    expect(announcer()).toHaveTextContent(/Saved for later/);
   });
 });
 
@@ -512,12 +519,18 @@ describe("#163 the keyboard path", () => {
   // it is what makes the drag surface satisfy WCAG 2.1.1 (Keyboard) and 2.5.7
   // (Dragging Movements). Every draggable row must carry one.
   //
-  // #253 moved it one press further away on the `RowActions` rows: the compact 📥
-  // went with the icon cluster, so the route is the row's ▾ list → "Move to…".
-  // Both are buttons, so the path is still keyboard-reachable throughout, which is
-  // the property this spec exists to hold — and #253's Bar says in as many words
-  // that no action may exist only behind a gesture. The Done bucket hand-rolls its
-  // line and keeps its inline 📥, so BOTH shapes have to be accepted here.
+  // #253 changed the shape twice. First the compact 📥 went with the icon cluster,
+  // putting the route behind the row's ▾ as a nested "Move to…" picker; then the
+  // picker went too, because the ▾ now names its destinations as ordinary entries.
+  // Every one of those is a button in a dialog, so the path is still keyboard-
+  // reachable throughout — the property this spec exists to hold, and what #253's Bar
+  // means by "no action may exist only behind a gesture".
+  //
+  // The Done bucket hand-rolls its line and keeps its inline 📥, so BOTH shapes have
+  // to be accepted here. What is checked in the ▾ shape is that at least one entry
+  // dispatches a bucket MOVE — asserted by name against the labels that do, rather
+  // than by counting entries, because a list full of non-move actions would satisfy
+  // a count.
   it("gives every row with a grip a move control that is not a drag", async () => {
     const user = userEvent.setup();
     const { container } = renderInbox([
@@ -544,71 +557,93 @@ describe("#163 the keyboard path", () => {
       const scope = within(row!);
       // Inline 📥 (the hand-rolled Done line) …
       if (scope.queryByRole("button", { name: "Move to" })) continue;
-      // … or the ▾ list's "Move to…" entry, which is the RowActions shape.
+      // … or the ▾ list, which is the RowActions shape.
       const overflow = scope.queryByRole("button", { name: "All options" });
       expect(
         overflow,
         `no move control and no ▾ trigger on the row holding ${grip.getAttribute("data-drag-grip") ?? "a grip"}`,
       ).not.toBeNull();
       await user.click(overflow!);
+      // Every label here dispatches through `moveItemToBucket`, i.e. is a real bucket
+      // move rather than merely an action. A row must offer at least one, or its only
+      // way to another bucket is a drag.
+      const MOVE_ENTRIES = [
+        "Send back to review",
+        "Break into multi-step to-do",
+        "Add as single-task to-do",
+        "Save for later",
+      ];
       expect(
-        scope.queryByRole("button", { name: "Move to…" }),
-        "the ▾ list offers no move control",
-      ).not.toBeNull();
+        MOVE_ENTRIES.some((name) => scope.queryByRole("button", { name })),
+        `the ▾ list offers no bucket move: ${scope
+          .queryAllByRole("button")
+          .map((b) => b.textContent)
+          .join(" · ")}`,
+      ).toBe(true);
       await user.keyboard("{Escape}");
     }
   });
 
+  // #253 — the keyboard proof, rewritten because the route it walked no longer
+  // exists. It used to open the ▾, focus the nested "Move to…" trigger, drive the
+  // submenu's roving cursor with ArrowDown and press Enter. The picker is gone, so
+  // the route is shorter AND flatter: open the ▾ from the keyboard, Tab to the
+  // destination entry, press Enter.
+  //
+  // Flatter is the improvement worth naming. The old path needed a roving-focus
+  // cursor inside a nested popup to reach a bucket — which is why it also needed a
+  // bounded arrow-press loop so a menu that never highlighted would fail instead of
+  // hang. An ordinary button in the list needs none of that. The property under test
+  // is unchanged: a bucket move must be reachable with no pointer at all (WCAG 2.1.1,
+  // and #253's Bar).
   it("moves an item with the keyboard alone", async () => {
     const user = userEvent.setup();
     renderInbox([makeItem({ id: "k5", text: "keyboard row" })]);
 
     const row = screen.getByText("keyboard row").closest("li")!;
-    // #253 — reached through the ▾ list. Opened with the keyboard too, so the whole
-    // route stays a keyboard proof rather than half a pointer one.
     const overflow = within(row).getByRole("button", { name: "All options" });
     overflow.focus();
     await user.keyboard("{Enter}");
-    const trigger = await within(row).findByRole("button", {
-      name: "Move to…",
-    });
-    trigger.focus();
-    expect(trigger).toHaveFocus();
 
-    // ArrowDown on a menu button opens the menu with its first entry
-    // highlighted; walking with the arrow keys rather than clicking is what
-    // makes this a keyboard proof and not a pointer one.
-    await user.keyboard("{ArrowDown}");
-    const target = await within(row).findByRole("menuitem", {
-      name: /^Completed$/,
+    // Tabbed to, not clicked — that is what makes this a keyboard proof. Bounded so
+    // an entry that is unreachable by Tab fails with a message naming what focus
+    // actually landed on, rather than hanging (the reason the old version bounded its
+    // arrow presses).
+    const target = await within(row).findByRole("button", {
+      name: "Mark as completed",
     });
-    // Bounded so a menu that never highlights fails instead of hanging. The
-    // cap is 2× the four entries a needs-review row offers, which is enough
-    // for the roving cursor to wrap; exhausting it means the arrow keys are
-    // not moving the cursor at all, and the message has to say that rather
-    // than "expected element to have attribute" (Duo review).
-    const MAX_ARROWS = 8;
-    let presses = 0;
-    while (!target.matches("[data-highlighted]") && presses < MAX_ARROWS) {
-      await user.keyboard("{ArrowDown}");
-      presses += 1;
+    const MAX_TABS = 12;
+    let tabs = 0;
+    while (document.activeElement !== target && tabs < MAX_TABS) {
+      await user.tab();
+      tabs += 1;
     }
     expect(
-      target.matches("[data-highlighted]"),
-      `ArrowDown never reached "Completed": ${presses} of a maximum ${MAX_ARROWS} presses. ` +
-        `Highlighted instead: ${
-          within(row)
-            .queryAllByRole("menuitem")
-            .filter((el) => el.matches("[data-highlighted]"))
-            .map((el) => el.textContent)
-            .join(", ") || "nothing"
-        }.`,
-    ).toBe(true);
-    await user.keyboard("{Enter}");
+      document.activeElement,
+      `Tab never reached "Mark as completed" in ${MAX_TABS} presses; ` +
+        `focus sat on "${
+          (document.activeElement as HTMLElement | null)?.textContent ??
+          "nothing"
+        }"`,
+    ).toBe(target);
 
+    await user.keyboard("{Enter}");
     expect(completeItem).toHaveBeenCalledWith("k5");
-    // Focus must come back to the row, not be stranded on a detached popup.
-    await waitFor(() => expect(trigger).toHaveFocus());
+
+    // ⚠️ The old version asserted focus came back to the ▾ TRIGGER, and that was a
+    // property of the nested picker: `MoveToMenu`'s `onOpenChange` called
+    // `restoreFocusToTrigger` as its submenu closed. There is no inner layer left to
+    // close, so there is nothing to hand focus back FROM — a plain ▾ entry leaves the
+    // list standing, exactly as `Delete`, `Save for later` and `Complete` always have.
+    //
+    // Re-pointed to the property that assertion existed to protect (WCAG 2.4.3, Focus
+    // Order): focus must still be on an operable control rather than lost to `<body>`,
+    // which is the failure #253's `restoreFocusToTrigger` work was chasing. Asserting
+    // the trigger specifically would now pin behaviour the design does not have.
+    await waitFor(() => {
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement?.tagName).toBe("BUTTON");
+    });
   });
 
   // The grip used to be a `<button aria-label="Drag …">` because dnd-kit's

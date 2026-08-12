@@ -2826,16 +2826,6 @@ export function InboxView({
                             ) : null
                           }
                           scheduleError={scheduleErrors[item.id]}
-                          moveMenu={
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
                           dragGrip={<DragGrip id={item.id} text={item.text} />}
                           editButton={pencil(item)}
                           titleEditor={
@@ -3083,15 +3073,60 @@ export function InboxView({
                                    also when the two step-dependent entries have nothing
                                    to point at. */
                                 menu={groupedRowMenu([
+                                  // ⚠️ The nested `Move to…` picker is gone (see
+                                  // `ItemRow` for the owner's reasoning), and on THIS
+                                  // renderer its destinations were not already covered.
+                                  // The picker offered every bucket but this row's own
+                                  // — needsReview, singleTask, savedLater, completed —
+                                  // and only `completed` had an entry (`Mark as
+                                  // completed`, below). So three explicit destination
+                                  // entries replace it, each dispatched through
+                                  // `moveItemToBucket`, which is byte-for-byte what the
+                                  // picker's `onMove` did: same `dropPlan`, same no-op
+                                  // guard, same `role="status"` announcement (#163/#225).
+                                  //
+                                  // Deleting the picker without these would have
+                                  // stripped three routes from this row and left drag
+                                  // as the only way out of Multi-step.
                                   [
-                                    <MoveToMenu
-                                      key="move"
-                                      currentBucket={bucketOfItem(item, now)}
-                                      voice={voice}
-                                      onMove={(target) =>
-                                        moveItemToBucket(item.id, target)
+                                    <button
+                                      key="review-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "needsReview")
                                       }
-                                    />,
+                                    >
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
+                                    // ⚠️ `moveItemToBucket` here, NOT `keepAsTask` as on
+                                    // the Needs-review row: this entry replaces
+                                    // `Move to… → Single-task`, so it keeps that path's
+                                    // exact behaviour (`triage`). Both land the row in
+                                    // the same bucket, which is what the shared label
+                                    // names; `keepAsTask` additionally materialises the
+                                    // `Task`. Unifying the two is #259/#213 territory,
+                                    // not a menu-layout change.
+                                    <button
+                                      key="single-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "singleTask")
+                                      }
+                                    >
+                                      {t("action.addTodoFull", voice)}
+                                    </button>,
+                                    <button
+                                      key="save-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "savedLater")
+                                      }
+                                    >
+                                      {t("action.saveForLater", voice)}
+                                    </button>,
                                   ],
                                   [
                                     // Rows with steps: view the broken-down list (inline
@@ -3343,15 +3378,52 @@ export function InboxView({
                                    bucket, so one is what it already is and the other is
                                    reached by `Move to… → Multi-step`. */
                                 menu={groupedRowMenu([
+                                  // The picker's destinations, explicit (see the
+                                  // multi-step row above for the full reasoning). It
+                                  // offered needsReview, multiStep, savedLater and
+                                  // completed here; only `completed` had an entry, so
+                                  // three are added, all through `moveItemToBucket` so
+                                  // the behaviour is identical to the picker's.
+                                  //
+                                  // ⚠️ `Break into multi-step to-do` on THIS row parks
+                                  // the item in Multi-step with a "Break into steps
+                                  // now?" CTA (`requestBreakdown`) — what
+                                  // `Move to… → Multi-step` always did here. On the
+                                  // Needs-review row the same label navigates into the
+                                  // breakdown editor (`startBreakdown`). Same
+                                  // destination bucket, different next step, and the
+                                  // difference predates this change.
                                   [
-                                    <MoveToMenu
-                                      key="move"
-                                      currentBucket={bucketOfItem(item, now)}
-                                      voice={voice}
-                                      onMove={(target) =>
-                                        moveItemToBucket(item.id, target)
+                                    <button
+                                      key="review-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "needsReview")
                                       }
-                                    />,
+                                    >
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
+                                    <button
+                                      key="multi-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "multiStep")
+                                      }
+                                    >
+                                      {t("action.breakdownFull", voice)}
+                                    </button>,
+                                    <button
+                                      key="save-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "savedLater")
+                                      }
+                                    >
+                                      {t("action.saveForLater", voice)}
+                                    </button>,
                                   ],
                                   [
                                     <button
@@ -3578,15 +3650,22 @@ export function InboxView({
                                    "park it again" should not have to know that the short
                                    button above means that. */
                                 menu={groupedRowMenu([
+                                  // The picker offered needsReview, multiStep,
+                                  // singleTask and completed here, and the review
+                                  // frame's own four entries below already cover three
+                                  // of them. Only `needsReview` needed adding — the
+                                  // row's way back out of the pantry to be re-triaged.
                                   [
-                                    <MoveToMenu
-                                      key="move"
-                                      currentBucket={bucketOfItem(item, now)}
-                                      voice={voice}
-                                      onMove={(target) =>
-                                        moveItemToBucket(item.id, target)
+                                    <button
+                                      key="review-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "needsReview")
                                       }
-                                    />,
+                                    >
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
                                   ],
                                   [
                                     <button
@@ -3664,7 +3743,6 @@ export function InboxView({
                                 </button>
                                 <span className="flex-1" />
                                 <MoveToMenu
-                                  compact
                                   describedById={moveInstructionsId}
                                   currentBucket={bucketOfItem(item, now)}
                                   voice={voice}
@@ -3790,7 +3868,6 @@ export function InboxView({
                           </button>
                           <span className="flex-1" />
                           <MoveToMenu
-                            compact
                             describedById={moveInstructionsId}
                             currentBucket={bucketOfItem(item, now)}
                             voice={voice}
@@ -4213,7 +4290,6 @@ function ItemRow({
   scheduled = false,
   icsMenu,
   scheduleError,
-  moveMenu,
   dragGrip,
   editButton,
   titleEditor,
@@ -4247,7 +4323,6 @@ function ItemRow({
    *  mirror. Null for guests (whose primary control is already the ICS one). */
   icsMenu?: React.ReactNode;
   scheduleError?: string;
-  moveMenu?: React.ReactNode;
   dragGrip?: React.ReactNode;
   editButton?: React.ReactNode;
   titleEditor?: React.ReactNode;
@@ -4457,16 +4532,30 @@ function ItemRow({
                `action.breakdownFull`, `action.addTodoFull`, `action.saveForLater` and
                `action.completeFull`.
 
-               THE ORDER, likewise the owner's, and it is the reason `Move to…` moved
-               back to the top. The list read as arbitrary because it led with a rare
-               action and demoted the "where does this belong" one; `Move to…` is the
-               most common thing done to a row awaiting review, and production had it
-               first. `Move to…` and `Delete` are the bookends — the destination
-               question and the destructive answer — with the actions that reshape the
-               item in between, in the order they escalate: break it up, keep it
-               whole, park it, finish it. Then the calendar pair. Groups are drawn
-               with `rowMenuSeparator`, because sequence alone did not give the column
-               any rhythm to read by.
+               ⚠️ **The nested `Move to…` picker is GONE, and this list is why.**
+               The owner's observation on seeing it rendered: the four entries below
+               ARE the buckets — `Break into multi-step to-do` → Multi-step,
+               `Add as single-task to-do` → Single-task, `Save for later` → Saved,
+               `Mark as completed` → Completed — so a submenu offering the same four
+               was a second route to the same places, one tap deeper, and the only
+               nested popup left in the list. Verified against `ACTION_FOR_BUCKET`
+               (move-dispatch.ts) rather than assumed: it maps five buckets, the
+               picker offered every bucket but this row's own, and those four are
+               exactly the four it offered here. The fifth, `needsReview`, is this
+               row's own bucket, so the picker never offered it and nothing is lost.
+               Coverage on the other three renderers was NOT complete — see each of
+               their menus for the entries added there.
+
+               Drag is untouched, and `ACTION_FOR_BUCKET` / `dropPlan` stay: only the
+               menu entry went. `MoveToMenu` itself is still rendered by the two
+               compact inline 📥 controls (the idle Saved row and the Done row), so it
+               is not orphaned.
+
+               THE ORDER is the owner's. `Delete` is the destructive answer and stays
+               last; the actions that reshape the item come first, in the order they
+               escalate — break it up, keep it whole, park it, finish it — then the
+               calendar pair. Groups are drawn with `rowMenuSeparator`, because
+               sequence alone did not give the column any rhythm to read by.
 
                ⚠️ `Snooze 1h` is GONE from this list, by the owner's decision, and it
                is worth recording that this file's own long-standing note about it was
@@ -4482,7 +4571,6 @@ function ItemRow({
                the inline `Save`, `Move to… → Saved for later`, a drag onto that bucket
                and the library bulk bar all still write it. */
             menu={groupedRowMenu([
-              [moveMenu],
               [
                 <button
                   key="breakdown-m"

@@ -145,6 +145,13 @@ describe("t() function", () => {
     // variant is real; whether the two grains converge is #259's call.
     ["action.startFocusTimer", "plain", "Start visual focus timer"],
     ["action.startFocusTimer", "playful", "🍽️ Start visual focus timer"],
+    // #253 — the one destination the canonical entries did not already cover when
+    // the nested `Move to…` picker was removed. Same phrase and same emoji as
+    // `step.sendToReview`, pinned side by side so the two grains cannot drift apart
+    // while #259 decides whether they merge.
+    ["action.sendToReview", "plain", "Send back to review"],
+    ["action.sendToReview", "playful", "🥫 Send back to review"],
+    ["step.sendToReview", "plain", "Send back to review"],
     // #25 step-row labels — voice-aware (plain literal, playful food-themed)
     ["step.startFocus", "plain", "▶ Start Focus"],
     ["step.startFocus", "playful", "▶ Start Focus"],

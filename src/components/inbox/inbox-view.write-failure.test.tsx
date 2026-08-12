@@ -104,6 +104,7 @@ import {
   ensureFocusStep,
   keepAsTask,
   renameItem,
+  snoozeBrainDumpItem,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { INBOX_ACTION_TIMEOUT_MS } from "@/components/inbox/inbox-view";
@@ -220,16 +221,21 @@ const DELETE = /^delete$/i;
  * ▾-entry convention in `inbox-view.test.tsx`: `t()` returns the whole accessible
  * name, so a substring pattern would also match a longer future sibling.
  *
- * `Move to…` (`action.moveTo`) was always this menu trigger's text — what changed
- * is that the row's compact 📥, whose `aria-label` was the bare "Move to", went
- * with the end cluster, so the ellipsis form is the only one left.
- * `Add as single-task to-do` (`action.addTodoFull`) likewise replaces the inline
- * short "Add to-do" (`action.addTodo`) the row used to carry — and #253 renamed it
- * again, to name the bucket the row lands in (`section.singleTask`) rather than to
- * describe the gesture.
+ * `Add as single-task to-do` (`action.addTodoFull`) replaces the inline short
+ * "Add to-do" (`action.addTodo`) the row used to carry — and #253 renamed it again,
+ * to name the bucket the row lands in (`section.singleTask`) rather than to describe
+ * the gesture.
+ *
+ * `SAVE_FOR_LATER` is the row's other bucket MOVE, and it replaced a `MOVE_TO`
+ * constant naming the nested "Move to…" picker. That picker is gone: the ▾ names its
+ * destinations directly, so a submenu offering the same four buckets was a second
+ * route one tap deeper. What the specs below need from it is a move dispatched
+ * through `moveItemToBucket` — the only entries that reach `movedAnnouncement` — and
+ * on a Needs-review row this is one. `Mark as completed` beside it is NOT: it calls
+ * `completeItem` directly and announces nothing.
  */
-const MOVE_TO = "Move to…";
 const ADD_TODO = "Add as single-task to-do";
+const SAVE_FOR_LATER = "Save for later";
 
 /**
  * #255 — two-row fixtures whose ORDER is decided here rather than by the clock.
@@ -1514,18 +1520,16 @@ describe("InboxView — a failed rename (#225)", () => {
 describe("InboxView — every row write reaches the notice (#225)", () => {
   it("does not leave the move announcer claiming the item moved when the move failed", async () => {
     const user = userEvent.setup();
-    vi.mocked(completeItem).mockRejectedValueOnce(new Error("offline"));
+    vi.mocked(snoozeBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
     renderInbox([makeItem({ id: "m1", text: "buy oat milk" })]);
 
-    // #253 — Move to… is a ▾ entry now. The popover is opened with this file's
-    // own idiom and the nested Base UI Menu is driven with `userEvent`, which its
-    // menuitems need for roving focus and activation.
+    // #253 — one press, on an ordinary ▾ entry. This used to open the nested
+    // "Move to…" picker and pick `Completed` from it; the picker is gone, so the move
+    // is `Save for later` and the write it fails is `snoozeBrainDumpItem`
+    // (`dropPlan(needsReview → savedLater)` → `snooze`).
     await openRowMenu("buy oat milk");
     const row = rowFor("buy oat milk");
-    await user.click(within(row).getByRole("button", { name: MOVE_TO }));
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /^Completed$/ }),
-    );
+    await user.click(within(row).getByRole("button", { name: SAVE_FOR_LATER }));
 
     // The write is the thing that decides, so the assertion waits for its
     // verdict rather than for a paint.
@@ -1549,14 +1553,11 @@ describe("InboxView — every row write reaches the notice (#225)", () => {
 
     await openRowMenu("buy rye bread");
     const row = rowFor("buy rye bread");
-    await user.click(within(row).getByRole("button", { name: MOVE_TO }));
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /^Completed$/ }),
-    );
+    await user.click(within(row).getByRole("button", { name: SAVE_FOR_LATER }));
 
     await waitFor(() =>
       expect(screen.getByTestId("move-announcer")).toHaveTextContent(
-        /moved .*buy rye bread.* to Completed/i,
+        /moved .*buy rye bread.* to Saved for later/i,
       ),
     );
     expect(screen.queryByRole("alert")).toBeNull();

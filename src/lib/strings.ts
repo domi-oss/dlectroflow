@@ -64,6 +64,18 @@ export const STRINGS = {
     playful: "Reopen selected",
   },
   "action.reopenAll": { plain: "Reopen all", playful: "Reopen all" },
+  // NO component consumer since #253 removed the nested "Move to…" picker from every
+  // row ▾ and left `MoveToMenu` as the inline 📥, whose accessible name is the
+  // literal "Move to" rather than this key. The canonical lists name their
+  // destinations directly instead — see `action.breakdownFull`,
+  // `action.addTodoFull`, `action.saveForLater`, `action.completeFull` and
+  // `action.sendToReview`, which are the five buckets of `ACTION_FOR_BUCKET`.
+  //
+  // Kept, and this is the THIRD key in that state in this issue (`action.addTodo`
+  // and `action.editTitle` are the others), on the precedent the first one set:
+  // `t()` is a public surface a self-hoster's voice override can reach, so pinning
+  // the pair is still worth something, and deleting a key is the breaking half of
+  // the change.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
@@ -173,6 +185,24 @@ export const STRINGS = {
   "action.startFocusTimer": {
     plain: "Start visual focus timer",
     playful: "🍽️ Start visual focus timer",
+  },
+  // #253 — "put this row back in Needs review", at ITEM grain.
+  //
+  // The one destination the canonical ▾ entries did not already cover when the
+  // nested `Move to…` picker was removed: `ACTION_FOR_BUCKET` maps five buckets and
+  // the entries cover four of them (`Break into multi-step to-do` → multiStep,
+  // `Add as single-task to-do` → singleTask, `Save for later` → savedLater,
+  // `Mark as completed` → completed), leaving `needsReview → moveToReview` reachable
+  // only through the picker on three of the four renderers.
+  //
+  // Named after the destination in the destination's own words — `section.needsReview`
+  // reads "Needs review" — per the rule this issue settled. Deliberately the same
+  // wording and the same playful emoji as `step.sendToReview`, its step-grain twin:
+  // two grains, one phrase, because it is one act. Whether the two keys should merge
+  // is #259's call.
+  "action.sendToReview": {
+    plain: "Send back to review",
+    playful: "🥫 Send back to review",
   },
 
   // ── Step rows (TaskSteps working view, #25) ────────────────────────────────

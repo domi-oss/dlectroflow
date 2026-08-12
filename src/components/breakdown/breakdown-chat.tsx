@@ -1075,12 +1075,33 @@ export function BreakdownChat({
                         {gsched.message}
                       </p>
                       {gsched.reason === "reconnect_required" && (
-                        <a
-                          href="/api/google/oauth/start"
-                          className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
-                        >
-                          Reconnect Google →
-                        </a>
+                        <>
+                          {/* #128 — the THIRD connect control in this file, and
+                              the one that shipped without the caveat while the
+                              two above it carried it. Found while #253 audited
+                              every connect entry point in the tree, because it
+                              moved the row's control out of that set and had to
+                              show the obligation still held everywhere else.
+                              This one is reached mid-flow, from a failed push
+                              (`reconnect_required`) rather than from a resting
+                              "not connected" state — which is exactly when
+                              someone re-picks an account, and therefore exactly
+                              when a managed account gets chosen again and
+                              refused with nothing to report. Same wiring as its
+                              two siblings: the sentence above the link, pointed
+                              at with `aria-describedby`. */}
+                          <GoogleAccountHint
+                            id={accountHintId}
+                            className="text-xs"
+                          />
+                          <a
+                            href="/api/google/oauth/start"
+                            aria-describedby={accountHintId}
+                            className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+                          >
+                            Reconnect Google →
+                          </a>
+                        </>
                       )}
                     </div>
                   )}

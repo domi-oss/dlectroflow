@@ -73,6 +73,45 @@ async function seedRows(marker: string): Promise<PrismaClient> {
   return prisma;
 }
 
+/**
+ * The same rows, COMPLETED — the Done bucket, whose action line is hand-rolled and
+ * carries the inline 📥 (`MoveToMenu`) rather than a ▾ list.
+ *
+ * #253 is why this exists. The nested-`Menu` specs below used to reach `MoveToMenu`
+ * through a "Move to…" entry in a row's ▾; that entry is gone, because the ▾ now
+ * names its destinations as ordinary entries and a submenu offering the same buckets
+ * was a second route one tap deeper. `MoveToMenu` itself still ships, on this bucket
+ * and on the idle Saved row — so the nested-popup properties #92 exists for are still
+ * live behaviour and are still asserted, just from the trigger that still opens it.
+ *
+ * That returns those specs to #92's ORIGINAL fault, which was this exact
+ * composition: an inline 📥 sitting far from the right edge, laying its 160px menu
+ * out from a negative left offset with no horizontal scroll to recover with.
+ */
+async function seedDoneRows(marker: string): Promise<PrismaClient> {
+  const prisma = new PrismaClient();
+  try {
+    await prisma.workspace.upsert({
+      where: { id: OWNER_WS_ID },
+      create: { id: OWNER_WS_ID, kind: "user" },
+      update: {},
+    });
+    await prisma.brainDumpItem.createMany({
+      data: Array.from({ length: SEED_COUNT }, (_, i) => ({
+        text: `${marker} ${i}`,
+        status: "triaged",
+        estMinutes: 10,
+        completedAt: new Date(),
+        workspaceId: OWNER_WS_ID,
+      })),
+    });
+  } catch (err) {
+    await prisma.$disconnect();
+    throw err;
+  }
+  return prisma;
+}
+
 async function cleanupSeed(prisma: PrismaClient, marker: string) {
   try {
     await prisma.brainDumpItem.deleteMany({
@@ -148,6 +187,14 @@ function seededRow(page: Page, marker: string, index: number): Locator {
     .filter({ hasText: `${marker} ${index}` });
 }
 
+/** The same lookup in the Done bucket — see {@link seedDoneRows}. */
+function seededDoneRow(page: Page, marker: string, index: number): Locator {
+  return page
+    .locator('[data-bucket="completed"]')
+    .getByRole("listitem")
+    .filter({ hasText: `${marker} ${index}` });
+}
+
 /** A locator's on-screen x/y, polled: an inbox re-render between "is it
  *  visible?" and "where is it?" detaches the node and `boundingBox()` returns
  *  null, so read it as a retrying assertion rather than a one-shot `!`. */
@@ -192,30 +239,49 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
   // deleted. The left-edge precondition goes with the cluster — the trigger is a
   // full-width entry in the popup now, so "is it near the left edge?" no longer
   // describes anything.
-  test("the Move-to menu, nested in the 🔽 popup, stays inside the viewport", async ({
+  // #253 — driven from the Done bucket's INLINE 📥, which is where `MoveToMenu` still
+  // lives (see `seedDoneRows`). This is #92's original composition and its original
+  // fault: a 📥 far from the right edge laying a 160px menu out from a negative left
+  // offset with no horizontal scroll to recover with.
+  //
+  // The `RowActions` half of the pair is asserted too, in the opposite direction: a
+  // single-task row must carry NEITHER an inline 📥 nor a nested "Move to…" entry,
+  // because its ▾ names the destinations directly now. Both absences in one place, so
+  // a rebase that restores either fails here.
+  test("the Move-to menu opened from a row's 📥 stays inside the viewport", async ({
     page,
   }) => {
     const marker = `${SEED_MARKER} move`;
-    const prisma = await seedRows(marker);
+    const prisma = await seedDoneRows(marker);
+    const rowsMarker = `${SEED_MARKER} moverow`;
+    const rowsPrisma = await seedRows(rowsMarker);
     try {
       await page.goto("/");
       await waitForShell(page);
 
-      const row = seededRow(page, marker, 0);
-      await expect(row).toBeVisible();
-      // The 📥 really is gone from the row, so this cannot pass by finding the old
-      // inline trigger if a rebase brought it back.
+      // Neither shape of Move-to survives on a `RowActions` row.
+      const listRow = seededRow(page, rowsMarker, 0);
+      await expect(listRow).toBeVisible();
       await expect(
-        row.getByRole("button", { name: "Move to", exact: true }),
+        listRow.getByRole("button", { name: "Move to", exact: true }),
       ).toHaveCount(0);
-      await row.getByRole("button", { name: "All options" }).click();
-      const trigger = page.getByRole("button", { name: "Move to…" });
+      await listRow.getByRole("button", { name: "All options" }).click();
+      await expect(
+        page.getByRole("button", { name: "Move to…" }),
+        "the nested Move-to picker is back in a ▾ list",
+      ).toHaveCount(0);
+      await page.keyboard.press("Escape");
+
+      const row = seededDoneRow(page, marker, 0);
+      await expect(row).toBeVisible();
+      const trigger = row.getByRole("button", { name: "Move to", exact: true });
       await expect(trigger).toBeVisible();
       await trigger.click();
       const menu = page.getByRole("menu").filter({ visible: true }).first();
       await expect(menu).toBeVisible();
-      expectInsideViewport(await measure(menu), "nested Move-to menu");
+      expectInsideViewport(await measure(menu), "Move-to menu from a row 📥");
     } finally {
+      await cleanupSeed(rowsPrisma, rowsMarker);
       await cleanupSeed(prisma, marker);
     }
   });
@@ -258,32 +324,42 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
     page,
   }) => {
     const marker = `${SEED_MARKER} scroll`;
-    const prisma = await seedRows(marker);
+    const prisma = await seedDoneRows(marker);
     try {
       await page.goto("/");
       await waitForShell(page);
 
-      // #253 — via the 🔽 list, since the compact 📥 went with the end cluster.
+      // #253 — from the Done bucket's inline 📥, the trigger `MoveToMenu` still has.
       // The property under test is unchanged: a row popup must not lock document
       // scroll, and a scroll must not dismiss it.
-      const row = seededRow(page, marker, 0);
+      const row = seededDoneRow(page, marker, 0);
       await expect(row).toBeVisible();
-      await row.getByRole("button", { name: "All options" }).click();
-      await page.getByRole("button", { name: "Move to…" }).click();
+      await row.getByRole("button", { name: "Move to", exact: true }).click();
       const menu = page.getByRole("menu").filter({ visible: true }).first();
       await expect(menu).toBeVisible();
 
-      // The page must still scroll — Base UI's Menu `modal` default (true)
-      // locks document scroll, which would strand a user whose popup is only
-      // partly reachable and generally make the page feel broken.
+      // The page must still scroll — Base UI's Menu `modal` default (true) locks
+      // document scroll, which would strand a user whose popup is only partly
+      // reachable and generally make the page feel broken.
+      //
+      // ⚠️ UPWARDS, and the direction is not arbitrary. #253 moved this spec onto the
+      // Done bucket's inline 📥, which is where `MoveToMenu` still lives — and Done is
+      // the LAST section on the board, so a row in it sits at or near maximum scroll
+      // and `scrollBy(0, 200)` is a no-op for want of anywhere to go. That would fail
+      // for the wrong reason: "the page did not move" read as "scroll is locked".
+      // Scrolling back up exercises the same lock with room to prove it.
       const before = await page.evaluate(() => window.scrollY);
-      await page.evaluate(() => window.scrollBy(0, 200));
+      expect(
+        before,
+        "precondition: the page is scrolled down, so there is room to scroll up",
+      ).toBeGreaterThan(0);
+      await page.evaluate(() => window.scrollBy(0, -200));
       await page.waitForTimeout(150);
       const after = await page.evaluate(() => window.scrollY);
       expect(
         after,
         "page still scrolls while a row popup is open",
-      ).toBeGreaterThan(before);
+      ).toBeLessThan(before);
 
       // And scrolling must not dismiss it (pre-#92 behaviour, worth keeping).
       await expect(menu).toBeVisible();
@@ -297,24 +373,25 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
     }
   });
 
-  test("the 🔽 popup's nested Move-to menu still dispatches a move", async ({
+  // #253 — the Done bucket's 📥. Its menu is still portaled into the component's own
+  // wrapper, so the press-inside-a-portal property this spec was written for is still
+  // the thing under test; what changed is that the enclosing layer is the row rather
+  // than a ▾ popup.
+  test("the Move-to menu opened from a row's 📥 still dispatches a move", async ({
     page,
   }) => {
     const marker = `${SEED_MARKER} nested`;
-    const prisma = await seedRows(marker);
+    const prisma = await seedDoneRows(marker);
     try {
       await page.goto("/");
       await waitForShell(page);
 
-      const row = seededRow(page, marker, 0);
+      const row = seededDoneRow(page, marker, 0);
       await expect(row).toBeVisible();
-      await row.getByRole("button", { name: "All options" }).click();
-      // Nested floating elements: the 🔽 popup must not treat a press inside
-      // its own child menu as an outside press and unmount it mid-click.
-      await page.getByRole("button", { name: "Move to…" }).click();
+      await row.getByRole("button", { name: "Move to", exact: true }).click();
       const nested = page.getByRole("menu").filter({ visible: true }).first();
       await expect(nested).toBeVisible();
-      expectInsideViewport(await measure(nested), "nested Move-to menu");
+      expectInsideViewport(await measure(nested), "Move-to menu from a row 📥");
       await nested.getByRole("menuitem", { name: /Multi-step/ }).click();
 
       await expect(
@@ -846,7 +923,11 @@ test.describe("#253 the row action line is compact at 360px", () => {
       // inline button. Schedule is absent here because this seed has no Google
       // credential, so the calendar group collapses to the single .ics entry —
       // the Google label is covered at 390 by e2e/smoke/schedule-ics.spec.ts.
-      for (const name of [ROW_MENU_ADD_TODO, "Move to…", "Delete"]) {
+      //
+      // #253 — the move route is `Save for later` rather than a nested "Move to…"
+      // picker: the ▾ names its destinations directly now, and this one is a bucket
+      // move dispatched through the same `moveItemToBucket` the picker used.
+      for (const name of [ROW_MENU_ADD_TODO, "Save for later", "Delete"]) {
         await expect(
           popup.getByRole("button", { name }),
           `"${name}" is not in the ▾ list`,
@@ -879,110 +960,65 @@ test.describe("#253 the row action line is compact at 360px", () => {
     }
   });
 
-  // ── The third half of the trade: the LAYERED dismissal (WCAG 2.4.3) ────────
+  // ── The LAYERED dismissal (WCAG 2.4.3) ─────────────────────────────────────
   //
-  // #253 leaves two entries in the ▾ list that open a second floating layer of
-  // their own — "Move to…" (a Base UI `Menu`) and Schedule (the #106 dialog) —
-  // and both are now the row's ONLY route to what they do. So dismissing that
-  // inner layer has to leave focus on an operable control, and the only sensible
-  // one is the entry that opened it: the ▾ list is still standing, so the entry
-  // is still visible and still pressable.
+  // #253's first shape left two ▾ entries that opened a second floating layer of
+  // their own — a nested "Move to…" `Menu` and Schedule's #106 dialog — and
+  // dismissing that inner layer stranded focus. Base UI's `Popover.Popup` mounts its
+  // focus manager with `restoreFocus: "popup"` (row-actions.tsx renders the ▾ list as
+  // one), and that handler fires when a descendant loses focus while
+  // `document.activeElement` has fallen back to `<body>` — exactly the state an inner
+  // popup's own async restoration passes through as it unmounts. It then focuses the
+  // popup CONTAINER and re-focuses it a frame later, so it wins the race: focus ended
+  // on a `tabindex="-1"` span, on no control at all, with the user's place in the list
+  // lost. Fixed in the inner layers, by `restoreFocusToTrigger`
+  // (src/components/ui/anchored-popup.ts) handing focus back synchronously.
   //
-  // It did not. Base UI's `Popover.Popup` mounts its focus manager with
-  // `restoreFocus: "popup"` (row-actions.tsx renders the ▾ list as one), and that
-  // handler fires when a descendant loses focus while `document.activeElement`
-  // has fallen back to `<body>` — which is exactly the state an inner popup's own
-  // async focus restoration passes through as it unmounts. It then focuses the
-  // popup CONTAINER, and re-focuses it a frame later, so it wins the race: focus
-  // ended on a `tabindex="-1"` span, on no control at all, with the user's place
-  // in the list lost. Reachable by pressing ▾, then Move to…, then Escape.
+  // ⚠️ #253 then removed the nested "Move to…" entry altogether — the ▾ names its
+  // destinations directly, so a submenu offering the same buckets was a second route
+  // one tap deeper. There is no nested layer left inside a ▾ list, which retires the
+  // composition this test drove.
   //
-  // Fixed in the inner layers rather than here — `MoveToMenu` and `ScheduleMenu`
-  // now restore focus to their own trigger synchronously, which keeps
-  // `activeElement` off `<body>` and leaves that `restoreFocus` branch unentered.
-  // See `restoreFocusToTrigger` in src/components/ui/anchored-popup.ts.
-  //
-  // Move to… is the case with no other coverage; the Schedule dialog's half of
-  // the same fix is asserted by e2e/smoke/schedule-menu.spec.ts (which needs a
-  // seeded Google credential, so it lives with the other menu specs). The unit
-  // test in move-to-menu.test.tsx cannot see this: it renders the menu on its own,
-  // where there is no outer popup to take the focus away.
-  test("dismissing the nested Move-to menu hands focus back to the entry, then to ▾", async ({
+  // Re-pointed rather than deleted, because `MoveToMenu` still ships and its focus
+  // hand-off is still the fix under test: the Done bucket's inline 📥 opens it, and
+  // Escape must land focus back on that trigger rather than on `<body>`. The enclosing
+  // layer is the row instead of a ▾ popup; the property is the same one. The other
+  // inner layer of the original pair — Schedule's dialog inside a ▾ — is still
+  // asserted, by e2e/smoke/schedule-menu.spec.ts. The unit test in
+  // move-to-menu.test.tsx cannot see this: it renders the menu with nothing around it.
+  test("dismissing the Move-to menu hands focus back to the 📥 that opened it", async ({
     page,
   }) => {
-    const prisma = new PrismaClient();
+    const marker = `${COMPACT_MARKER} focus`;
+    const prisma = await seedDoneRows(marker);
     try {
-      await prisma.workspace.upsert({
-        where: { id: OWNER_WS_ID },
-        create: { id: OWNER_WS_ID, kind: "user" },
-        update: {},
-      });
-      await prisma.brainDumpItem.create({
-        data: {
-          text: `${COMPACT_MARKER} focus`,
-          status: "inbox",
-          workspaceId: OWNER_WS_ID,
-        },
-      });
-
       await page.goto("/");
       await waitForShell(page);
 
-      const row = page
-        .getByRole("listitem")
-        .filter({ hasText: `${COMPACT_MARKER} focus` })
-        .first();
+      const row = seededDoneRow(page, marker, 0);
       await expect(row).toBeVisible();
-      const overflow = row.getByRole("button", { name: "All options" });
-      await overflow.click();
-
-      const popup = page
-        .getByRole("dialog", { name: "All options" })
-        .filter({ visible: true })
-        .first();
-      await expect(popup).toBeVisible();
-
-      const entry = popup.getByRole("button", { name: "Move to…" });
-      await entry.click();
-      const nested = page.getByRole("menu").filter({ visible: true }).first();
-      await expect(nested).toBeVisible();
+      const trigger = row.getByRole("button", { name: "Move to", exact: true });
+      await trigger.click();
+      const menu = page.getByRole("menu").filter({ visible: true }).first();
+      await expect(menu).toBeVisible();
 
       await page.keyboard.press("Escape");
-      await expect(nested).toBeHidden();
+      await expect(menu).toBeHidden();
 
-      // The precondition, stated so a pass cannot come from a list that closed
-      // too: one Escape dismisses the inner layer only.
-      await expect(popup).toBeVisible();
-
-      // `settledFocusLabel`, not `toBeFocused()`, and that choice is the whole
-      // reason this test can see the bug — see the helper: a retrying matcher is
-      // satisfied by focus that lands on the entry for one frame and is then
-      // taken by the popup container, which is precisely this failure mode.
+      // `settledFocusLabel`, not `toBeFocused()`, and that choice is the whole reason
+      // this test can see the bug — see the helper: a retrying matcher is satisfied by
+      // focus that touches the trigger for one frame on its way somewhere else, which
+      // is precisely this failure mode.
       expect(
         await settledFocusLabel(page),
-        "focus after dismissing the nested Move-to menu",
-      ).toBe("Move to…");
-
-      // …and the way out stays operable: the next Escape closes the list and
-      // hands focus to the ▾ that opened it. Two presses, two hand-offs, no
-      // step that lands on nothing.
-      await page.keyboard.press("Escape");
-      await expect(popup).toBeHidden();
-      expect(
-        await settledFocusLabel(page),
-        "focus after dismissing the ▾ list itself",
-      ).toBe("All options");
-      await expect(overflow).toBeFocused();
+        "focus after dismissing the Move-to menu",
+      ).toBe("Move to");
+      await expect(trigger).toBeFocused();
     } finally {
-      await prisma.brainDumpItem.deleteMany({
-        where: {
-          workspaceId: OWNER_WS_ID,
-          text: { startsWith: COMPACT_MARKER },
-        },
-      });
-      await prisma.$disconnect();
+      await cleanupSeed(prisma, marker);
     }
   });
+
   /**
    * ── Screenshots of the open ▾ list at 360px, for review ────────────────────
    *

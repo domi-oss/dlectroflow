@@ -2324,13 +2324,11 @@ describe("InboxView — Move to… menu dispatch", () => {
       />,
     );
     const row = screen.getByText("todo").closest("li")!;
-    // Move to… now lives inside the row's ⋯ overflow menu.
+    // #253 — the nested picker is gone; the ▾ names its destinations directly, so
+    // this is one press instead of two. The dispatch under test is unchanged.
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(
-      await within(row).findByRole("button", { name: "Move to…" }),
-    );
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /Completed/ }),
+      await within(row).findByRole("button", { name: "Mark as completed" }),
     );
     expect(completeItem).toHaveBeenCalledWith("s1");
   });
@@ -2348,12 +2346,13 @@ describe("InboxView — Move to… menu dispatch", () => {
       />,
     );
     const row = screen.getByText("todo").closest("li")!;
+    // #253 — `needsReview` is the one bucket the canonical entries did NOT already
+    // name, so removing the picker without this entry would have stripped the route.
+    // `action.sendToReview` is that entry, and it dispatches through the same
+    // `moveItemToBucket` the picker used.
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(
-      await within(row).findByRole("button", { name: "Move to…" }),
-    );
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /Needs review/ }),
+      await within(row).findByRole("button", { name: "Send back to review" }),
     );
     expect(moveToReview).toHaveBeenCalledWith("s1");
   });
@@ -2394,20 +2393,32 @@ describe("InboxView — Move to… menu dispatch", () => {
     render(
       <InboxView
         now={Date.now()}
-        initialItems={[makeItem({ id: "n1", text: "big thing" })]}
+        initialItems={[
+          makeItem({ id: "n1", text: "big thing", status: "triaged" }),
+        ]}
         settings={settings}
         welcomeVisible={false}
         resumeStep={null}
       />,
     );
     const row = screen.getByText("big thing").closest("li")!;
-    // Move to… now lives inside the needs-review row's ⋯ overflow menu too.
+    // ⚠️ #253 — a SINGLE-TASK row, not a Needs-review one, and the change of fixture
+    // is the finding rather than a convenience. Removing the nested picker meant
+    // naming each destination as an entry, and the two rows spell "Multi-step"
+    // differently on purpose:
+    //   • single-task → `moveItemToBucket(id, "multiStep")` → `requestBreakdown`,
+    //     which PARKS the row in Multi-step with a "Break into steps now?" CTA —
+    //     exactly what `Move to… → Multi-step` always did from here, so this spec's
+    //     subject survives intact;
+    //   • needs-review → `startBreakdown`, which navigates into the editor.
+    // Both land in the same bucket, which is what the shared label names; the
+    // difference in what happens next predates this change. Parking a NEEDS-REVIEW
+    // row without navigating is now drag-only, which is stated in #253.
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(
-      await within(row).findByRole("button", { name: "Move to…" }),
-    );
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /Multi-step/ }),
+      await within(row).findByRole("button", {
+        name: "Break into multi-step to-do",
+      }),
     );
     expect(requestBreakdown).toHaveBeenCalledWith("n1");
     // The editor only opens from the row's "Break into steps now?" CTA.
@@ -2499,7 +2510,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     expect(push).toHaveBeenCalledWith("/tasks/t9");
   });
 
-  it("not clicking the CTA blocks nothing: the row still moves elsewhere via Move to…", async () => {
+  it("not clicking the CTA blocks nothing: the row still moves elsewhere from the ▾", async () => {
     const { triageBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(
@@ -2512,12 +2523,13 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
       />,
     );
     const row = screen.getByText("needs a plan").closest("li")!;
+    // #253 — the multi-step row's own destination entry, replacing the nested
+    // picker. Same dispatcher, same `triage` action, one press fewer.
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(
-      await within(row).findByRole("button", { name: "Move to…" }),
-    );
-    await user.click(
-      await within(row).findByRole("menuitem", { name: /Single-task/ }),
+      await within(row).findByRole("button", {
+        name: "Add as single-task to-do",
+      }),
     );
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
   });
@@ -2842,7 +2854,13 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       ).not.toBeInTheDocument();
     }
     await openRowMenu(user, row);
-    for (const name of ["Add as single-task to-do", "Move to…", "Delete"]) {
+    // #253 — `Send back to review` replaces the nested picker here: it was the one
+    // destination this frame's own four entries did not already name.
+    for (const name of [
+      "Add as single-task to-do",
+      "Send back to review",
+      "Delete",
+    ]) {
       expect(within(row).getByRole("button", { name })).toBeInTheDocument();
     }
     await user.keyboard("{Escape}");
@@ -3928,7 +3946,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   // Every action the cluster carried is still reachable, and reachable by
   // KEYBOARD — the ▾ trigger is a button and the entries are ordinary buttons in
   // a dialog, so nothing here is gesture-only (#253's Bar).
-  it("Move to, Schedule and Delete are all reachable from the ▾ list", async () => {
+  it("the move, Schedule and Delete routes are all reachable from the ▾ list", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -3942,8 +3960,12 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     );
     const row = screen.getByText("capture me").closest("li")!;
     await openRowMenu(user, row);
+    // #253 — not "Move to…": the nested picker is gone and the entries name its
+    // destinations directly. `Save for later` is asserted here because it is a bucket
+    // MOVE dispatched through the same `moveItemToBucket` the picker used, so it is
+    // the honest replacement for "the move route survives".
     for (const name of [
-      "Move to…",
+      "Save for later",
       "Schedule to calendar (send to Google Tasks)",
       "Delete",
     ]) {
@@ -4093,12 +4115,15 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
    * rendered 360px screenshot rather than agreed on paper (the previous ordering was
    * agreed on paper and read badly).
    *
-   * `Move to…` and `Delete` are the bookends: the destination question and the
-   * destructive answer. Between them the actions that reshape the item, in the order
-   * they escalate — break it up, keep it whole, park it, finish it — then the
-   * calendar pair. `Move to…` is first because it is the most common thing done to a
-   * row awaiting review, and because production already had it there; leading with a
-   * rare action is what made the list read as arbitrary.
+   * `Delete` is the destructive answer and stays last. Before it, the actions that
+   * reshape the item in the order they escalate — break it up, keep it whole, park
+   * it, finish it — then the calendar pair.
+   *
+   * ⚠️ The nested `Move to…` picker LED this list until the owner saw it rendered.
+   * It is gone, and these four entries are why: they ARE the four buckets it offered
+   * from this row (`ACTION_FOR_BUCKET` minus `needsReview`, which is the row's own),
+   * so it was a second route to the same places one tap deeper — and the only nested
+   * popup left in the list.
    *
    * Four of these are TWINS of inline buttons, deliberately. The list is the row's
    * canonical, complete action set and the inline bar a shortcut subset of it, so a
@@ -4130,7 +4155,6 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual([
-      "Move to…",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4147,6 +4171,11 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       "Break into smaller steps",
       "Add as single task to do",
       "Edit task title",
+      // #253 — the nested picker. These four entries ARE the four buckets it offered
+      // from this row (`ACTION_FOR_BUCKET` minus `needsReview`, which is this row's
+      // own), so it was a second route to the same places one tap deeper — and the
+      // only nested popup left in the list.
+      "Move to…",
     ]) {
       expect(
         within(popup).queryByText(gone),
@@ -4173,7 +4202,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
    * guards: no role, no accessible name, nothing announced as a menu entry. The
    * button count either side of this assertion is what proves they are not entries.
    */
-  it("the ▾ list draws its four intent groups with decorative separators", async () => {
+  it("the ▾ list draws its three intent groups with decorative separators", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -4196,8 +4225,6 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
           : el.textContent,
       ),
     ).toEqual([
-      "Move to…",
-      "sep",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4208,15 +4235,15 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       "sep",
       "Delete",
     ]);
-    // Decoration, not content: nothing here has a role, so the eight buttons above
+    // Decoration, not content: nothing here has a role, so the seven buttons above
     // are still the whole list as far as AT and the 44px guard are concerned.
-    expect(within(popup).getAllByRole("button")).toHaveLength(8);
-    // Scoped to the popup's own children: `MoveToMenu`'s disclosure chevron is an
-    // `aria-hidden` svg too, and it is decoration of an ENTRY rather than a rule
-    // between groups. An unscoped count would read 4 and pass for the wrong reason.
+    expect(within(popup).getAllByRole("button")).toHaveLength(7);
+    // Scoped to the popup's own children — belt-and-braces now that the nested
+    // picker and its `aria-hidden` disclosure chevron have gone: a group rule is a
+    // direct child of the popup, an entry's own decoration is not.
     expect(
       popup.querySelectorAll(":scope > [aria-hidden='true']"),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
   });
 
   /**
@@ -4248,7 +4275,6 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual([
-      "Move to…",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4260,7 +4286,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     ]);
     expect(
       popup.querySelectorAll(":scope > [aria-hidden='true']"),
-    ).toHaveLength(3);
+    ).toHaveLength(2);
   });
 
   // Every ▾ entry carries the 44px minimum (`rowMenuEntry`) — including the four
@@ -4285,7 +4311,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const entries = within(
       within(row).getByRole("dialog", { name: "All options" }),
     ).getAllByRole("button");
-    expect(entries).toHaveLength(8);
+    expect(entries).toHaveLength(7);
     for (const entry of entries) {
       expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
     }

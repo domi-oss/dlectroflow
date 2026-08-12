@@ -67,12 +67,12 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     // future refactor that drops it fails loudly instead of quietly restoring
     // the "scan of nothing" this test exists to end.
     //
-    // #253 — that control is the ▾ trigger now: the compact 📥 Move-to went with
-    // the row's trailing icon cluster, and "Move to…" is one of the entries the
-    // trigger opens. Re-pointed rather than dropped, because the precondition it
-    // enforces (this scan really did have a row with actions on it) is the whole
-    // point of the assertion. Left closed on purpose — the scan below is of the
-    // RESTING row, which is what the baseline was taken against.
+    // #253 — that control is the ▾ trigger now: the compact 📥 Move-to went with the
+    // row's trailing icon cluster, and the row's destinations are ordinary entries
+    // inside the list this trigger opens. Re-pointed rather than dropped, because the
+    // precondition it enforces (this scan really did have a row with actions on it) is
+    // the whole point of the assertion. Left closed on purpose — the scan below is of
+    // the RESTING row, which is what the baseline was taken against.
     await expect(
       row.getByRole("button", { name: "All options" }),
     ).toBeVisible();

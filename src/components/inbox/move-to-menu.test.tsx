@@ -22,7 +22,7 @@ describe("MoveToMenu", () => {
     render(
       <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
     );
-    await openMenu("Move to…");
+    await openMenu("Move to");
     expect(
       await screen.findByRole("menuitem", { name: /Needs review/ }),
     ).toBeInTheDocument();
@@ -46,21 +46,21 @@ describe("MoveToMenu", () => {
     render(
       <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />,
     );
-    await openMenu("Move to…");
+    await openMenu("Move to");
     await userEvent.click(
       await screen.findByRole("menuitem", { name: /Completed/ }),
     );
     expect(onMove).toHaveBeenCalledWith("completed");
   });
 
-  it("compact variant renders a 📥 icon trigger labeled 'Move to' (no 'Move to…' text) and still opens the bucket list", async () => {
+  // #253 — there is no longer a text variant to distinguish this from: the ▾ lists
+  // name their destinations directly, so `MoveToMenu` is the inline 📥 only and the
+  // `compact` prop went with the branch. The assertion is unchanged and is the one
+  // that matters — the icon carries an accessible name, because a bare glyph does
+  // not, and it still opens the bucket list.
+  it("renders a 📥 icon trigger named 'Move to', not bare text, and opens the bucket list", async () => {
     render(
-      <MoveToMenu
-        compact
-        currentBucket="singleTask"
-        voice="plain"
-        onMove={vi.fn()}
-      />,
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
     );
     expect(
       screen.queryByRole("button", { name: "Move to…" }),
@@ -73,15 +73,10 @@ describe("MoveToMenu", () => {
     ).toBeInTheDocument();
   });
 
-  it("compact variant calls onMove with the chosen bucket id", async () => {
+  it("calls onMove with the chosen bucket id from the icon trigger", async () => {
     const onMove = vi.fn();
     render(
-      <MoveToMenu
-        compact
-        currentBucket="singleTask"
-        voice="plain"
-        onMove={onMove}
-      />,
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />,
     );
     await openMenu("Move to");
     await userEvent.click(
@@ -94,7 +89,7 @@ describe("MoveToMenu", () => {
     render(
       <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
     );
-    await openMenu("Move to…");
+    await openMenu("Move to");
     await userEvent.keyboard("{Escape}");
     await waitFor(() =>
       expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
@@ -109,7 +104,7 @@ describe("MoveToMenu", () => {
         <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />
       </div>,
     );
-    await openMenu("Move to…");
+    await openMenu("Move to");
     await userEvent.click(screen.getByRole("button", { name: "outside" }));
     await waitFor(() =>
       expect(screen.queryByRole("menu")).not.toBeInTheDocument(),
@@ -123,12 +118,7 @@ describe("MoveToMenu", () => {
   // the element that carried them.
   it("the trigger advertises the menu it controls, and only while it is open", async () => {
     render(
-      <MoveToMenu
-        compact
-        currentBucket="singleTask"
-        voice="plain"
-        onMove={vi.fn()}
-      />,
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
     );
     const trigger = screen.getByRole("button", { name: "Move to" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
@@ -145,7 +135,7 @@ describe("MoveToMenu", () => {
     render(
       <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />,
     );
-    const trigger = screen.getByRole("button", { name: "Move to…" });
+    const trigger = screen.getByRole("button", { name: "Move to" });
     trigger.focus();
     // ArrowDown on a menu button opens the menu with its first entry
     // highlighted — the entry the old markup left permanently off screen.
@@ -169,7 +159,7 @@ describe("MoveToMenu", () => {
     const { container } = render(
       <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
     );
-    await openMenu("Move to…");
+    await openMenu("Move to");
     const host = container.firstElementChild!;
     expect(host.querySelectorAll("div")).toHaveLength(0);
   });
