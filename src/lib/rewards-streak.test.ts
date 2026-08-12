@@ -37,6 +37,14 @@
  * that makes the claim, rather than in a hygiene module of its own: the failure
  * being guarded is a sentence drifting from its evidence, and a check kept
  * anywhere else is a second thing that can be deleted separately.
+ *
+ * It also fails when the lock itself goes, and that is a change of mind from the
+ * version first pushed. That one returned early when it could not find
+ * `FOR UPDATE`, so that deliberately dropping the lock would retire the check
+ * along with its premise. But it could not tell a deliberate removal from a
+ * query it had simply failed to read, and it answered both by passing — which is
+ * the same class of green-means-nothing-was-looked-at signal as the vacuous
+ * proof above. `RAW_ROW_LOCK` below carries what that cost, measured.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
@@ -257,21 +265,121 @@ describe("maybeAwardInboxZero — Inbox-zero badge", () => {
   });
 });
 
+/**
+ * `FOR UPDATE` inside the template literal that a `$queryRaw` tag opens.
+ *
+ * Self-scoping, and the reason this can be a plain string match rather than a
+ * TypeScript parse: the lock has to sit in the *query text*, not anywhere in the
+ * file. The two prose mentions in `touchStreakOnEngagement`'s comments would
+ * satisfy a bare `/FOR UPDATE/`, and this repo has twice shipped a tool that
+ * read a comment as code.
+ *
+ * `[^`]*` rather than the `[^\n]*` this shipped with (#233, Duo round 1). That
+ * form only matched a lock on the same source line as the tag, so splitting the
+ * template across lines for readability — an ordinary, reviewable change that
+ * Prettier cannot do for you because it never reformats inside a template
+ * literal — made the scan below read "no lock". Measured before the fix: with
+ * the query wrapped onto four lines *and the proof file deleted*, this file
+ * passed 13/13. Bounding the distance instead (`[\s\S]{0,200}`) keeps the same
+ * shape of hole, just further away. The template's own delimiters are the
+ * boundary the query actually has, so they are the boundary used.
+ */
+const RAW_ROW_LOCK = /\$queryRaw\s*`[^`]*FOR UPDATE[^`]*`/;
+
+/**
+ * Any raw query at all — used only to say *which* thing went missing when the
+ * check below fails, since "the lock clause was dropped" and "the locking read
+ * was replaced wholesale" want different answers from whoever reads the failure.
+ */
+const RAW_QUERY = /\$queryRaw/;
+
+type RowLockScan = "locked" | "unlocked" | "no-raw-query";
+
+/**
+ * Read `rewards.ts` the way this check needs to see it.
+ *
+ * A local function rather than a `*-hygiene.ts` module, on purpose and for the
+ * same reason the test stays in this file: the failure being guarded is a
+ * sentence in *this* docblock drifting from its evidence, and a module is a
+ * second thing that can be deleted separately. `CLAUDE.md` asks a file-parsing
+ * guard to keep its parser out of `fs` so it can be shown to fail on synthetic
+ * input — that is what this signature buys, and the `describe` below spends it.
+ */
+function scanRawRowLock(source: string): RowLockScan {
+  if (RAW_ROW_LOCK.test(source)) return "locked";
+  return RAW_QUERY.test(source) ? "unlocked" : "no-raw-query";
+}
+
+describe("scanRawRowLock — what counts as seeing the lock (#233)", () => {
+  it("sees a lock written on one line, as `rewards.ts` writes it today", () => {
+    expect(
+      scanRawRowLock(
+        'await tx.$queryRaw`SELECT 1 FROM "Streak" WHERE "workspaceId" = ${id} FOR UPDATE`;',
+      ),
+    ).toBe("locked");
+  });
+
+  it("sees a lock in a template split across lines", () => {
+    // The regression Duo round 1 found. Nothing about this rewrite changes what
+    // Postgres does, so a check that stops seeing the lock here is measuring
+    // source formatting rather than behaviour.
+    expect(
+      scanRawRowLock(
+        'await tx.$queryRaw`\n  SELECT 1 FROM "Streak"\n  WHERE "workspaceId" = ${id}\n  FOR UPDATE`;',
+      ),
+    ).toBe("locked");
+  });
+
+  it("does not read the comments that describe the lock as the lock", () => {
+    // Both mentions in `touchStreakOnEngagement` are backticked prose of exactly
+    // this shape, and they outlive the code they describe by design.
+    expect(
+      scanRawRowLock(
+        "// the leading `SELECT … FOR UPDATE` serialises same-day callers\n" +
+          "const streak = await tx.streak.findUnique({ where: { workspaceId } });",
+      ),
+    ).toBe("no-raw-query");
+  });
+
+  it("separates a dropped lock clause from a dropped locking read", () => {
+    expect(scanRawRowLock('await tx.$queryRaw`SELECT 1 FROM "Streak"`;')).toBe(
+      "unlocked",
+    );
+    expect(
+      scanRawRowLock("const streak = await tx.streak.findUnique({});"),
+    ).toBe("no-raw-query");
+  });
+});
+
 describe("the row lock's real-DB proof, as a check rather than a citation (#233)", () => {
   it("still exists, still runs unmocked, and still measures its own overlap", () => {
-    // Deliberately ONE test and no parser module. `#234` spent a module plus two
-    // adversarial review rounds on a guard that, by its own measurement, never
-    // blocked a merge; the cheap half of this is four string assertions, and the
-    // cheap half is what is taken.
+    // Deliberately ONE test against the real tree, and plain string matching
+    // rather than an AST walk. `#234` spent a module plus two adversarial review
+    // rounds on a guard that, by its own measurement, never blocked a merge; the
+    // cheap half is what is taken here — no module, no allowlist, no parse. The
+    // synthetic `describe` above is not a second guard, it is the only way to
+    // show this one failing, which is the thing #233 keeps being about.
     const lock = readFileSync(path.join("src", "lib", "rewards.ts"), "utf8");
 
-    // Self-scoping, and the reason this can be a plain string match. It looks
-    // for `FOR UPDATE` on a `$queryRaw` line, not anywhere in the file — the two
-    // prose mentions in `touchStreakOnEngagement`'s comments would otherwise
-    // satisfy it, and this repo has twice shipped a tool that read a comment as
-    // code. If the lock is ever removed on purpose the premise goes with it and
-    // this retires itself, instead of demanding proof of something gone.
-    if (!/\$queryRaw[^\n]*FOR UPDATE/.test(lock)) return;
+    // A hard assertion, NOT the early return this shipped with (#233, Duo round
+    // 1). The early return was written so that deliberately removing the lock
+    // would retire this check with it rather than demand proof of something
+    // gone — but it could not tell "removed on purpose" from "I could not see
+    // it", and it answered both by silently passing. A guard that stops
+    // guarding without saying so is worse than no guard, because the green tick
+    // is then read as evidence.
+    //
+    // Failing instead costs one red test on a deliberate removal, and the
+    // message says what to delete. It also fixes the direction the whole check
+    // fails in: every way of mis-reading `rewards.ts` now ends in *more*
+    // enforcement plus a message naming what was looked for, never in less.
+    const scan = scanRawRowLock(lock);
+    expect(
+      scan,
+      scan === "no-raw-query"
+        ? "`rewards.ts` no longer issues a raw query, so the `SELECT … FOR UPDATE` that serialises `touchStreakOnEngagement` is gone (#233). Three places argue from that lock: this file's docblock, `rewards.integration.test.ts`, and #233's severity table, which calls `logReward` the only unguarded reward call. If the lock was replaced on purpose, retire them together with this test — not this test alone."
+        : "`rewards.ts` still issues a raw query but it no longer takes `FOR UPDATE`, so `touchStreakOnEngagement`'s read-decide-write is back to the TOCTOU #21 P5.3 closed (#233). If that is deliberate, the citations in this file's docblock, in `rewards.integration.test.ts` and in #233's severity table go with it, and so does this test.",
+    ).toBe("locked");
 
     const proof = path.join("src", "lib", "rewards.integration.test.ts");
     // The deletion this guard exists for. `783a6bf` removed 113 lines of
