@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   CAPTURE_QUEUE_STORAGE_KEY,
   CAPTURE_QUEUE_MAX_ITEMS,
@@ -688,5 +688,99 @@ describe("capture queue — client keys (#175)", () => {
     const k = newClientKey();
     expect(k.length).toBeGreaterThan(15);
     expect(k.length).toBeLessThanOrEqual(64);
+  });
+});
+
+// The third tier of `newClientKey` — reached only when a runtime has NEITHER
+// `crypto.randomUUID` nor `crypto.getRandomValues`, so close to unreachable.
+//
+// It used to fill 16 bytes from `Math.random()`, which Semgrep flags MEDIUM
+// (CWE-338) on every pipeline. `pick-one.ts` records why dismissing that is the
+// wrong tool: the finding's fingerprint includes the LINE NUMBER, so one statement
+// in `focus-timer.tsx` was dismissed five separate times as unrelated changes
+// moved it down the file. A fix is permanent; a dismissal is a tax on every future
+// MR that shifts the line.
+//
+// ⚠️ The security reading is the weaker argument and should not be the one relied
+// on. A `clientKey` is an idempotency key, not a secret, and predicting one grants
+// nothing without the victim's `workspaceId`. The CORRECTNESS reading is the real
+// one: the column is `@@unique([workspaceId, clientKey])`, so a collision makes the
+// second capture take the `200 duplicate` arm and be dropped from the queue as
+// already saved — words lost, silently, in the one module whose whole premise is
+// that that cannot happen. A clock plus a counter is collision-FREE within a
+// session rather than merely unlikely, which is strictly better here than any PRNG.
+describe("capture queue — client keys with no platform CSPRNG (#175)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // The mirror of `pick-one.test.ts`'s assertion that the CSPRNG *is* reached. If
+  // a refactor reintroduces the flagged construct, this is what fails.
+  it("does not reach for Math.random, which SAST flags on every pipeline", () => {
+    vi.stubGlobal("crypto", {});
+    const spy = vi.spyOn(Math, "random");
+
+    newClientKey();
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // A fallback key that reached the database would otherwise be indistinguishable
+  // from a `getRandomValues` one, and the two mean very different things about the
+  // browser that produced it.
+  it("is recognisable as the fallback, so one in the database is diagnosable", () => {
+    vi.stubGlobal("crypto", {});
+    expect(newClientKey().startsWith("clk-")).toBe(true);
+  });
+
+  it("still returns a key the server will accept", () => {
+    vi.stubGlobal("crypto", {});
+    const k = newClientKey();
+
+    // Mirrors CLIENT_KEY_SHAPE in `src/app/api/braindump/route.ts`. A fallback key
+    // the route refuses is a capture that can never flush — stuck in the queue
+    // forever while the strip says it is waiting to save. The route's own test
+    // proves the agreement end to end; this is the local half.
+    expect(k).toMatch(/^[A-Za-z0-9-]{1,64}$/);
+    expect(k.length).toBeGreaterThan(15);
+    expect(k.length).toBeLessThanOrEqual(64);
+    expect(JSON.parse(JSON.stringify({ k })).k).toBe(k);
+  });
+
+  // Uniqueness has to come from the COUNTER, not from the clock and not from luck.
+  // Freezing time is what makes that the only thing left to carry it.
+  it("cannot repeat inside a single millisecond", () => {
+    vi.stubGlobal("crypto", {});
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-12T09:00:00.000Z"));
+    try {
+      const keys = Array.from({ length: 1_000 }, () => newClientKey());
+      expect(new Set(keys).size).toBe(1_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The property the docblock leans on hardest: this function failing would take
+  // capture down with it, which is worse than any key weakness.
+  it("never throws, whatever crypto turns out to be", () => {
+    for (const stub of [{}, undefined, null, { randomUUID: 42 }]) {
+      vi.stubGlobal("crypto", stub);
+      expect(() => newClientKey()).not.toThrow();
+      expect(newClientKey().length).toBeGreaterThan(0);
+    }
+  });
+
+  // The middle tier is unchanged and stays preferred — asserted so this change
+  // cannot quietly demote a real CSPRNG to the counter.
+  it("still prefers getRandomValues when that is the only member present", () => {
+    const getRandomValues = vi.fn((a: Uint8Array) => a.fill(0xab));
+    vi.stubGlobal("crypto", { getRandomValues });
+
+    const k = newClientKey();
+
+    expect(getRandomValues).toHaveBeenCalled();
+    expect(k).toBe("ab".repeat(16));
   });
 });

@@ -135,14 +135,24 @@ export const runtime = "nodejs";
 const MAX_BODY_CHARS = 2 * CAPTURE_QUEUE_MAX_BYTES;
 
 /**
- * The shape a `clientKey` can have: the alphabet both generators in
- * `newClientKey` produce — a `crypto.randomUUID()` (hex and dashes, 36 chars) or
- * its 32-character hex fallback — and nothing else.
+ * The shape a `clientKey` can have: the alphabet all THREE tiers of
+ * `newClientKey` produce — a `crypto.randomUUID()` (lowercase hex and dashes, 36
+ * chars), its 32-character hex `getRandomValues` form, or the
+ * `clk-<ms base36>-<counter base36>` clock-and-counter tier a runtime with no
+ * `crypto` at all falls back to (20 chars, lowercase base36 and dashes) — and
+ * nothing else.
+ *
+ * ⚠️ Kept deliberately as one permissive alphabet rather than three alternated
+ * patterns. A key this route REFUSES is a capture that can never flush: it stays
+ * queued forever while the strip says it is waiting to save, which is a silent
+ * permanent stall rather than a refusal anybody sees. So the bound is on length and
+ * character set, and `capture-queue.test.ts` asserts the fallback tier lands inside
+ * it from the other side.
  *
  * Bounded because this value becomes a key in
  * `BrainDumpItem_workspaceId_clientKey_key`, and an unbounded client-supplied
  * index key is a cost a request should not be able to choose. 64 is comfortably
- * above both generators and refuses nothing a browser of this app can send.
+ * above all three tiers and refuses nothing a browser of this app can send.
  *
  * A file-level literal, as `TASK_ID_SHAPE` is in `/api/breakdown` — nothing here
  * builds a pattern from a variable (`regexp-source-hygiene`).

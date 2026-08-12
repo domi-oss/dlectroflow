@@ -53,7 +53,7 @@ vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/origin");
 
 import { MissingWorkspaceError, RevokedAccountError } from "@/lib/workspace";
-import { CAPTURE_QUEUE_MAX_BYTES } from "@/lib/capture-queue";
+import { CAPTURE_QUEUE_MAX_BYTES, newClientKey } from "@/lib/capture-queue";
 import { requestOrigin } from "@/lib/origin";
 import { POST } from "./route";
 
@@ -370,6 +370,29 @@ describe("POST /api/braindump — a request that could never be a capture", () =
       validBody({ text: "x".repeat(CAPTURE_QUEUE_MAX_BYTES - 500) }),
     );
     expect(res.status).toBe(201);
+  });
+
+  // ⚠️ Cross-file agreement, asserted rather than reasoned about. `newClientKey`
+  // has three tiers producing three different SHAPES, and `CLIENT_KEY_SHAPE` has to
+  // accept all of them — a key this route refuses is not a visible error, it is a
+  // capture that can never flush: queued forever while the strip says it is waiting
+  // to save. The third tier is the one no test could have caught by accident,
+  // because it only fires on a runtime with no `crypto` at all.
+  it("accepts a clientKey from every tier of newClientKey, fallback included", async () => {
+    const realCrypto = newClientKey();
+
+    vi.stubGlobal("crypto", {});
+    const clockFallback = newClientKey();
+    vi.unstubAllGlobals();
+
+    // The fallback really is the shape under test, not another UUID.
+    expect(clockFallback.startsWith("clk-")).toBe(true);
+
+    for (const clientKey of [realCrypto, clockFallback]) {
+      writeCaptureMock.mockResolvedValue("created");
+      const res = await post(validBody({ clientKey }));
+      expect(res.status).toBe(201);
+    }
   });
 
   it("refuses a malformed body BEFORE resolving the session", async () => {

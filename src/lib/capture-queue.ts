@@ -452,24 +452,78 @@ function applyOutcome(
 }
 
 /**
- * A fresh idempotency key.
+ * Sequence behind the third tier of `newClientKey`.
  *
- * `crypto.randomUUID()` where available, which is everywhere this app runs in a
- * secure context. The fallback exists because this function failing would take
- * capture down with it, and an insecure-context or older-runtime `undefined` is
- * cheaper to absorb than to diagnose. Both forms are URL- and JSON-safe and fit
- * the column comfortably.
+ * Module-scoped, exactly as `breakdown-chat.tsx`'s `stepKeySeq` is and for the
+ * same reason: two callers in one page — two capture bars, or a flush racing a
+ * fresh capture — must not be able to draw the same value.
+ */
+let clockKeySeq = 0;
+
+/**
+ * A fresh idempotency key. Three tiers, in order of preference:
+ *
+ *  1. `crypto.randomUUID()` — 36 chars, lowercase hex and dashes. Everywhere this
+ *     app runs in a secure context.
+ *  2. `crypto.getRandomValues` — 32 lowercase hex chars. An insecure context still
+ *     has this when it has no `randomUUID`.
+ *  3. `clk-<ms base36, 9>-<counter base36, ≥6>` — 20 chars, lowercase base36 and
+ *     dashes. A clock and a counter, **not** a PRNG.
+ *
+ * All three are URL- and JSON-safe, sit inside `CLIENT_KEY_SHAPE` in
+ * `src/app/api/braindump/route.ts` (whose comment describes all three — keep the
+ * two in step), and fit the column comfortably.
+ *
+ * ── Why the third tier is a clock and a counter ──────────────────────────────
+ *
+ * It filled 16 bytes from `Math.random` until Semgrep flagged it MEDIUM
+ * (CWE-338) on `!334`. **The fix is not a dismissal, and that is a maintenance
+ * decision rather than a security one.** `pick-one.ts` records the reasoning at
+ * length: the finding's fingerprint includes the LINE NUMBER, so one statement in
+ * `focus-timer.tsx` was dismissed five separate times as unrelated changes moved
+ * it down the file. Every dismissal was correct and none stayed true. A fix is
+ * permanent; a dismissal is a tax on every future MR that shifts the line.
+ *
+ * ⚠️ **The security reading is the weaker argument and is not the one to rely on.**
+ * A `clientKey` is an idempotency key, not a secret: it is not authorization, and
+ * predicting one grants nothing without the victim's `workspaceId`, which the
+ * route only ever compares and which no cross-origin page can read. Nor was this
+ * ever a live hole — the tier needs BOTH `crypto` members absent, so it is close
+ * to unreachable on any runtime this app supports.
+ *
+ * The **correctness** argument is the real one. `BrainDumpItem` carries
+ * `@@unique([workspaceId, clientKey])`, so a collision does not error — it makes
+ * the second capture take the `200 duplicate` arm and be dropped from the queue as
+ * already saved. Words lost, silently, in the one module whose entire premise is
+ * that nothing here ever loses words. A clock plus a monotonic counter is
+ * collision-**free** within a session, and separated across sessions by the
+ * millisecond, which is strictly better than anything probabilistic.
+ *
+ * The residual, stated rather than implied: two loads of a `crypto`-less runtime
+ * starting inside the same millisecond would draw the same key. Nothing short of
+ * randomness fixes that, it is the tier that needs no `crypto` at all to have been
+ * present, and it is not worth a third mechanism.
+ *
+ * **Still never throws**, which is the property that matters most and now holds
+ * more simply than it did: this function failing would take capture down with it,
+ * and that is worse than a weak key. `Date.now`, `toString(36)` and `padStart`
+ * cannot fail.
  */
 export function newClientKey(): string {
   const c: Crypto | undefined = globalThis.crypto;
   if (typeof c?.randomUUID === "function") return c.randomUUID();
-  const bytes = new Uint8Array(16);
+
   if (typeof c?.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
     c.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   }
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+  // Padded to fixed widths so the shape is stable rather than drifting with the
+  // clock, and prefixed so a key that reached the database is recognisable as
+  // having come from a browser with no CSPRNG at all — which is worth knowing, and
+  // is otherwise indistinguishable from tier 2's hex.
+  const stamp = Date.now().toString(36).padStart(9, "0");
+  const seq = (++clockKeySeq).toString(36).padStart(6, "0");
+  return `clk-${stamp}-${seq}`;
 }
