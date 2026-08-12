@@ -164,8 +164,9 @@ length limit on capture text anywhere** — no `maxLength` on the input, no chec
 `createBrainDumpItem`, and `BrainDumpItem.text` is an unbounded Postgres `text`. So one pasted essay
 can be arbitrarily large, and without a byte bound a single capture could exhaust the quota and throw
 `QuotaExceededError` on the write this whole design depends on being reliable. 64 KB total, checked
-before enqueue, with an over-large single capture refused on the same message. Whether capture text
-should have a limit *at all* is a separate question and not this issue's to answer.
+before enqueue, and a single capture over that bound is refused **with its own message** (below).
+Whether capture text should have a limit *at all* is a separate question and not this issue's to
+answer.
 
 **The two caps do not share a message.** An earlier draft said an over-large single
 capture was "refused on the same message", which would tell someone who pasted one
