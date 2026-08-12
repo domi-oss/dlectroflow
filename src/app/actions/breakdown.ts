@@ -11,6 +11,7 @@ import {
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
+import { bestEffort } from "@/lib/best-effort";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
@@ -175,6 +176,38 @@ export async function ejectStepToInbox(
  * Persist a confirmed breakdown: set the parent emoji and replace the task's
  * steps with the proposal. (Scheduling is wired via the Google Tasks / calendar
  * export routes.)
+ *
+ * ## The payout is BEST-EFFORT (#257)
+ *
+ * The steps commit in their own `$transaction`, and everything after it is a
+ * consequence of that success — so none of it may report the breakdown as
+ * failed. Until #257 the three statements below propagated: a user pressed
+ * Confirm, the steps landed, a transient fault in the streak touch rejected the
+ * action, and the UI said the breakdown had not saved over steps that were in
+ * the database. Their next move is to press Confirm again, which is a wasted
+ * press rather than a duplicate — `confirmBreakdown` replaces the step set
+ * rather than appending to it — but the message is still a lie.
+ *
+ * All three are wrapped, not only the streak touch the issue names: it is the
+ * LAST of the three, so fixing it alone would leave `logReward` and `awardBadge`
+ * able to un-report the same commit one line earlier. Read `src/lib/best-effort.ts`
+ * for the rule, the two rejected alternatives (join the transaction, recover on
+ * retry) and why they are worse.
+ *
+ * **The residual, stated rather than implied:** this confirm banks no points, no
+ * FirstBreakdown badge and no streak credit. The badge is once-ever and
+ * idempotent, so the next confirm earns it. The streak is not banked *at all*
+ * only when the person makes no other qualifying engagement that working day —
+ * `Streak.lastActiveWorkday` makes it a per-day boolean, so any capture,
+ * completion or later confirm credits the same day in full and nothing is left
+ * half-advanced. The points for this one confirm are lost, and that is the whole
+ * cost.
+ *
+ * The revalidations run either way, deliberately, and are NOT gated on the
+ * payout: the steps are saved, so skipping them would leave the person's own tab
+ * rendering a task with no steps. `reopenItem` records the same rule in as many
+ * words — "each request still has to refresh its own render, whoever did the
+ * write".
  */
 export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   const workspaceId = await currentWorkspaceId();
@@ -208,11 +241,19 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
     }),
   ]);
 
-  await logReward(workspaceId, RewardType.BreakdownConfirmed);
-  await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
-  // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
-  // streak at most once per working day.
-  await touchStreakOnEngagement(workspaceId);
+  // Best-effort: the steps above are committed, so no fault here may report the
+  // confirm as failed (#257). See this function's docblock for the residual.
+  await bestEffort(
+    "breakdown_confirm_bookkeeping_failed",
+    workspaceId,
+    async () => {
+      await logReward(workspaceId, RewardType.BreakdownConfirmed);
+      await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
+      // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
+      // streak at most once per working day.
+      await touchStreakOnEngagement(workspaceId);
+    },
+  );
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/");

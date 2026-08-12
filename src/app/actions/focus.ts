@@ -25,6 +25,7 @@ import {
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { bestEffort } from "@/lib/best-effort";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 /**
@@ -72,7 +73,17 @@ export async function beginFocus(
     },
   });
   // First focus — awarded the first time a focus session begins (idempotent).
-  await awardBadge(workspaceId, BadgeKey.FirstFocus);
+  //
+  // Best-effort (#257): the session row above is committed and its id is what
+  // the caller navigates with, so a badge insert that failed must not report the
+  // start as failed. The retry cost is what makes this reachable rather than
+  // tidy — the `updateMany` above retires every open session on this step BEFORE
+  // creating the new one, so a person pressing Start again after a false failure
+  // abandons the session that is actually running and opens another, once per
+  // press. The badge is once-ever and idempotent, so the next start earns it.
+  await bestEffort("first_focus_badge_failed", workspaceId, () =>
+    awardBadge(workspaceId, BadgeKey.FirstFocus),
+  );
   return session.id;
 }
 
@@ -188,6 +199,18 @@ async function closeSession(
  * task-complete reward+badge. Returns whether the task's OWN Google Task was
  * patched — `completeFocus` folds that into the `googleSynced` it reports, so
  * the return value is UI-visible rather than bookkeeping (see the call site).
+ *
+ * The payout is BEST-EFFORT (#257). Both callers reach this line with their own
+ * write already committed, and the two writes at the top of this helper commit
+ * before the payout as well — so a `logReward`/`awardBadge` fault here would
+ * report a completion as failed over a task that is Done and inbox rows that are
+ * stamped. In `completeStep` it also skipped the three `revalidatePath` calls,
+ * leaving the person's own tab showing the to-do as open.
+ *
+ * The residual is one `task_complete` payout. The badge is once-ever and
+ * idempotent, so the next completion earns it; the points for this one are lost.
+ * Google is patched either way — it is best-effort already and for the same
+ * reason.
  */
 async function markTaskCompleted(
   workspaceId: string,
@@ -203,8 +226,14 @@ async function markTaskCompleted(
     where: { taskId, workspaceId },
     data: { completedAt: new Date() },
   });
-  await logReward(workspaceId, RewardType.TaskComplete);
-  await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  await bestEffort(
+    "task_complete_bookkeeping_failed",
+    workspaceId,
+    async () => {
+      await logReward(workspaceId, RewardType.TaskComplete);
+      await awardBadge(workspaceId, BadgeKey.TaskComplete);
+    },
+  );
   // #195 — a task can carry its OWN Google id, from having been scheduled while
   // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates
   // a step the moment it is focused, and that step has no id of its own, so the
@@ -234,7 +263,26 @@ async function markTaskCompleted(
  * `reopenItem` never made.
  */
 
-/** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
+/**
+ * Complete a step directly (no focus session). Awards StepDone; finishes the
+ * task on the last step.
+ *
+ * ## The payout is BEST-EFFORT, and here it is a data-integrity fix (#257)
+ *
+ * The step write commits on its own, and the guard at the top is
+ * `if (!step || step.done) return` — so once that write has landed, **every later
+ * press returns before reaching anything below it**. A `rewardStepDone` that
+ * propagated therefore did not merely report a false failure: it aborted the
+ * request in front of `markTaskCompleted`, leaving the task **Active with zero
+ * open steps and no press that could ever finish it**, plus the three
+ * revalidations unrun. Swallowing the payout is what lets the state write behind
+ * it run, which is why this site is in #257's sweep rather than filed as a nit.
+ *
+ * The residual is the `step_done` points, the ten-steps-in-a-day badge check and
+ * this engagement's streak credit for the day — see `src/lib/best-effort.ts` and
+ * `confirmBreakdown` for why the streak's per-day boolean makes that recoverable
+ * by any other engagement the same day.
+ */
 export async function completeStep(stepId: string) {
   const workspaceId = await currentWorkspaceId();
   const step = await prisma.step.findFirst({
@@ -245,7 +293,9 @@ export async function completeStep(stepId: string) {
 
   await completeGoogleTaskForStep(step);
   await prisma.step.update({ where: { id: stepId }, data: { done: true } });
-  await rewardStepDone(workspaceId);
+  await bestEffort("step_done_bookkeeping_failed", workspaceId, () =>
+    rewardStepDone(workspaceId),
+  );
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
   if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
@@ -524,8 +574,29 @@ export async function completeFocus(
   }
 
   // Points + streak + badges (dashboard reads these).
-  const streak = await rewardStepDone(workspaceId);
-  await logReward(workspaceId, RewardType.SessionFinished);
+  //
+  // Both best-effort (#257): the session is closed and the step is marked done,
+  // both committed, so no payout fault may report the session as unfinished. A
+  // retry here is not idempotent either — `sessionCheck` matches a session that
+  // is already closed, so a second press re-closes it and banks a SECOND
+  // `step_done` and `session_finished` for one stretch of work. Throwing did not
+  // preserve anything; it invited the double-pay.
+  //
+  // TWO calls rather than one wrapped block, for the reason `awardFirstSchedule`
+  // reaches with `allSettled`: these two payouts are independent, and
+  // `session_finished` pays for time that was really spent (see
+  // `reverseStepCompletionRewards` — it is the one reward an undo does not take
+  // back). A failed step payout must not silently cost it, and a failed bonus
+  // must not hide a streak that did advance. The residual is at most one of the
+  // two, never both from one fault.
+  const streak = await bestEffort(
+    "focus_session_bookkeeping_failed",
+    workspaceId,
+    () => rewardStepDone(workspaceId),
+  );
+  await bestEffort("focus_session_bookkeeping_failed", workspaceId, () =>
+    logReward(workspaceId, RewardType.SessionFinished),
+  );
 
   const next = await prisma.step.findFirst({
     where: {

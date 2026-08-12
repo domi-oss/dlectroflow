@@ -1,0 +1,412 @@
+/**
+ * #257 — bookkeeping that fails AFTER the write it belongs to has committed.
+ *
+ * The rule, reached on `!330`'s review and quoted by the issue: **the `try`
+ * governs the WRITE; anything after it is a consequence of success and cannot
+ * un-write the row.** `writeCapture` (`!334`) applied it to the capture path;
+ * this file pins the five sites in `breakdown.ts` and `focus.ts` that had the
+ * same shape.
+ *
+ * Every block below is the same pair of assertions, deliberately:
+ *
+ *  * the consequence fails, and the action still reports SUCCESS — because the
+ *    row is in the database, so the caller must be told the row is in the
+ *    database, and the revalidations are owed either way (`reopenItem`'s rule:
+ *    "each request still has to refresh its own render, whoever did the write");
+ *  * **the control** — the WRITE itself fails, and the action still rejects.
+ *    Without that second half a suite passes an implementation that swallows
+ *    everything, which is a worse bug than the one being fixed. It is green
+ *    throughout, by design, exactly as `!334`'s was.
+ *
+ * Prisma and `@/lib/rewards` are mocked: what is under test is which statement
+ * may abort a request, not what any of them write. The reward primitives have
+ * their own tests, and `rewards.integration.test.ts` proves the streak
+ * transaction against real Postgres.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+const {
+  prismaMock,
+  revalidatePathMock,
+  currentWorkspaceIdMock,
+  logRewardMock,
+  awardBadgeMock,
+  rewardStepDoneMock,
+  touchStreakOnEngagementMock,
+  completeGoogleTaskForStepMock,
+  completeGoogleTaskForTaskMock,
+} = vi.hoisted(() => {
+  const prismaMock = {
+    task: { findFirst: vi.fn(), update: vi.fn() },
+    step: {
+      findFirst: vi.fn(),
+      update: vi.fn(),
+      deleteMany: vi.fn(),
+      createMany: vi.fn(),
+      count: vi.fn(),
+    },
+    brainDumpItem: { updateMany: vi.fn() },
+    focusSession: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    $transaction: vi.fn(),
+  };
+  return {
+    prismaMock,
+    revalidatePathMock: vi.fn(),
+    currentWorkspaceIdMock: vi.fn(),
+    logRewardMock: vi.fn(),
+    awardBadgeMock: vi.fn(),
+    rewardStepDoneMock: vi.fn(),
+    touchStreakOnEngagementMock: vi.fn(),
+    completeGoogleTaskForStepMock: vi.fn(),
+    completeGoogleTaskForTaskMock: vi.fn(),
+  };
+});
+
+vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
+vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
+vi.mock("@/lib/workspace", () => ({
+  currentWorkspaceId: currentWorkspaceIdMock,
+  MissingWorkspaceError: class extends Error {},
+}));
+vi.mock("@/lib/workspace-kind", () => ({
+  isGuestWorkspace: vi.fn().mockResolvedValue(false),
+}));
+vi.mock("@/lib/llm", () => ({ getLLM: () => ({ generate: vi.fn() }) }));
+vi.mock("@/lib/models", () => ({ resolveUtilityModel: () => "model" }));
+vi.mock("@/lib/google", () => ({ patchGoogleTask: vi.fn() }));
+vi.mock("@/lib/google-task-sync", () => ({
+  actingUserGoogleToken: vi.fn().mockResolvedValue(null),
+  completeGoogleTaskForStep: completeGoogleTaskForStepMock,
+  completeGoogleTaskForTask: completeGoogleTaskForTaskMock,
+  reopenGoogleTaskForStep: vi.fn(),
+}));
+vi.mock("@/lib/rewards", () => ({
+  logReward: logRewardMock,
+  awardBadge: awardBadgeMock,
+  rewardStepDone: rewardStepDoneMock,
+  touchStreakOnEngagement: touchStreakOnEngagementMock,
+  reverseStepCompletionRewards: vi.fn(),
+}));
+
+import { BadgeKey, RewardType, TaskStatus } from "@/lib/constants";
+
+const WS = "ws-1";
+const BOOM = "reward store went away";
+/** A write that never reached the database — the control's failure. */
+const DEAD = "connection refused";
+
+/** The one open step of a one-step task, so a completion also finishes it. */
+const STEP = {
+  id: "step-1",
+  taskId: "task-1",
+  text: "Write the intro",
+  order: 1,
+  total: 1,
+  done: false,
+  estMinutes: 20,
+  estimateHistory: null,
+  subtaskEmoji: null,
+  googleTaskId: null,
+  googleTaskListId: null,
+};
+
+let errorLog: ReturnType<typeof vi.spyOn>;
+
+/** The tag of the one line a swallow left behind. */
+const loggedTag = () =>
+  (
+    JSON.parse(String(errorLog.mock.calls[0][0])) as {
+      tag: string;
+      workspaceId: string;
+      message: string;
+    }
+  ).tag;
+
+const loggedLine = () =>
+  JSON.parse(String(errorLog.mock.calls[0][0])) as {
+    tag: string;
+    workspaceId: string;
+    message: string;
+  };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  currentWorkspaceIdMock.mockResolvedValue(WS);
+  logRewardMock.mockResolvedValue(undefined);
+  awardBadgeMock.mockResolvedValue(true);
+  rewardStepDoneMock.mockResolvedValue(null);
+  touchStreakOnEngagementMock.mockResolvedValue(null);
+  completeGoogleTaskForStepMock.mockResolvedValue(false);
+  completeGoogleTaskForTaskMock.mockResolvedValue(false);
+
+  prismaMock.task.findFirst.mockResolvedValue({ id: "task-1" });
+  prismaMock.task.update.mockResolvedValue({ id: "task-1" });
+  prismaMock.step.findFirst.mockResolvedValue({
+    ...STEP,
+    task: { id: "task-1", steps: [STEP] },
+  });
+  prismaMock.step.update.mockResolvedValue({});
+  prismaMock.step.deleteMany.mockResolvedValue({ count: 0 });
+  prismaMock.step.createMany.mockResolvedValue({ count: 1 });
+  prismaMock.step.count.mockResolvedValue(1);
+  prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.focusSession.findFirst.mockResolvedValue({ id: "sess-1" });
+  prismaMock.focusSession.updateMany.mockResolvedValue({ count: 0 });
+  prismaMock.focusSession.create.mockResolvedValue({ id: "sess-1" });
+  prismaMock.focusSession.update.mockResolvedValue({
+    id: "sess-1",
+    plannedMin: 25,
+    step: STEP,
+  });
+  // The array form is the only one `confirmBreakdown` uses; the callback form is
+  // here so this mock stays honest if a caller changes shape.
+  prismaMock.$transaction.mockImplementation((arg: unknown) =>
+    typeof arg === "function"
+      ? (arg as (tx: unknown) => unknown)(prismaMock)
+      : Promise.all(arg as Promise<unknown>[]),
+  );
+});
+
+afterEach(() => errorLog.mockRestore());
+
+// ── confirmBreakdown ────────────────────────────────────────────────────────
+describe("confirmBreakdown — a payout that fails after the steps committed", () => {
+  const PROPOSAL = {
+    parentEmoji: "🚀",
+    steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }],
+  };
+  const confirm = async () => {
+    const { confirmBreakdown } = await import("./breakdown");
+    return confirmBreakdown("task-1", PROPOSAL);
+  };
+
+  // THE interaction, in the issue's own words: a user presses Confirm, the steps
+  // commit, the streak touch fails, and the UI must NOT say the breakdown did
+  // not save over steps that are in the database.
+  it("resolves, because the steps are committed", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(confirm()).resolves.toBeUndefined();
+    // Also proves the queued rejection was consumed — an unconsumed `Once`
+    // shifts every later test in the file by one.
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+  });
+
+  // Not an early return: the caller's own tab renders these two surfaces, and
+  // skipping the invalidation leaves it showing a task with no steps.
+  it("still revalidates the task page and the inbox", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await confirm();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/task-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await confirm();
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(loggedLine().tag).toBe("breakdown_confirm_bookkeeping_failed");
+    expect(loggedLine().workspaceId).toBe(WS);
+    expect(loggedLine().message).toContain(BOOM);
+  });
+
+  // The streak touch is the one the issue names, and it is the LAST of three
+  // post-commit statements. Fixing only that one would leave the two in front of
+  // it able to un-report the same commit.
+  it("covers the points and the badge, not only the streak touch", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(confirm()).resolves.toBeUndefined();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+
+    vi.clearAllMocks();
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(confirm()).resolves.toBeUndefined();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  // THE CONTROL. Green before the fix and after it: the steps did not save, so
+  // the person must hear about it and press Confirm again.
+  it("CONTROL: a step write that fails still rejects", async () => {
+    prismaMock.$transaction.mockRejectedValueOnce(new Error(DEAD));
+    await expect(confirm()).rejects.toThrow(DEAD);
+    expect(touchStreakOnEngagementMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── completeStep ────────────────────────────────────────────────────────────
+describe("completeStep — a payout that fails after the step committed", () => {
+  const complete = async () => {
+    const { completeStep } = await import("./focus");
+    return completeStep("step-1");
+  };
+
+  it("resolves, because the step is committed", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(rewardStepDoneMock).toHaveBeenCalledExactlyOnceWith(WS);
+  });
+
+  /**
+   * The reason this site is worse than a false failure message, and the reason
+   * it is in this sweep rather than deferred.
+   *
+   * `completeStep` guards on `if (!step || step.done) return`, so once the step
+   * write has landed a retry returns before reaching `markTaskCompleted`.
+   * A `rewardStepDone` that propagated therefore left the task **Active with
+   * zero open steps, permanently** — no later press can finish it, because every
+   * later press early-returns. Swallowing the payout is what lets the state write
+   * behind it run.
+   */
+  it("still finishes the task, so a done step cannot leave it Active", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await complete();
+    expect(prismaMock.task.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: TaskStatus.Done } }),
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await complete();
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(loggedLine().tag).toBe("step_done_bookkeeping_failed");
+    expect(loggedLine().workspaceId).toBe(WS);
+  });
+
+  it("CONTROL: a step write that fails still rejects", async () => {
+    prismaMock.step.update.mockRejectedValueOnce(new Error(DEAD));
+    await expect(complete()).rejects.toThrow(DEAD);
+    expect(rewardStepDoneMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  // `markTaskCompleted` is the third site, reached from here and from
+  // `completeFocus`. Its two payouts sit after a `Task` update and a
+  // `BrainDumpItem` stamp that are both already committed.
+  it("survives the task-complete payout failing, and still patches Google", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("task_complete_bookkeeping_failed");
+    // #195 — the task-grain patch runs last and is what closes a Google task
+    // belonging to a to-do that was scheduled while it was still stepless.
+    expect(completeGoogleTaskForTaskMock).toHaveBeenCalledTimes(1);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("CONTROL: the task's own Done write failing still rejects", async () => {
+    prismaMock.task.update.mockRejectedValueOnce(new Error(DEAD));
+    await expect(complete()).rejects.toThrow(DEAD);
+  });
+});
+
+// ── completeFocus ───────────────────────────────────────────────────────────
+describe("completeFocus — a payout that fails after the session closed", () => {
+  const finish = async () => {
+    const { completeFocus } = await import("./focus");
+    return completeFocus("sess-1", { durationMin: 25, addedMin: 0 });
+  };
+
+  /**
+   * A retry here is not idempotent, which is the second reason not to throw:
+   * `sessionCheck` matches a session that is already closed, so a second press
+   * re-closes it and banks a second `step_done` and a second
+   * `session_finished` for one stretch of work.
+   */
+  it("reports ok, with no streak to show", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(finish()).resolves.toMatchObject({
+      ok: true,
+      streak: null,
+      freshStart: false,
+    });
+  });
+
+  // Independence, the property `awardFirstSchedule` uses `allSettled` for: the
+  // session bonus pays for time that was really spent, and a failed step payout
+  // must not silently take it away as well.
+  it("still banks the session bonus when the step payout failed", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await finish();
+    expect(logRewardMock).toHaveBeenCalledWith(WS, RewardType.SessionFinished);
+  });
+
+  // The other direction of the same independence: a streak that DID advance is
+  // still reported, so the toast the person earned is not lost to an unrelated
+  // failure one line later.
+  it("still reports a streak that advanced when the bonus failed", async () => {
+    rewardStepDoneMock.mockResolvedValueOnce({
+      current: 3,
+      freshStart: false,
+      continued: true,
+    });
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(finish()).resolves.toMatchObject({ ok: true, streak: 3 });
+    expect(loggedTag()).toBe("focus_session_bookkeeping_failed");
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await finish();
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(loggedLine().tag).toBe("focus_session_bookkeeping_failed");
+    expect(loggedLine().workspaceId).toBe(WS);
+  });
+
+  it("CONTROL: closing the session failing still rejects", async () => {
+    prismaMock.focusSession.update.mockRejectedValueOnce(new Error(DEAD));
+    await expect(finish()).rejects.toThrow(DEAD);
+    expect(rewardStepDoneMock).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL: the step's own done write failing still rejects", async () => {
+    prismaMock.step.update.mockRejectedValueOnce(new Error(DEAD));
+    await expect(finish()).rejects.toThrow(DEAD);
+    expect(rewardStepDoneMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── beginFocus ──────────────────────────────────────────────────────────────
+describe("beginFocus — the badge awarded after the session row landed", () => {
+  const begin = async () => {
+    const { beginFocus } = await import("./focus");
+    return beginFocus("step-1", 25);
+  };
+
+  /**
+   * The retry cost that makes this reachable rather than tidy: `beginFocus`
+   * retires every open session on the step BEFORE creating its own, so a press
+   * reported as failed over a session that exists leaves the person pressing
+   * Start again — and each press abandons the live session and opens another.
+   */
+  it("returns the session id, because the session row is committed", async () => {
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(begin()).resolves.toBe("sess-1");
+    expect(awardBadgeMock).toHaveBeenCalledExactlyOnceWith(
+      WS,
+      BadgeKey.FirstFocus,
+    );
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await begin();
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(loggedLine().tag).toBe("first_focus_badge_failed");
+    expect(loggedLine().workspaceId).toBe(WS);
+  });
+
+  it("CONTROL: a session that fails to open still rejects", async () => {
+    prismaMock.focusSession.create.mockRejectedValueOnce(new Error(DEAD));
+    await expect(begin()).rejects.toThrow(DEAD);
+    expect(awardBadgeMock).not.toHaveBeenCalled();
+  });
+});
