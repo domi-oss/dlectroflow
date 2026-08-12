@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { captureItem, needsReviewRow } from "../helpers";
+import { captureItem, needsReviewRow, ROW_MENU_ADD_TODO } from "../helpers";
 
 /**
  * The .ics schedule path, end to end in a production build (#104).
@@ -31,12 +31,12 @@ test("scheduling a to-do downloads an .ics with a focus link and busy time", asy
   await captureItem(page, label);
 
   // The .ics handler needs a linked Task (`icsProps` bails without one), and a
-  // fresh capture has none — "Add as single task to do" is what creates it.
+  // fresh capture has none — `ROW_MENU_ADD_TODO` is what creates it.
   const row = needsReviewRow(page, label);
   await expect(row).toBeVisible();
   // #253 — Add to-do moved off the row into its ▾ list, under the full label.
   await row.getByRole("button", { name: "All options" }).click();
-  await row.getByRole("button", { name: "Add as single task to do" }).click();
+  await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
   const todoRow = page
     .locator('[data-bucket="singleTask"]')

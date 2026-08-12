@@ -7,6 +7,7 @@ import {
   waitForShell,
   expandAllSections,
   THEMES,
+  ROW_MENU_ADD_TODO,
 } from "./helpers";
 import {
   scanColorContrast,
@@ -324,9 +325,7 @@ for (const theme of THEMES) {
       await expect(row).toBeVisible();
       // #253 — Add to-do moved off the row into its ▾ list, under the full label.
       await row.getByRole("button", { name: "All options" }).click();
-      await row
-        .getByRole("button", { name: "Add as single task to do" })
-        .click();
+      await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
       const todoRow = page
         .locator('[data-bucket="singleTask"]')

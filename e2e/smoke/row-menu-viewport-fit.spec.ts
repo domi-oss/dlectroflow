@@ -1,7 +1,14 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { MOBILE, NARROW, settledFocusLabel, waitForShell } from "../helpers";
-import { OWNER_WS_ID } from "../constants";
+import {
+  MOBILE,
+  NARROW,
+  ROW_MENU_ADD_TODO,
+  settledFocusLabel,
+  waitForShell,
+} from "../helpers";
+import { OWNER_WS_ID, OWNER_USER_ID } from "../constants";
+import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
 
 // #92 — row-action popups must stay inside the viewport at phone width.
 //
@@ -836,8 +843,9 @@ test.describe("#253 the row action line is compact at 360px", () => {
 
       // Move to and Delete were icons in the deleted cluster; Add to-do was an
       // inline button. Schedule is absent here because this seed has no Google
-      // credential — covered at 390 by e2e/smoke/schedule-ics.spec.ts.
-      for (const name of ["Add as single task to do", "Move to…", "Delete"]) {
+      // credential, so the calendar group collapses to the single .ics entry —
+      // the Google label is covered at 390 by e2e/smoke/schedule-ics.spec.ts.
+      for (const name of [ROW_MENU_ADD_TODO, "Move to…", "Delete"]) {
         await expect(
           popup.getByRole("button", { name }),
           `"${name}" is not in the ▾ list`,
@@ -972,6 +980,174 @@ test.describe("#253 the row action line is compact at 360px", () => {
         },
       });
       await prisma.$disconnect();
+    }
+  });
+  /**
+   * ── Screenshots of the open ▾ list at 360px, for review ────────────────────
+   *
+   * Not assertions, and deliberately so: the ORDER and the grouping in that list
+   * are the owner's design call, taken from a rendered phone screenshot rather
+   * than from a written list, because the previous ordering was agreed on paper
+   * and read badly once it was on screen. A green suite is not the same evidence
+   * as their own eyes on the surface. Same reasoning and same shape as
+   * `e2e/smoke/schedule-menu.spec.ts`'s screenshot block.
+   *
+   * The measurement IS an assertion though, and it is the one that matters here.
+   * #253 restored four entries that a mid-issue pass had deleted, so the list is
+   * longer than anything `expectInsideViewport` had measured before, and 360×780
+   * is the smallest viewport the app supports. `popupSurface` carries no
+   * max-height on purpose (its own note explains why), so the failure mode if it
+   * did not fit would be a popup running off the bottom edge with no scroll to
+   * recover with — fault 2 of this file, returning by a different route.
+   *
+   * Both Google states, because they are different lists: with no credential the
+   * calendar group collapses to the single .ics entry (7 rows), and with one it
+   * carries both Schedule and .ics (8 rows). The second is what a production user
+   * sees and it is the taller of the two.
+   */
+  test.describe("#253 ▾ list screenshots at 360px", () => {
+    const SHOTS = "test-results/row-menu-253";
+
+    /** Open the seeded row's ▾ and hand back the row and the popup. */
+    async function openSeededMenu(page: Page, marker: string) {
+      const row = page
+        .getByRole("listitem")
+        .filter({ hasText: marker })
+        .first();
+      await expect(row).toBeVisible();
+      await row.getByRole("button", { name: "All options" }).click();
+      const popup = page
+        .getByRole("dialog", { name: "All options" })
+        .filter({ visible: true })
+        .first();
+      await expect(popup).toBeVisible();
+      return { row, popup };
+    }
+
+    /**
+     * The entries in document order with their rendered heights, so the shot is
+     * captioned by the run rather than by whatever its author remembered — and so
+     * the log says which labels WRAP.
+     *
+     * The wrapping matters and is not a nit: `popupSurface` is a flex column with
+     * no width of its own, so the widest entry sets the popup's width and every
+     * narrower one gets it for free. Take the widest entry away — which is what a
+     * workspace with no Google connection does, since "Schedule to calendar (send
+     * to Google Tasks)" is that entry — and the column narrows onto the next
+     * longest, which then wraps to two lines. So the list is TALLER without Google
+     * than with it, which is the opposite of what an entry count predicts.
+     */
+    async function entryRows(
+      popup: Locator,
+    ): Promise<Array<{ label: string; height: number }>> {
+      const entries = await popup.getByRole("button").all();
+      return Promise.all(
+        entries.map(async (e) => ({
+          label: (await e.textContent())?.trim() ?? "",
+          height: Math.round(
+            await e.evaluate(
+              (n: HTMLElement) => n.getBoundingClientRect().height,
+            ),
+          ),
+        })),
+      );
+    }
+
+    for (const google of [false, true] as const) {
+      const suffix = google ? "google-connected" : "google-not-connected";
+      test(`captures the Needs-review ▾ list (${suffix})`, async ({ page }) => {
+        const prisma = new PrismaClient();
+        const marker = `${COMPACT_MARKER} shot ${suffix}`;
+        try {
+          await prisma.workspace.upsert({
+            where: { id: OWNER_WS_ID },
+            create: { id: OWNER_WS_ID, kind: "user" },
+            update: {},
+          });
+          // Untriaged: the Needs-review bucket, which is the row the owner
+          // screenshotted and the one with the longest ▾ list in the app.
+          await prisma.brainDumpItem.create({
+            data: { text: marker, status: "inbox", workspaceId: OWNER_WS_ID },
+          });
+          // The first-run welcome card is ~340 of the 780px and would be most of
+          // the frame. Dismissed for the shot and put back afterwards — a review
+          // image of a menu should be of the menu.
+          await prisma.settings.updateMany({
+            where: { workspaceId: OWNER_WS_ID },
+            data: { welcomeDismissedAt: new Date() },
+          });
+          if (google) {
+            // `configured` comes from the config's dummy client id; `connected`
+            // needs a stored token, which is what this seeds. Nothing reaches
+            // Google — the shot opens the list and never presses Schedule.
+            await seedConnectedGoogle(prisma, OWNER_USER_ID, "e2e-shot-token");
+          }
+
+          await page.goto("/");
+          await waitForShell(page);
+
+          // Park the row at the top of the frame so the list opens DOWNWARDS from
+          // it. Framing, not geometry: Base UI flips a popup that will not fit
+          // below, and a shot of a flipped list sitting ON TOP of the row it
+          // belongs to shows the entries but not what they act on. The fit itself
+          // is asserted below and holds either way.
+          //
+          // 20px rather than something more generous because the taller of the two
+          // lists is 497px and the ▾ sits ~170px into the row: at 120px from the
+          // top it flipped.
+          const rowLocator = page
+            .getByRole("listitem")
+            .filter({ hasText: marker })
+            .first();
+          await expect(rowLocator).toBeVisible();
+          await parkNearBottom(page, rowLocator, NARROW.height - 20);
+
+          const { popup } = await openSeededMenu(page, marker);
+          const rows = await entryRows(popup);
+          const box = await measure(popup);
+
+          // Printed so the reviewer reading the image has the numbers beside it,
+          // and so a CI log records them without anyone opening the PNG. A height
+          // past 44 by more than a pixel or two is a wrapped label.
+          console.log(
+            `[#253] ▾ list (${suffix}) at ${box.vw}×${box.vh}: ` +
+              `${rows.length} entries, ` +
+              `${box.bottom - box.top}px tall, ` +
+              `${box.right - box.left}px wide, ` +
+              `top=${box.top} bottom=${box.bottom}\n` +
+              rows
+                .map((r, i) => `  ${i + 1}. ${r.height}px  ${r.label}`)
+                .join("\n"),
+          );
+
+          await page.screenshot({
+            path: `${SHOTS}/needs-review-360-${suffix}.png`,
+          });
+
+          // THE assertion, and the reason this is not a screenshot-only test: the
+          // restored entries must not have pushed the list off the smallest
+          // supported viewport.
+          expectInsideViewport(box, `▾ list at 360px (${suffix})`);
+
+          // No horizontal scroll bought the vertical fit — the longest label
+          // ("Schedule to calendar (send to Google Tasks)") is in this list when
+          // Google is connected, and `popupSurface`'s width cap plus the
+          // positioner's shifting are what have to absorb it.
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+          ).toBeLessThanOrEqual(NARROW.width);
+        } finally {
+          if (google) await clearGoogleTokens(prisma, OWNER_USER_ID);
+          await prisma.settings.updateMany({
+            where: { workspaceId: OWNER_WS_ID },
+            data: { welcomeDismissedAt: null },
+          });
+          await prisma.brainDumpItem.deleteMany({
+            where: { workspaceId: OWNER_WS_ID, text: { startsWith: marker } },
+          });
+          await prisma.$disconnect();
+        }
+      });
     }
   });
 });

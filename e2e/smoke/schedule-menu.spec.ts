@@ -8,6 +8,7 @@ import {
   THEMES,
   MOBILE,
   DESKTOP,
+  ROW_MENU_SCHEDULE,
 } from "../helpers";
 import {
   MARKER,
@@ -93,13 +94,17 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   const row = multiStepRow(page);
   await expect(row).toBeVisible();
   // Configured AND connected, so the row's control is the Google one.
-  // `exact`: the marker is the task title, so "Drag <title>" / "Edit <title>"
-  // also contain it — only the Schedule control is named exactly "Schedule".
   //
   // #253 — reached from the ▾ list; the 📅 icon went with the trailing icon
-  // cluster, and the entry opens the same #106 dialog.
+  // cluster, and the entry opens the same #106 dialog. `exact` because the marker
+  // is the task title, so "Drag <title>" / "Edit <title>" also contain it — and
+  // because this entry's renamed label CONTAINS the dialog's own "Schedule" submit
+  // button, so a loose match would resolve to two controls once it is open.
   await row.getByRole("button", { name: "All options" }).click();
-  const trigger = row.getByRole("button", { name: "Schedule", exact: true });
+  const trigger = row.getByRole("button", {
+    name: ROW_MENU_SCHEDULE,
+    exact: true,
+  });
   await trigger.click();
 
   // Portaled into the row, so a row-scoped query still finds it (#92's idiom).
@@ -142,7 +147,7 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   expect(
     await settledFocusLabel(page),
     "focus after the Schedule dialog closes",
-  ).toBe("Schedule");
+  ).toBe(ROW_MENU_SCHEDULE);
 });
 
 test("the menu remembers the choice, and the .ics path keeps its one click", async ({
@@ -162,7 +167,9 @@ test("the menu remembers the choice, and the .ics path keeps its one click", asy
   await waitForShell(page);
   const row = multiStepRow(page);
   await row.getByRole("button", { name: "All options" }).click(); // #253
-  await row.getByRole("button", { name: "Schedule", exact: true }).click();
+  await row
+    .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
+    .click();
 
   // #253 — named, because the ▾ list Base UI renders is a `dialog` as well.
   const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
@@ -197,7 +204,9 @@ test("the menu is usable on a 390px phone screen", async ({ page }) => {
 
   const row = multiStepRow(page);
   await row.getByRole("button", { name: "All options" }).click(); // #253
-  await row.getByRole("button", { name: "Schedule", exact: true }).click();
+  await row
+    .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
+    .click();
   // #253 — named, because the ▾ list Base UI renders is a `dialog` as well.
   const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
   await expect(dialog).toBeVisible();
@@ -210,6 +219,10 @@ test("the menu is usable on a 390px phone screen", async ({ page }) => {
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(box.y).toBeGreaterThanOrEqual(0);
 
+  // The DIALOG's submit, which is still the bare "Schedule" — #253 renamed the ▾
+  // ENTRY that opens this dialog, not the primary action inside it, and aligning the
+  // rest of the app's Schedule labels is #259. Scoped to `dialog` so the two cannot
+  // be confused, and `exact` so this can never silently match the longer entry.
   const go = dialog.getByRole("button", { name: "Schedule", exact: true });
   await expect(go).toBeVisible();
   const goBox = (await go.boundingBox())!;
@@ -243,7 +256,7 @@ test.describe("schedule menu — screenshots", () => {
         await expect(row).toBeVisible();
         await row.getByRole("button", { name: "All options" }).click(); // #253
         await row
-          .getByRole("button", { name: "Schedule", exact: true })
+          .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
           .click();
         const dialog = row.getByRole("dialog", {
           name: `Schedule ${MARKER}`,

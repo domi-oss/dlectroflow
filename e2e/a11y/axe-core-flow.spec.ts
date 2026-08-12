@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { captureItem, needsReviewRow, waitForShell } from "../helpers";
+import {
+  captureItem,
+  needsReviewRow,
+  waitForShell,
+  ROW_MENU_ADD_TODO,
+} from "../helpers";
 import { scanA11y } from "./axe-helpers";
 
 // Mechanical accessibility (axe) gate over the core flow (issue #31):
@@ -142,7 +147,7 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     await expect(row).toBeVisible();
     // #253 — Add to-do moved off the row into its ▾ list, under the full label.
     await row.getByRole("button", { name: "All options" }).click();
-    await row.getByRole("button", { name: "Add as single task to do" }).click();
+    await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
     const todoRow = page
       .locator('[data-bucket="singleTask"]')

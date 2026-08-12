@@ -7,6 +7,27 @@ import { expect, type Page } from "@playwright/test";
 // diverges (e.g. the single-task row lookups) stays local to its spec.
 export const CAPTURE_PLACEHOLDER = "Brain dump anything… (Enter to save)";
 
+/**
+ * Two ▾-list entry labels, hoisted because #253 renamed both and five specs plus a
+ * fixture query them by exact accessible name.
+ *
+ * The rule behind the words is that an action is named after the state it produces,
+ * in the words the destination bucket uses: `ROW_MENU_ADD_TODO` names
+ * `section.singleTask` ("Single-task to-dos"), and `ROW_MENU_SCHEDULE` names where
+ * the row is actually sent — `lib/google.ts` posts to `tasks.googleapis.com` into
+ * the Reclaim-synced list, and Reclaim is what turns those tasks into calendar time.
+ *
+ * ⚠️ `ROW_MENU_SCHEDULE` is NOT the same string as the Schedule DIALOG's submit
+ * button, which is still the bare "Schedule" — `row-actions.tsx`'s `icon` variant
+ * and its `label` default are unchanged, and aligning the rest of the app is #259.
+ * That is why the specs below keep `exact: true` on both: with the entry renamed,
+ * a substring match for "Schedule" inside an open row would resolve to two
+ * controls, which is Playwright strict-mode failure rather than a wrong assertion —
+ * but only once the dialog is open, so it would look intermittent.
+ */
+export const ROW_MENU_ADD_TODO = "Add as single-task to-do";
+export const ROW_MENU_SCHEDULE = "Schedule to calendar (send to Google Tasks)";
+
 // Capture a brain-dump item. The capture bar has no submit button — Enter
 // saves it. Callers assert on the resulting row themselves.
 export async function captureItem(page: Page, label: string): Promise<void> {
