@@ -1020,9 +1020,29 @@ export async function reopenItem(id: string, stepIds?: string[]) {
     // completed when I read it", which both callers see and only one of them
     // earns. An item that was not completed never banked a `task_complete`, so
     // reversing one would take points from a different, genuinely finished to-do.
+    //
+    // `stepDoneNotAfter` for the reason `deleteBrainDumpItem`'s call site gives,
+    // and because this function's own docblock requires it: the two routes must
+    // ask `reverseItemCompletionRewards` the same question, so a reopen that kept
+    // taking the newest rows in the workspace while a delete took the item's own
+    // would make that sentence true of the balance and false of every per-day
+    // reader. `getDashboardData().todayPoints`, `stepsDoneToday` and
+    // `gatherDayData` are three such readers — measured before this, reopening a
+    // to-do completed yesterday moved `todayPoints` 20 → 0 and `stepsDoneToday`
+    // 2 → 0, un-counting today's work from an action that touched none of it.
+    //
+    // `item.completedAt` from the pre-transaction read, not `uncompleted`: the
+    // guarded `updateMany` above has already cleared the column, so the snapshot
+    // is the only copy left. A partial reopen of a row that was never completed
+    // passes `undefined` and keeps the unbounded behaviour, which is right —
+    // there is no completion instant to bound by.
     await reverseItemCompletionRewards(
       workspaceId,
-      { stepDone: reopened.length, includeTaskComplete: uncompleted > 0 },
+      {
+        stepDone: reopened.length,
+        includeTaskComplete: uncompleted > 0,
+        stepDoneNotAfter: item.completedAt ?? undefined,
+      },
       tx,
     );
     return { uncompleted, reopened };
