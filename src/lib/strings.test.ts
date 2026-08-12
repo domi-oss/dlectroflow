@@ -79,13 +79,31 @@ describe("t() function", () => {
     ["prompt.breakNow", "plain", "Break into steps now?"],
     ["action.reviewNow", "plain", "Review now"],
     ["action.reviewNow", "playful", "🥫 Review now"],
-    // v6 dropdown full-labels + short button
-    ["action.breakdownFull", "plain", "Break into smaller steps"],
-    ["action.addTodoFull", "plain", "Add as single task to do"],
+    // v6 dropdown full-labels + short button.
+    //
+    // #253 renamed three of them so each names the STATE IT PRODUCES in the words
+    // the destination bucket already uses — "multi-step to-do" and "single-task
+    // to-do" are `section.multiStep` / `section.singleTask`, and Schedule says
+    // where the row is actually sent. `action.completeFull` was left alone in that
+    // pass and the pair is the reason why: `section.completed` reads "Completed",
+    // so "Mark as completed" already agreed with its destination and a draft
+    // "Mark as complete" would have broken the agreement it was meant to create.
+    // The app-wide sweep of the same rule is #259; #253 renames only the ▾ entries
+    // it renders. Both voices are pinned here because the rename has to carry the
+    // playful variant with it (#86) — same emoji, new words.
+    ["action.breakdownFull", "plain", "Break into multi-step to-do"],
+    ["action.breakdownFull", "playful", "🍿 Break into multi-step to-do"],
+    ["action.addTodoFull", "plain", "Add as single-task to-do"],
+    ["action.addTodoFull", "playful", "🍽️ Add as single-task to-do"],
     ["action.saveShort", "plain", "Save"],
     ["action.completeFull", "plain", "Mark as completed"],
     ["action.editTitle", "plain", "Edit task title"],
-    ["action.schedule", "plain", "Schedule"],
+    ["action.schedule", "plain", "Schedule to calendar (send to Google Tasks)"],
+    [
+      "action.schedule",
+      "playful",
+      "🗓️ Schedule to calendar (send to Google Tasks)",
+    ],
     // #25 step-row labels — voice-aware (plain literal, playful food-themed)
     ["step.startFocus", "plain", "▶ Start Focus"],
     ["step.startFocus", "playful", "▶ Start Focus"],
@@ -316,11 +334,15 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   });
 
   // action.addTodo — NO consumer since #253 moved this act into the row's ▾ list,
-  // where it renders `action.addTodoFull` ("Add as single task to do"). The key
+  // where it renders `action.addTodoFull` ("Add as single-task to-do"). The key
   // and these two cases stay: `t()` is the public surface and a self-hoster's
   // voice override can still reach it, so its plain/playful pair is worth pinning.
   // The comment is corrected rather than deleted because "used in InboxView row
   // button" is what a reader would otherwise grep for and not find.
+  //
+  // `action.editTitle` is the second key in this state, for the same reason and on
+  // this precedent — #253 dropped the ▾ "Edit task title" entry as a mirror of the
+  // row's ✎ pencil. Its cases live in the table above.
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });

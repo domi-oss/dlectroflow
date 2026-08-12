@@ -223,11 +223,13 @@ const DELETE = /^delete$/i;
  * `Move to…` (`action.moveTo`) was always this menu trigger's text — what changed
  * is that the row's compact 📥, whose `aria-label` was the bare "Move to", went
  * with the end cluster, so the ellipsis form is the only one left.
- * `Add as single task to do` (`action.addTodoFull`) likewise replaces the inline
- * short "Add to-do" (`action.addTodo`) the row used to carry.
+ * `Add as single-task to-do` (`action.addTodoFull`) likewise replaces the inline
+ * short "Add to-do" (`action.addTodo`) the row used to carry — and #253 renamed it
+ * again, to name the bucket the row lands in (`section.singleTask`) rather than to
+ * describe the gesture.
  */
 const MOVE_TO = "Move to…";
-const ADD_TODO = "Add as single task to do";
+const ADD_TODO = "Add as single-task to-do";
 
 /**
  * #255 — two-row fixtures whose ORDER is decided here rather than by the clock.
@@ -264,10 +266,14 @@ const RENDERS_FIRST = new Date(Date.now() - 1_000);
  *
  * The ✎ pencil is the anchor because its `aria-label={`Edit ${item.text}`}` is the
  * one per-row unique accessible name in the markup, which is why {@link editTitle}
- * above already leans on it. It sits on the row's TITLE line, not in the ▾ list
- * (`pencil` vs `editMenuItem` in inbox-view.tsx), so it stays reachable with the
- * menu shut — #253 moved other controls into the popup but deliberately not this
- * one, and that is what keeps this anchor usable.
+ * above already leans on it. It sits on the row's TITLE line, not in the ▾ list, so
+ * it stays reachable with the menu shut — #253 moved other controls into the popup
+ * but deliberately not this one, and that is what keeps this anchor usable.
+ *
+ * #253 also deleted the ▾ list's own "Edit task title" entry (`editMenuItem`),
+ * which fired the identical `setEditingId`. That STRENGTHENS this anchor rather
+ * than threatening it: `Edit ${itemText}` was two controls per row with the menu
+ * open and is now exactly one, whichever state the popup is in.
  *
  * Re-queried on every call rather than held: the notice mounting and unmounting
  * above the board re-renders the rows, and a stale node would fail an assertion

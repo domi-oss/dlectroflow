@@ -68,22 +68,64 @@ export const STRINGS = {
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
   // in the ▾ dropdown. The button variants above stay short; these are the
-  // dropdown's full-length mirrors (+ a short "Save" for the button).
+  // dropdown's full-length twins (+ a short "Save" for the button).
+  //
+  // #253 settled what "full descriptive wording" means, because "descriptive" was
+  // letting each label describe whatever its author found salient: **an action is
+  // named after the STATE IT PRODUCES, in the same words the destination bucket
+  // uses.** So the two triage entries name the bucket the row lands in —
+  // `section.multiStep` is "Multi-step to-dos" and `section.singleTask` is
+  // "Single-task to-dos" — and `action.schedule` names where the row is actually
+  // sent rather than the verb for sending it.
+  //
+  // ⚠️ `action.completeFull` is deliberately NOT touched by that rule, and it is
+  // the case that shows the rule is about agreement rather than about rewording:
+  // `section.completed` reads "Completed", so "Mark as completed" already agrees
+  // with its destination. A drafted "Mark as complete" would have broken the one
+  // thing the rename exists to create.
+  //
+  // Scope: #253 renames only the ▾ entries it renders. The same rule applied
+  // across the library rows, the bulk bar, the focus surfaces and the task working
+  // view is **#259**, and the playful column is frozen while **#86** decides
+  // whether that voice survives at all — so a rename here carries the existing
+  // emoji onto the new words and invents no new metaphor.
   "action.breakdownFull": {
-    plain: "Break into smaller steps",
-    playful: "🍿 Snack-size into smaller steps",
+    plain: "Break into multi-step to-do",
+    playful: "🍿 Break into multi-step to-do",
   },
   "action.addTodoFull": {
-    plain: "Add as single task to do",
-    playful: "🍽️ Add as single task to do",
+    plain: "Add as single-task to-do",
+    playful: "🍽️ Add as single-task to-do",
   },
   "action.saveShort": { plain: "Save", playful: "🥫 Save" },
   "action.completeFull": {
     plain: "Mark as completed",
     playful: "✅ Mark as completed",
   },
+  // NO component consumer since #253 dropped the ▾ list's "Edit task title"
+  // entry: it fired the identical `setEditingId` as the permanently-visible ✎
+  // pencil on the row's title line, whose accessible name ("Edit <the row's
+  // title>") names the row and is therefore strictly clearer. Kept, on the
+  // precedent `action.addTodo` set in this same issue — `t()` is a public surface
+  // a self-hoster's voice override can reach, so pinning the pair is still worth
+  // something, and deleting a key is the breaking half of the change.
   "action.editTitle": { plain: "Edit task title", playful: "Edit task title" },
-  "action.schedule": { plain: "Schedule", playful: "🗓️ Schedule" },
+  // Names the destination, not the verb — and the parenthetical is the literal
+  // mechanism, verified rather than assumed: `lib/google.ts` posts to
+  // `https://tasks.googleapis.com/tasks/v1`, into the list whose title contains
+  // "reclaim" (`RECLAIM_LIST_MATCH`), and Reclaim is what turns those tasks into
+  // calendar time. "Schedule" alone was the one row action nobody could predict
+  // the effect of, which is the whole complaint behind #253's menu.
+  //
+  // ⚠️ Two other surfaces render a Schedule label that does NOT come from here:
+  // `row-actions.tsx`'s `icon` variant (`iconLabel`) and its `label` default, both
+  // the literal "Schedule", reached from the task working view's bordered pill.
+  // They are left short on purpose — #253 renames only what it renders, and
+  // aligning the rest is #259's sweep.
+  "action.schedule": {
+    plain: "Schedule to calendar (send to Google Tasks)",
+    playful: "🗓️ Schedule to calendar (send to Google Tasks)",
+  },
   "action.addToCalendar": {
     plain: "Add to calendar (.ics)",
     playful: "📅 Add to calendar (.ics)",
