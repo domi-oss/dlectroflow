@@ -143,14 +143,26 @@ describe("bulkBrainDumpAction", () => {
 
   it("routes complete through the real completeItem path (stamps completedAt + awards TaskComplete)", async () => {
     prismaMock.brainDumpItem.findMany.mockResolvedValueOnce([{ id: "a" }]);
+    // #233 — `completeItem` now stamps the completion through a guarded
+    // `updateMany` and pays out only on its count, so this spec has to say the
+    // write MATCHED. The file-wide default is `{ count: 0 }`, which is the right
+    // default for `deleteBrainDumpItem` (these fixtures are uncompleted, so it
+    // claims nothing) and exactly wrong here: one mock, two callers, opposite
+    // meanings. Stated locally rather than by changing the default, which would
+    // silently turn the delete specs into assertions about a reversal that never
+    // runs.
+    prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
     const { bulkBrainDumpAction } = await import("./braindump");
     const rewards = await import("@/lib/rewards");
 
     const res = await bulkBrainDumpAction(["a"], "complete");
 
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalledWith(
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "a" },
+        // The precondition is the guard, so it is named here: `completedAt: null`
+        // is what makes a second concurrent completion match nothing, and the
+        // scope travels in the write's own arguments.
+        where: { id: "a", workspaceId: "ws1", completedAt: null },
         data: expect.objectContaining({ completedAt: expect.any(Date) }),
       }),
     );

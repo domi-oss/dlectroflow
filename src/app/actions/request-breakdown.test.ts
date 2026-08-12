@@ -18,7 +18,12 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       brainDumpItem: {
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
-        updateMany: vi.fn().mockResolvedValue({}),
+        // `{ count: 1 }`, not `{}` — #233 gave `completeItem` a guarded write
+        // that BRANCHES on this count, and a bare `{}` reads as `undefined`,
+        // which happens to fall through the wrong side of the guard for the
+        // wrong reason. Every guarded bulk write in this action file reports a
+        // count; the mock says so too.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         // #225 — `keepAsTask`'s guarded triage stamp. Returns the row AS
         // UPDATED, which is where it reads back whether the item already has a
         // Task; `[]` would mean the row is gone.
@@ -116,6 +121,11 @@ describe("breakdownRequestedAt is cleared by every move out of Multi-step", () =
     ).toBeNull();
   });
 
+  // #233 — the stamp moved into the guarded write, the same way #225 moved
+  // `keepAsTask`'s. `completeItem` now clears it on the `updateMany` whose
+  // `completedAt: null` precondition is what stops a second concurrent
+  // completion banking the rewards twice, so the clear is asserted where it now
+  // lives rather than on the `update` that no longer runs.
   it("completeItem (→ Completed) clears it", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",
@@ -125,7 +135,7 @@ describe("breakdownRequestedAt is cleared by every move out of Multi-step", () =
     const { completeItem } = await import("./braindump");
     await completeItem("i1");
     expect(
-      prismaMock.brainDumpItem.update.mock.calls[0][0].data
+      prismaMock.brainDumpItem.updateMany.mock.calls[0][0].data
         .breakdownRequestedAt,
     ).toBeNull();
   });

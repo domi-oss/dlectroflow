@@ -124,12 +124,51 @@ beforeEach(() => {
   currentWorkspaceIdMock.mockResolvedValue("owner");
 });
 
+/**
+ * Seed one completion: the pre-read snapshot AND what the guarded step write
+ * reports having changed.
+ *
+ * #233 — `completeItem` no longer takes its payout or its Google list from the
+ * snapshot. Both are counted off the rows `step.updateManyAndReturn` reports
+ * turning not-done → done, so seeding only `findFirst` describes a database where
+ * the write matched nothing, which is a different test from the one intended.
+ * This keeps the two agreeing the way real Postgres does; a test that needs them
+ * to DISAGREE — a losing caller, or a step a concurrent `completeStep` closed
+ * first — states the second one itself.
+ *
+ * ⚠️ Only for a completion that actually reaches the step write. The queued value
+ * is a `mockResolvedValueOnce`, and `vi.clearAllMocks()` in the outer `beforeEach`
+ * clears CALLS but not queued implementations — so a test that seeds one and then
+ * returns early (`count: 0`) leaves it in the queue and shifts every later test in
+ * the file by one. That is not hypothetical: it happened while #233 was being
+ * written and presented as seven unrelated Google-sync failures.
+ */
+function seedCompletion(item: {
+  // Index signatures at both levels on purpose: these are `findFirst` fixtures
+  // that carry whatever columns the test under way cares about (`googleTaskId`,
+  // a step `id`, `completedAt`), and the helper reads only `task.steps[].done`.
+  // Naming the full row here would make every fixture an excess-property error
+  // for fields the helper never looks at.
+  task?: {
+    steps?: { done?: boolean; [key: string]: unknown }[];
+    [key: string]: unknown;
+  } | null;
+  [key: string]: unknown;
+}) {
+  prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(item);
+  if (item.task) {
+    prismaMock.step.updateManyAndReturn.mockResolvedValueOnce(
+      (item.task.steps ?? []).filter((s) => !s.done),
+    );
+  }
+}
+
 describe("completeItem", () => {
   it("no-ops when the item is missing or already completed", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(null);
     const { completeItem } = await import("./braindump");
     await completeItem("x");
-    expect(prismaMock.brainDumpItem.update).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).not.toHaveBeenCalled();
 
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",
@@ -137,27 +176,32 @@ describe("completeItem", () => {
       task: null,
     });
     await completeItem("i1");
-    expect(prismaMock.brainDumpItem.update).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).not.toHaveBeenCalled();
   });
 
   it("stamps completedAt + awards TaskComplete for a single-task item (no task)", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
-      id: "i1",
-      completedAt: null,
-      task: null,
-    });
+    seedCompletion({ id: "i1", completedAt: null, task: null });
     const { completeItem } = await import("./braindump");
     await completeItem("i1");
-    const upd = prismaMock.brainDumpItem.update.mock.calls[0][0];
-    expect(upd.where).toEqual({ id: "i1" });
+    const upd = prismaMock.brainDumpItem.updateMany.mock.calls[0][0];
+    // #233 — the precondition IS the guard, so its shape is asserted here rather
+    // than left to the integration test. `completedAt: null` is what makes a
+    // second concurrent completion match nothing, and `workspaceId` travels in
+    // the write's own arguments rather than being inherited from the read.
+    expect(upd.where).toEqual({
+      id: "i1",
+      workspaceId: "owner",
+      completedAt: null,
+    });
     expect(upd.data.completedAt).toBeInstanceOf(Date);
+    expect(upd.data.breakdownRequestedAt).toBeNull();
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
     expect(awardBadge).toHaveBeenCalledWith("owner", "task_complete");
     expect(maybeAwardInboxZero).toHaveBeenCalledWith("owner");
   });
 
   it("completes a multi-step task: all steps + task done, credits StepDone per not-done step", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i2",
       completedAt: null,
       task: {
@@ -171,9 +215,14 @@ describe("completeItem", () => {
     });
     const { completeItem } = await import("./braindump");
     await completeItem("i2");
-    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({
-      where: { taskId: "t1" },
+    // #233 — `done: false` in the where, and `task.workspaceId` alongside the
+    // `taskId`, for the reasons `reopenItem`'s twin gives. `updateManyAndReturn`
+    // because the rows it changed are what the payout and the Google list are
+    // both counted off.
+    expect(prismaMock.step.updateManyAndReturn).toHaveBeenCalledWith({
+      where: { taskId: "t1", done: false, task: { workspaceId: "owner" } },
       data: { done: true },
+      select: { googleTaskId: true, googleTaskListId: true },
     });
     expect(prismaMock.task.update).toHaveBeenCalledWith({
       where: { id: "t1" },
@@ -190,17 +239,132 @@ describe("completeItem", () => {
   });
 
   it("is workspace-scoped (findFirst gated on workspaceId)", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
-      id: "i1",
-      completedAt: null,
-      task: null,
-    });
+    seedCompletion({ id: "i1", completedAt: null, task: null });
     const { completeItem } = await import("./braindump");
     await completeItem("i1");
     expect(prismaMock.brainDumpItem.findFirst.mock.calls[0][0].where).toEqual({
       id: "i1",
       workspaceId: "owner",
     });
+  });
+
+  // ── #233: the guard, at the call-shape grain ────────────────────────────────
+  // The behaviour is proved on real Postgres in
+  // `complete-item.integration.test.ts`, where two callers actually race. These
+  // pin the shapes that make it possible, so a refactor that reverts one of them
+  // fails here with the reason attached rather than only in the integration file.
+
+  it("banks nothing when a concurrent completion already took the item", async () => {
+    // `count: 0` is how a losing caller is expressed: Postgres re-evaluated the
+    // blocked UPDATE's `completedAt: null` against the winner's committed row and
+    // matched nothing. Everything downstream is the winner's to do.
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    // `findFirst` seeded directly and NOT through `seedCompletion`, deliberately:
+    // this caller must never reach the step write, so queueing a
+    // `mockResolvedValueOnce` for it would leave an unconsumed value in the queue
+    // and shift every later test in the file by one. `vi.clearAllMocks()` clears
+    // calls, not queued implementations.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      completedAt: null,
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i1")).resolves.toBeUndefined();
+
+    expect(logReward).not.toHaveBeenCalled();
+    expect(awardBadge).not.toHaveBeenCalled();
+    expect(maybeAwardTenStepsDay).not.toHaveBeenCalled();
+    expect(maybeAwardInboxZero).not.toHaveBeenCalled();
+    // Not even the local writes: the guard returns before them, so a loser can
+    // never re-close steps the winner has already closed and paid for.
+    expect(prismaMock.step.updateManyAndReturn).not.toHaveBeenCalled();
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+    // But the revalidations ARE still owed, and this is the assertion that says
+    // so — the rule `reopenItem` records for its own loser: "each request still
+    // has to refresh its own render, whoever did the write". A loser that
+    // returned early would answer its own tab without invalidating anything, and
+    // that tab would go on rendering the row as un-completed.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("takes the item's row lock FIRST, then the steps and the task", async () => {
+    // The lock order, asserted because inverting it in one writer is how a
+    // deadlock gets built. `reopenItem`, `keepAsTask`, `ensureFocusStep` and
+    // `deleteBrainDumpItem` all take the `BrainDumpItem` row lock before any
+    // `Task` or `Step` write; this now does too, and it is also what makes a
+    // second caller block on the contended row before it reaches a payout.
+    const order: string[] = [];
+    prismaMock.brainDumpItem.updateMany.mockImplementationOnce(async () => {
+      order.push("item");
+      return { count: 1 };
+    });
+    prismaMock.step.updateManyAndReturn.mockImplementationOnce(async () => {
+      order.push("steps");
+      return [];
+    });
+    prismaMock.task.update.mockImplementationOnce(async () => {
+      order.push("task");
+      return {};
+    });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      completedAt: null,
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(order).toEqual(["item", "steps", "task"]);
+  });
+
+  it("runs the guarded writes in one transaction on the shared budget", async () => {
+    // Atomic, so a to-do can never be left completed with its task still Active
+    // — three independent autocommitted writes could. `TASK_WRITER_TX_BUDGET`
+    // because this now waits on the same contended row lock every sibling writer
+    // does: at Prisma's 5s default a loser that waits longer is killed with
+    // `P2028 Transaction already closed`, turning the promised no-op into an
+    // error raised at somebody who pressed the tick twice.
+    seedCompletion({
+      id: "i1",
+      completedAt: null,
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      TASK_WRITER_TX_BUDGET,
+    );
+  });
+
+  it("pays per step the WRITE closed, not per step the snapshot showed open", async () => {
+    // The correction `!301` review round 12 made to `reopenItem`, applied to its
+    // mirror image. The snapshot says three steps are open; by the time the write
+    // ran, a concurrent `completeStep` had closed one and already paid for it. The
+    // payout owes two, not three.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [
+          { id: "s1", done: false },
+          { id: "s2", done: false },
+          { id: "s3", done: false },
+        ],
+      },
+    });
+    prismaMock.step.updateManyAndReturn.mockResolvedValueOnce([
+      { googleTaskId: null, googleTaskListId: null },
+      { googleTaskId: null, googleTaskListId: null },
+    ]);
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    const stepDoneCalls = (
+      logReward as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[1] === "step_done");
+    expect(stepDoneCalls).toHaveLength(2);
   });
 });
 
@@ -223,7 +387,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     (
       google.getValidAccessToken as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce("tok");
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i1",
       completedAt: null,
       task: {
@@ -245,7 +409,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     (
       google.getValidAccessToken as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce("tok");
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i2",
       completedAt: null,
       task: {
@@ -264,7 +428,7 @@ describe("completeItem — Google Task sync (#195)", () => {
 
   it("skips silently when the task carries no Google id", async () => {
     const google = await import("@/lib/google");
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i3",
       completedAt: null,
       task: {
@@ -278,7 +442,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     await completeItem("i3");
     expect(google.getValidAccessToken).not.toHaveBeenCalled();
     expect(google.patchGoogleTask).not.toHaveBeenCalled();
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalled();
   });
 
   it("skips silently when the acting account has no Google credential", async () => {
@@ -286,7 +450,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     (
       google.getValidAccessToken as ReturnType<typeof vi.fn>
     ).mockResolvedValueOnce(null);
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i4",
       completedAt: null,
       task: {
@@ -299,7 +463,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     const { completeItem } = await import("./braindump");
     await completeItem("i4");
     expect(google.patchGoogleTask).not.toHaveBeenCalled();
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalled();
   });
 
   it("a thrown Google error never fails the completion (best-effort contract)", async () => {
@@ -310,7 +474,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("network down"),
     );
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i5",
       completedAt: null,
       task: {
@@ -322,7 +486,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     });
     const { completeItem } = await import("./braindump");
     await expect(completeItem("i5")).resolves.toBeUndefined();
-    const upd = prismaMock.brainDumpItem.update.mock.calls[0][0];
+    const upd = prismaMock.brainDumpItem.updateMany.mock.calls[0][0];
     expect(upd.data.completedAt).toBeInstanceOf(Date);
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
   });
@@ -332,7 +496,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     (
       google.getValidAccessToken as ReturnType<typeof vi.fn>
     ).mockRejectedValueOnce(new Error("refresh failed"));
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i6",
       completedAt: null,
       task: {
@@ -344,7 +508,7 @@ describe("completeItem — Google Task sync (#195)", () => {
     });
     const { completeItem } = await import("./braindump");
     await expect(completeItem("i6")).resolves.toBeUndefined();
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalled();
   });
 });
 
@@ -400,7 +564,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
   });
 
   it("completes every step's own Google Task", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+    seedCompletion(
       multiStepItem([
         { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
         { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
@@ -420,7 +584,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
   // change" (#209). The count is the assertion: a request that changes nothing
   // is still a request against a rate-limited API.
   it("skips steps that were already done before this call", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+    seedCompletion(
       multiStepItem([
         { id: "s1", done: true, googleTaskId: "g1", googleTaskListId: "l1" },
         { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
@@ -434,7 +598,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
   // Both grains, and neither implies the other: a to-do scheduled while stepless
   // that was later broken down carries an id on the task AND on its steps.
   it("completes the task's own Google Task alongside its steps", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+    seedCompletion({
       id: "i2",
       completedAt: null,
       task: {
@@ -452,7 +616,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
   });
 
   it("does not reach for a credential when nothing is scheduled", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+    seedCompletion(
       multiStepItem([
         { id: "s1", done: false, googleTaskId: null, googleTaskListId: null },
       ]),
@@ -469,7 +633,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
     (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("network down"),
     );
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+    seedCompletion(
       multiStepItem([
         { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
         { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
@@ -479,16 +643,16 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
     const { completeItem } = await import("./braindump");
     await expect(completeItem("i1")).resolves.toBeUndefined();
     expect(patchedIds().sort()).toEqual(["g1", "g2", "g3"]);
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalled();
   });
 
   // The ordering invariant `!288` pinned in the lib module's doc: the local
   // writes land first, so an unreachable Google can never cost the completion.
   it("patches only after the local writes have landed", async () => {
     const order: string[] = [];
-    prismaMock.brainDumpItem.update.mockImplementationOnce(async () => {
+    prismaMock.brainDumpItem.updateMany.mockImplementationOnce(async () => {
       order.push("local");
-      return {};
+      return { count: 1 };
     });
     (
       google_.patchGoogleTask as ReturnType<typeof vi.fn>
@@ -496,7 +660,7 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
       order.push("google");
       return true;
     });
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+    seedCompletion(
       multiStepItem([
         { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
       ]),
