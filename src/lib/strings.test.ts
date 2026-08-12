@@ -315,7 +315,12 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("action.breakdown", "playful")).toBe("🍿 Snack-size it");
   });
 
-  // action.addTodo (used in InboxView row button)
+  // action.addTodo — NO consumer since #253 moved this act into the row's ▾ list,
+  // where it renders `action.addTodoFull` ("Add as single task to do"). The key
+  // and these two cases stay: `t()` is the public surface and a self-hoster's
+  // voice override can still reach it, so its plain/playful pair is worth pinning.
+  // The comment is corrected rather than deleted because "used in InboxView row
+  // button" is what a reader would otherwise grep for and not find.
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });
