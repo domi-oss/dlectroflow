@@ -30,6 +30,16 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       },
       step: {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        // #233 — `completeItem` closes a to-do's open steps with
+        // `updateManyAndReturn`, because the rows it turned not-done → done are
+        // the only source of truth for what the payout and the Google patch list
+        // both owe. It resolves to an ARRAY OF ROWS, not a `{ count }` — same
+        // default (`[]`, nothing closed) and same shape as complete.test.ts's
+        // mock, so the two files cannot disagree about what the write returns. A
+        // stub of the wrong shape would be worse than none: `is not a function`
+        // is loud, whereas a count here would silently make `closed.steps`
+        // un-iterable or empty and turn a payout bug into a passing test (#160).
+        updateManyAndReturn: vi.fn().mockResolvedValue([]),
         // #251 — the done steps a delete destroys, and so the step_done rows it
         // owes back. None here, for the same reason.
         count: vi.fn().mockResolvedValue(0),
@@ -83,6 +93,13 @@ beforeEach(async () => {
   currentWorkspaceIdMock.mockResolvedValue("ws1");
   prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.step.count.mockResolvedValue(0);
+  // Re-armed for the same reason as the two above: the task-branch spec sets a
+  // persistent value, and `clearAllMocks` clears calls but not implementations.
+  // Persistent rather than a `mockResolvedValueOnce`, deliberately — a queued
+  // once-value that its spec never reaches survives into the next spec and shifts
+  // the whole file by one, which is the failure complete.test.ts's seed helper
+  // carries a warning about (it cost seven bogus Google-sync failures in #233).
+  prismaMock.step.updateManyAndReturn.mockResolvedValue([]);
   // Nothing re-arms the two reward stubs: `clearAllMocks` leaves a
   // `mockResolvedValue` set in the mock factory intact, and no spec in this file
   // queues a `mockResolvedValueOnce` on them. Stated because the sibling file
@@ -167,6 +184,68 @@ describe("bulkBrainDumpAction", () => {
       }),
     );
     expect(rewards.logReward).toHaveBeenCalledWith("ws1", "task_complete");
+    expect(res).toEqual({ count: 1 });
+  });
+
+  it("routes complete for a to-do WITH a task through the guarded step write (one step_done per step it closed)", async () => {
+    prismaMock.brainDumpItem.findMany.mockResolvedValueOnce([{ id: "a" }]);
+    prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
+    // The file-wide `findFirst` fixture is `task: null`, which routes every other
+    // spec here down the stepless branch — so the task branch of `completeItem`
+    // had no coverage in this file at all, and the `step.updateManyAndReturn`
+    // stub it needs was missing without anything being red. Overridden for this
+    // one spec rather than by loosening the shared fixture, which would push
+    // every other spec through the step write they are not about.
+    //
+    // Both Google address halves are null on the task and on the rows the write
+    // reports, so `completeGoogleTasksForItem` filters the patch queue to empty
+    // and returns before it resolves a token (#209) — that is what keeps this a
+    // unit test without this file having to mock `@/lib/google-task-sync`.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "a",
+      completedAt: null,
+      task: {
+        id: "t1",
+        googleTaskId: null,
+        googleTaskListId: null,
+        steps: [
+          { id: "s1", done: true },
+          { id: "s2", done: false },
+          { id: "s3", done: false },
+        ],
+      },
+    });
+    // #233 — the payout is counted off the rows the WRITE reports turning
+    // not-done → done, not off the snapshot above, so the two have to be stated
+    // to agree the way real Postgres would: `done: false` in the where drops the
+    // already-done `s1`, leaving two rows.
+    prismaMock.step.updateManyAndReturn.mockResolvedValue([
+      { googleTaskId: null, googleTaskListId: null },
+      { googleTaskId: null, googleTaskListId: null },
+    ]);
+    const { bulkBrainDumpAction } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    const res = await bulkBrainDumpAction(["a"], "complete");
+
+    expect(prismaMock.step.updateManyAndReturn).toHaveBeenCalledWith({
+      where: { taskId: "t1", done: false, task: { workspaceId: "ws1" } },
+      data: { done: true },
+      select: { googleTaskId: true, googleTaskListId: true },
+    });
+    // Inside the same transaction as the two writes above: a bulk complete must
+    // not be able to leave a to-do completed with its task still Active.
+    expect(prismaMock.task.update).toHaveBeenCalledWith({
+      where: { id: "t1" },
+      data: { status: "done" },
+    });
+    const stepDone = (
+      rewards.logReward as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[1] === "step_done");
+    expect(stepDone).toHaveLength(2);
+    expect(rewards.logReward).toHaveBeenCalledWith("ws1", "task_complete");
+    expect(rewards.maybeAwardTenStepsDay).toHaveBeenCalledWith("ws1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
     expect(res).toEqual({ count: 1 });
   });
 
