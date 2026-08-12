@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { Menu } from "@base-ui/react/menu";
+import { ChevronRight } from "lucide-react";
 import { BUCKET_ORDER, BUCKET_LABEL, type BucketId } from "./bucket";
 import { t, type Voice } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
@@ -9,6 +10,7 @@ import {
   ANCHORED_POSITIONER,
   popupSurface,
   restoreFocusToTrigger,
+  rowMenuEntry,
 } from "@/components/ui/anchored-popup";
 
 /**
@@ -81,22 +83,46 @@ export function MoveToMenu({
           aria-label={compact ? "Move to" : undefined}
           aria-describedby={describedById}
           title={compact ? "Move to" : undefined}
-          className={cn(
+          className={
             compact
               ? // End-cluster icon (owner: mobile screenshot) — same ghost hover
                 // + slightly bigger glyph as the row's other icon controls (📅/▾
                 // in row-actions.tsx) instead of a bare, hover-less glyph.
-                "text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-sm font-medium"
-              : // #253 — the ▾ list is the only route to this menu now that the
-                // compact 📥 has gone with the end cluster, so the text trigger takes
-                // the same 44px minimum every other entry in that list has. Not
-                // `rowMenuEntry`: this one keeps its border, which is what
-                // distinguishes a nested submenu trigger from a plain entry.
-                "text-muted-foreground hover:text-foreground flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 py-1 text-xs",
-            compact && touchTarget,
-          )}
+                cn(
+                  "text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-sm font-medium",
+                  touchTarget,
+                )
+              : // #253 — `rowMenuEntry`, the same string every other entry in the ▾
+                // list uses, and the change here is what it STOPPED using. A first
+                // pass gave this trigger `border` + `justify-center`, reasoning that a
+                // box distinguishes a nested submenu trigger from a plain entry. On
+                // screen at 360px it read as an outlier dropped into the middle of the
+                // column — a boxed, centred label between left-aligned unboxed ones —
+                // and the owner's complaint about the list having no rhythm was partly
+                // this. A submenu says so with a disclosure glyph, which is the
+                // convention, costs no border and keeps the row on the same left
+                // margin as its neighbours.
+                rowMenuEntry("justify-between")
+          }
         >
-          {compact ? "📥" : t("action.moveTo", voice)}
+          {compact ? (
+            "📥"
+          ) : (
+            <>
+              {t("action.moveTo", voice)}
+              {/* Decorative: `aria-hidden` keeps it out of the accessible name, so
+                  the trigger is still named exactly "Move to…" for voice control and
+                  for every row-scoped query. Base UI already writes the
+                  `aria-haspopup`/`aria-expanded` that carry the meaning to a screen
+                  reader — this glyph is the sighted half of the same fact. An `<svg>`
+                  rather than a "›" text node for the same reason it is hidden: it
+                  contributes nothing to `textContent` either. */}
+              <ChevronRight
+                aria-hidden="true"
+                className="h-3.5 w-3.5 shrink-0"
+              />
+            </>
+          )}
         </Menu.Trigger>
         <Menu.Portal container={host} render={<span />}>
           <Menu.Positioner {...ANCHORED_POSITIONER} render={<span />}>
