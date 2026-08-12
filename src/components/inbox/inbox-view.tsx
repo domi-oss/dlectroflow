@@ -287,9 +287,15 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    as though it had. That is why the defence lives in the actions, and
  *    `reopenItem` says so in as many words ("the same Done row open in two
  *    tabs"): see its reversal counted off what the writes CHANGED,
- *    `touchStreakOnCompletion`'s interactive-transaction row lock (proved
- *    against a real database in `rewards.integration.test.ts`) and
- *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *    `touchStreakOnCompletion`'s interactive-transaction row lock
+ *    (`rewards.ts:596`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *
+ *    ⚠️ Corrected #251: this used to say the row lock was "proved against a real
+ *    database in `rewards.integration.test.ts`". **That file does not exist**, and
+ *    `touchStreakOnCompletion` is mocked in every test that names it — so the lock
+ *    is implemented and unexercised. The three defences above are not equally
+ *    evidenced, and the one carrying a false citation was the one nobody checked.
+ *    Tracked on #233, which rested its severity table on the same sentence.
  *
  *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
  *    two truly simultaneous completions of one to-do could bank twice. It is
