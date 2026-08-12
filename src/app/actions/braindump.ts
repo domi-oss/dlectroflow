@@ -316,8 +316,18 @@ export async function deleteBrainDumpItem(id: string) {
       // Defensive: the schema allows multiple BrainDumpItems to reference the
       // same Task, though no code path today creates more than one. Only
       // delete the Task once this was the last item pointing at it.
+      //
+      // `workspaceId` on the call's own arguments (#251 review). Not reachable
+      // today — every Task is created carrying its item's `workspaceId`, so a
+      // foreign item cannot share this one — and not a security finding. It is a
+      // truthfulness one: `count` is a GUARDED_OP in `scoping.harness.test.ts`,
+      // whose rule is only that `workspaceId` appears earlier in the same
+      // function, so this read was reported as covered while being the single
+      // unscoped query in the delete path — two lines above a `step.count` that
+      // deliberately re-proves its own scope and says so. A query that reads as
+      // scoped and is not is the shape that rots when the schema changes under it.
       const stillLinked = await tx.brainDumpItem.count({
-        where: { taskId: existing.taskId },
+        where: { taskId: existing.taskId, workspaceId },
       });
       if (stillLinked === 0) {
         // Scoped by `task.workspaceId` as well as by `taskId`, the same way

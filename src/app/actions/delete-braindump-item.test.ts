@@ -137,8 +137,15 @@ describe("deleteBrainDumpItem", () => {
     expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledWith({
       where: { id: "i1", workspaceId: "owner" },
     });
+    // #251 review — `workspaceId` on the call's own arguments. `count` is a
+    // GUARDED_OP in the scoping harness, whose rule is only that `workspaceId`
+    // appears earlier in the same function — so this read was waved through as
+    // covered while being the one query in the delete path that carried no scope,
+    // sitting two lines above a `step.count` that deliberately re-proves its own.
+    // Unexploitable today (every Task is created with its item's `workspaceId`),
+    // but it read as scoped when it was not, which is the property that rots.
     expect(prismaMock.brainDumpItem.count).toHaveBeenCalledWith({
-      where: { taskId: "t1" },
+      where: { taskId: "t1", workspaceId: "owner" },
     });
     expect(prismaMock.task.deleteMany).toHaveBeenCalledWith({
       where: { id: "t1", workspaceId: "owner" },
