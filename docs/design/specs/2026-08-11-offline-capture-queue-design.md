@@ -1327,9 +1327,30 @@ land here, and both cover things no other check in the repo can see:
   a shade-discipline failure in any of them is structurally invisible to the contrast gate and the axe
   baseline alike.
 - **`outline-none` on the new controls** — Retry, the collapse toggle, Discard, the two-step confirm, and
-  the discard-without-revealing control on the collapsed row. That is **WCAG 2.4.11 Focus Appearance**, AA
-  in WCAG 2.2, and **axe does not implement it at all**. A focus indicator that is only a background swap
-  passes every other gate in the suite; #117 is the precedent.
+  the discard-without-revealing control on the collapsed row. **Every one of them needs an author-drawn
+  focus indicator**, and **axe does not implement the check at all**. A focus indicator that is only a
+  background swap passes every other gate in the suite; #117 is the precedent.
+
+  ⚠️ **The criterion, stated correctly — and an earlier version of this bullet had it wrong in exactly the
+  way this document already caught once for target size.** It said *"WCAG 2.4.11 Focus Appearance, AA"*,
+  which conflates a number with a different criterion's name:
+
+  | Criterion | Name | Level | What it is about |
+  | --- | --- | --- | --- |
+  | **2.4.7** | Focus Visible | **AA** (WCAG 2.0) | **An indicator exists at all — this is the bar these controls must meet** |
+  | 2.4.11 | Focus **Not Obscured** (Minimum) | AA (WCAG 2.2) | The focused control is not hidden behind other content. A different concern; nothing here measures it |
+  | 2.4.13 | Focus **Appearance** | **AAA** (WCAG 2.2) | The indicator's size and contrast. The stronger bar, and not AA |
+
+  So: **`outline-none` without a replacement fails 2.4.7 at AA.** A replacement that is *only* a colour
+  swap is what `a11y-class-hygiene` additionally rejects, and that reach is toward **2.4.13 at AAA** — a
+  bar this project has chosen to hold, which is worth knowing is a choice rather than a requirement.
+
+  ⚠️ **The same mislabel is in the repo's own control**, not just here — `src/lib/a11y-class-hygiene.ts`
+  names *"WCAG 2.4.11 Focus Appearance"* in five places including *"is AA in WCAG 2.2"*, and `CLAUDE.md`
+  repeats it. **That is a compensating control misnaming the criterion it enforces**, which matters because
+  it is read precisely when somebody is deciding whether a change is compliant, and it reports the wrong
+  level. Filed separately — it is the repo's control, not this design's, and correcting it here would make
+  a docs-only MR touch `src/`.
 
 #### Target size, the disabled Retry, and the announcements that do not repeat
 
