@@ -1162,10 +1162,113 @@ Both halves of that are load-bearing:
   together with its first message is silent. Kept identical in shape to that notice and
   `focus-timer.tsx`'s on purpose — those two drifted apart once already, which is what produced #236.
 
-Retry carries `aria-disabled` while a flush is in flight, mirroring #210's contract, and is ≥44×44 px
-(WCAG 2.5.5). When the strip unmounts on the last item saving, focus returns to the input only if it
-was inside the strip — the one-shot ref pattern of `returnFocusToInput` and its effect in
-`src/components/inbox/inbox-view.tsx` (WCAG 2.4.3).
+#### A refusal restored from storage is static text, never an assertive announcement
+
+⚠️ **Raised in review of this spec, and it is a real defect in the design as written.** `blockedBy` is
+persisted precisely so the reason survives the reload a discarded tab forces — which means on **every**
+page load the assertive region goes from empty to filled. A screen reader treats that as a live change and
+**interrupts** with *"Your session expired. Sign in and these will save."* The user did nothing, and
+nothing happened. This section's own rule is that an assertive region is for things that happen *to* the
+user, and a state read back out of `localStorage` did not just happen to anybody.
+
+So the refusal copy has two homes and only one of them is a live region:
+
+- **A restored refusal is static text**, rendered with the entry and associated with it — and, because the
+  refusal is also why the capture bar's submission failed, associated with the **input** through
+  `aria-describedby` (**WCAG 3.3.1 Error Identification**, which wants the error available *with the
+  field*, not only announced once and gone). Readable on demand, at any time, by anyone navigating the
+  strip.
+- **The assertive region carries transitions only** — a refusal arriving while this page is open. It is
+  filled by a flush outcome and never by a mount.
+
+**The polite region takes the same rule and needs it less.** A restored count is not an interruption
+either, but a screen reader reading *"3 waiting to save"* once on load is at worst noise rather than a
+false alarm. Assert it anyway: the mechanism is identical and the assertion is one line.
+
+#### The in-flight wait must be announced — `write-notice-hygiene` rule E
+
+⚠️ **`write-notice-hygiene` has five rules, this document named one, and the rule it did not name is
+violated by the design as written.** Rule D is cited above. **Rule E is the gap: _"the in-flight wait is
+announced by a live region, not by a description."_** Nothing here announces the wait — Retry takes
+`aria-disabled`, the flush runs, and a screen-reader user gets silence between the press and the outcome.
+That is the failure the repo records as having **shipped green four times** (#210, #218, #225, #246),
+because every other check in the suite is per-file and none of them can see a *missing* message. This gate
+is the only thing in the repo that can, which is exactly why naming rule D and stopping was not enough.
+
+**So the wait is announced, and the polite region carries it.** *"Saving 3 captures…"* into the
+`role="status"` region when a flush starts, replaced by the count when it resolves or by the refusal in the
+assertive one when it does not. **Deliberately not a third region:** the count and the wait are the same
+channel — background progress the user did not ask to be interrupted by — and they are mutually exclusive
+in time, whereas two polite regions competing on one strip is its own drift trap. `aria-describedby` from
+Retry to that region **as well** is what #210 does and is welcome; what rule E rejects is a description
+*instead of* a region. The shape to copy is `capture-saving-announcer` in
+`src/components/inbox/inbox-view.tsx`, and `focus-timer.tsx`'s equivalent, which #236 records as having
+drifted apart once already.
+
+**And `a11y-class-hygiene` applies to this strip, which the document also did not say.** Two of its rules
+land here, and both cover things no other check in the repo can see:
+
+- **The refusal copy only paints when a refusal occurs.** That is #109's blind spot exactly — axe measures
+  what is on screen during the scan, and every sentence in the wording table above is state-dependent, so
+  a shade-discipline failure in any of them is structurally invisible to the contrast gate and the axe
+  baseline alike.
+- **`outline-none` on the new controls** — Retry, the collapse toggle, Discard, the two-step confirm, and
+  the discard-without-revealing control on the collapsed row. That is **WCAG 2.4.11 Focus Appearance**, AA
+  in WCAG 2.2, and **axe does not implement it at all**. A focus indicator that is only a background swap
+  passes every other gate in the suite; #117 is the precedent.
+
+#### Target size, the disabled Retry, and the announcements that do not repeat
+
+Retry carries `aria-disabled` while a flush is in flight, mirroring #210's contract, and is ≥44×44 px.
+⚠️ **The criterion cited for that size was wrong: `2.5.5` is AAA.** The AA target-size criterion in WCAG
+2.2 is **`2.5.8` Target Size (Minimum), 24×24 CSS px**. Committing to 44×44 is right and is kept — it
+clears both — but citing an AAA number as the AA bar, in the document that *is* this feature's a11y
+contract, is the defect rather than a pedantic one: a later reader either reads 44×44 as the line and
+treats a legitimate 32×32 control as a regression, or reads `2.5.5` as the standard this repo holds and
+mis-scopes everything else against it.
+
+Four more contracts, each of which fails silently if it is left to the implementer:
+
+- ⚠️ **`aria-disabled` does not prevent activation — the handler must refuse as well.** It is an ARIA
+  attribute, not the `disabled` property, and that is deliberate for the reason `inbox-view.tsx`'s own
+  comment gives: *"a disabled element cannot hold focus, so the browser would drop it to `<body>` the
+  moment the retry starts."* The consequence is that the button stays activatable, so Enter or Space on a
+  "disabled" Retry fires **a second flush** over the first. #210 guards the press in the handler; this
+  design inherits the attribute and must inherit the guard with it, or the attribute is decoration.
+- ⚠️ **An identical assertive message re-set is not reliably re-announced.** Two consecutive cap refusals
+  carry the *same* sentence, so writing it into `role="alert"` twice leaves the second **silent** — the
+  user presses Enter against a full queue, is refused, and hears nothing at all. The region must be
+  cleared and set on a later tick so the text genuinely changes. Same class of failure as the role-swap
+  above: the DOM holds the right words and the screen reader never said them.
+- **`aria-expanded` on the collapse toggle** (**WCAG 4.1.2 Name, Role, Value**). The strip's whole premise
+  is that the words stay readable on demand, and a toggle that does not report its state leaves a
+  screen-reader user unable to tell whether the queue is on screen.
+- **Debounce the polite region.** A drain of twenty entries emits twenty count changes, and twenty polite
+  announcements queued back to back is a screen reader talking for a long time about a background event.
+  Coalesce on a short timer and announce the count the drain settled on.
+
+#### Focus, on unmount and on Discard
+
+When the strip unmounts on the last item saving, focus returns to the input only if it was inside the
+strip — the one-shot ref pattern of `returnFocusToInput` and its effect in
+`src/components/inbox/inbox-view.tsx` (**WCAG 2.4.3 Focus Order**).
+
+⚠️ **That was this document's only focus commitment, and it leaves Discard destroying focus.** Discarding
+entry 3 of 5 removes the focused element while the strip stays mounted, so the unmount path never runs and
+the browser drops focus to `<body>` — the user's place in the page is gone, and on a screen reader the next
+key press starts from the top of the document. It is also the *more* common press of the two, since the
+unmount case needs the queue to empty. So:
+
+- **Discard moves focus to a stable anchor as the entry goes** — the next entry's Discard control, or the
+  strip's collapse toggle if the discarded entry was the last expanded one, or the capture input if the
+  strip is about to unmount. Never `<body>`.
+- **The two-step confirm needs an accessible name, and focus moved into it.** A confirm that appears
+  without taking focus is invisible to a screen reader until it is hunted for, and the name has to say what
+  is being discarded. For the collapsed stranded row that name is the **count and the origin**, never the
+  text — the whole point of that control is that the words cannot be shown.
+- **Focus returns to a stable anchor on both confirm and cancel.** Cancel returns it to the Discard control
+  it came from; confirm follows the rule above. Both arms, because a cancel that drops focus is the same
+  defect arriving on the path where the user chose to change nothing.
 
 ### Multi-device dissolves by construction
 
@@ -1286,15 +1389,30 @@ TDD, failing test first, in this order:
    already gives — *"it costs zero height when the queue is empty"*: **the region pair mounts
    unconditionally at zero height**, and only the count, the entries and the controls are conditional.
    Assert both halves, because an implementation that gates the whole strip passes a test that only
-   checks the empty case is invisible. **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches
-   no network, and — the assertion that matters — **a queue of 20 permanently-blocked entries can be
-   emptied back to a usable state**, which is the dead-end this control exists to prevent. Its a11y contract is asserted as **two sibling live regions with fixed roles**, both present
-   and empty before the first message: that the polite region carries the count and the assertive one
-   carries the refusals, that neither is nested in the other (`write-notice-hygiene` rule D also blocks
-   that mechanically), and that **no element's `role` changes between renders** — the assertion that
-   catches a later refactor collapsing them back into one. **`capture-failure-pile-up` in
-   `inbox-view.test.tsx` will change**, which is intended and was predicted on #175 on 8 Aug: a second
-   failure no longer displaces the first.
+   checks the empty case is invisible.
+   - **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches no
+     network, and — the assertion that matters — **a queue of 20 permanently-blocked entries can be
+     emptied back to a usable state**, which is the dead-end this control exists to prevent.
+   - **Two sibling live regions with fixed roles**, both present and empty before the first message: the
+     polite one carries the count, the assertive one carries the refusals, neither is nested in the other
+     (`write-notice-hygiene` rule D also blocks that mechanically), and **no element's `role` changes
+     between renders** — the assertion that catches a later refactor collapsing them back into one.
+   - **A refusal restored from storage does not reach the assertive region.** Mount with a `blockedBy`
+     already in the queue and assert the alert is **empty** while the sentence is present as static text
+     associated with the entry and with the input. Then assert the transition case fills it, because a
+     region that is never filled would pass the first half on its own.
+   - **The wait is announced** (`write-notice-hygiene` rule E, which also checks this mechanically): a
+     flush in flight puts the saving sentence inside the polite region, not only in a description.
+   - **Enter on an `aria-disabled` Retry fires nothing.** The handler guard, asserted by counting flushes
+     rather than by reading the attribute — the attribute is what a test that only checks the DOM sees, and
+     it is not the control.
+   - **Two consecutive identical cap refusals both announce.** Assert the region is cleared between them,
+     because an implementation that sets the same string twice passes any assertion made on final content.
+   - **Focus after Discard is on a named control, never `<body>`** — asserted on entry 3 of 5, where the
+     strip stays mounted, and on both the confirm and the cancel arm.
+   - **`aria-expanded` tracks the collapse toggle**, both values.
+   - **`capture-failure-pile-up` in `inbox-view.test.tsx` will change**, which is intended and was
+     predicted on #175 on 8 Aug: a second failure no longer displaces the first.
 5. **Worker and the mirror** — the `sync` handler drains the store, in a worker context, with the
    capability check exercised both ways. Mount reconciliation is asserted in **both directions
    separately**: an IndexedDB entry with no `localStorage` counterpart is deleted, **and** a
