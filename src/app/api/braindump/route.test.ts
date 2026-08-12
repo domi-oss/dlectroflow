@@ -372,6 +372,48 @@ describe("POST /api/braindump — a request that could never be a capture", () =
     expect(res.status).toBe(201);
   });
 
+  // ⚠️ #175 — the guard is a BYTE budget and must be measured in bytes. This pair
+  // is the only thing in the suite that can tell UTF-8 bytes from UTF-16 code
+  // units: every other body here is ASCII, where the two are equal, so a
+  // `rawBody.length` check passes all of them. `MAX_BODY_BYTES` is derived from
+  // `CAPTURE_QUEUE_MAX_BYTES`, which `enqueue` measures with `byteLength` — so a
+  // code-unit check on this side lets a non-Latin body through at up to three
+  // times the budget the two are supposed to share. Caught in review of !334.
+  //
+  // Measured with `Buffer.byteLength` rather than the exported `byteLength`
+  // deliberately: an independent ruler, so a broken helper cannot make its own
+  // test agree with it.
+  it("answers 413 for a body inside the budget in characters but over it in bytes", async () => {
+    // U+8003 is one UTF-16 code unit and three UTF-8 bytes, which is the widest
+    // gap the BMP offers. 60k of them serialise to ~180 KB — well over the ~131 KB
+    // budget — while `rawBody.length` reads ~60k, well under it.
+    const body = JSON.stringify(validBody({ text: "考".repeat(60_000) }));
+    expect(body.length).toBeLessThan(2 * CAPTURE_QUEUE_MAX_BYTES);
+    expect(Buffer.byteLength(body, "utf8")).toBeGreaterThan(
+      2 * CAPTURE_QUEUE_MAX_BYTES,
+    );
+
+    const res = await post(body);
+    expect(res.status).toBe(413);
+    expect(currentWorkspaceIdMock).not.toHaveBeenCalled();
+    expect(writeCaptureMock).not.toHaveBeenCalled();
+  });
+
+  it("still accepts a multi-byte capture whose BYTES fit the budget", async () => {
+    // The control on the test above, and the reason it cannot be passed by
+    // refusing everything: measuring bytes must not become "refuse non-Latin
+    // text". 18k of the same character is ~54 KB, inside the route's budget AND
+    // inside `enqueue`'s own 64 KB — so this is a capture the queue really can
+    // hold and really can flush.
+    const body = JSON.stringify(validBody({ text: "考".repeat(18_000) }));
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThan(
+      CAPTURE_QUEUE_MAX_BYTES,
+    );
+
+    const res = await post(body);
+    expect(res.status).toBe(201);
+  });
+
   // ⚠️ Cross-file agreement, asserted rather than reasoned about. `newClientKey`
   // has three tiers producing three different SHAPES, and `CLIENT_KEY_SHAPE` has to
   // accept all of them — a key this route refuses is not a visible error, it is a

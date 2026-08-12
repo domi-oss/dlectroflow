@@ -4,6 +4,7 @@ import {
   CAPTURE_QUEUE_MAX_ITEMS,
   CAPTURE_QUEUE_MAX_BYTES,
   CAPTURE_BLOCK_REASONS,
+  byteLength,
   readQueue,
   enqueue,
   applyFlushOutcome,
@@ -231,6 +232,35 @@ describe("capture queue — reading (#175)", () => {
       removeItem: () => {},
     };
     expect(readQueue(store)).toEqual([]);
+  });
+});
+
+// `byteLength` is the ruler `CAPTURE_QUEUE_MAX_BYTES` is judged with, and since
+// !334 it is exported and `/api/braindump`'s request guard uses the same one. So
+// its UTF-8 semantics are a cross-file contract rather than an implementation
+// detail: the reason it is shared is that a second, `.length`-based measurement
+// on the route side let a non-Latin body past a budget the queue had already
+// measured in bytes.
+describe("capture queue — the shared byte ruler (#175)", () => {
+  it.each([
+    ["ASCII, where bytes and code units agree", "hello", 5],
+    ["Cyrillic, two bytes per character", "привет", 12],
+    ["CJK, three bytes per character", "考考考", 9],
+    // An astral character is ONE code point and TWO UTF-16 code units, so this is
+    // the case where `.length` over-counts rather than under-counts. Reachable:
+    // people put emoji in captures.
+    ["an astral emoji, four bytes and two code units", "🧠", 4],
+  ])("counts %s", (_why, value, bytes) => {
+    expect(byteLength(value)).toBe(bytes);
+    // The same number an independent ruler gives, so this pins UTF-8 and not just
+    // whatever `TextEncoder` happens to do.
+    expect(byteLength(value)).toBe(Buffer.byteLength(value, "utf8"));
+  });
+
+  it("diverges from String.length on multi-byte text, which is the whole point", () => {
+    const cjk = "考".repeat(1_000);
+    expect(cjk.length).toBe(1_000);
+    expect(byteLength(cjk)).toBe(3_000);
   });
 });
 

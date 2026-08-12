@@ -231,8 +231,19 @@ export type ApplyFlushResult =
  */
 export type FlushOutcome = "saved" | "duplicate" | CaptureBlockReason | "retry";
 
-/** Bytes of a UTF-8 string, not characters — the quota is measured in bytes. */
-function byteLength(value: string): number {
+/**
+ * Bytes of a UTF-8 string, not characters — the quota is measured in bytes.
+ *
+ * Exported so that **everything judging a body against
+ * {@link CAPTURE_QUEUE_MAX_BYTES} measures it the same way**, `/api/braindump`'s
+ * request guard included. It was module-private, the route reached for
+ * `rawBody.length` instead, and the two silently disagreed by up to 3× on
+ * non-Latin text — one BMP character is up to three UTF-8 bytes, so a body the
+ * queue calls oversized read as comfortably inside the route's budget (found in
+ * review of !334). Two implementations of "how big is this" is how those units
+ * drifted apart, so there is one.
+ */
+export function byteLength(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 

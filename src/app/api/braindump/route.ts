@@ -7,6 +7,7 @@ import {
 import { writeCapture } from "@/lib/capture-write";
 import { requestOrigin } from "@/lib/origin";
 import {
+  byteLength,
   CAPTURE_QUEUE_MAX_BYTES,
   type FlushOutcome,
 } from "@/lib/capture-queue";
@@ -110,7 +111,7 @@ import {
 export const runtime = "nodejs";
 
 /**
- * The largest request this route will read, in characters.
+ * The largest request this route will read: 128 KB, in **UTF-8 bytes**.
  *
  * DERIVED from the queue's own bound rather than picked, and that direction
  * matters: `enqueue` refuses any single capture whose serialised entry exceeds
@@ -118,7 +119,26 @@ export const runtime = "nodejs";
  * construction. A cap set independently could drift BELOW it, and the queue would
  * then accept words it can never flush — a capture stuck forever while the strip
  * tells the person it is waiting to save. Twice the queue's whole-queue budget
- * leaves that impossible with room to spare.
+ * leaves that impossible with room to spare — and it stays impossible for
+ * non-Latin text specifically BECAUSE both ends count bytes: the largest body
+ * `enqueue` can produce is 64 KB whatever script it is written in, so the
+ * doubling is a factor of two of headroom for every alphabet rather than only for
+ * ASCII.
+ *
+ * ⚠️ **Measured with `byteLength` — the queue's own ruler — and a `.length` here
+ * is the bug this comment exists to stop coming back.** It was `rawBody.length`
+ * until review of !334: UTF-16 code units against a byte budget, which agree for
+ * ASCII and diverge by up to 3× for BMP non-Latin scripts, where one character is
+ * up to three UTF-8 bytes. So 131,072 code units passed a 128 KB cap — up to
+ * ~384 KB of CJK or ~256 KB of Cyrillic, both reachable under the 2 MB ingress
+ * cap — while `enqueue` had already measured the same words in bytes. Two ends of
+ * a derived relationship counting different things is not a derivation.
+ *
+ * **For non-ASCII text this therefore refuses EARLIER in character terms than it
+ * used to: ~43k CJK characters rather than ~131k.** That is the correction and not
+ * a regression — a 131k-character CJK body is ~384 KB, which `enqueue` refuses at
+ * 64 KB, so it was never a capture this route could have been sent by the queue.
+ * The effective budget is unchanged where it was ever stated in bytes.
  *
  * It is a guard on the REQUEST, not a length limit on capture text: this app has
  * never bounded that (no `maxLength` on the input, an unbounded Postgres `text`),
@@ -127,12 +147,14 @@ export const runtime = "nodejs";
  * capture text should be bounded at all is `capture-queue.ts`'s open question and
  * is deliberately not answered here.
  *
- * Characters rather than bytes because that is what is cheap to measure on a
- * string already read, and the ingress caps the body at 2 MB regardless — this is
- * the application-layer backstop (OWASP ASVS V13.2.6), the same role
- * `MAX_BODY_CHARS` plays in `/api/breakdown`.
+ * The ingress caps the body at 2 MB regardless, so this is the application-layer
+ * backstop (OWASP ASVS V13.2.6) — the same role `MAX_BODY_CHARS` plays in
+ * `/api/breakdown`. That one is correctly in characters and is not a sibling of
+ * this bug: it is a picked 10,000, named in characters and reported to the caller
+ * in characters, so code units are the unit it means. Only a budget derived from
+ * a byte count needs a byte ruler.
  */
-const MAX_BODY_CHARS = 2 * CAPTURE_QUEUE_MAX_BYTES;
+const MAX_BODY_BYTES = 2 * CAPTURE_QUEUE_MAX_BYTES;
 
 /**
  * The shape a `clientKey` can have: the alphabet all THREE tiers of
@@ -252,7 +274,10 @@ export async function POST(req: Request): Promise<Response> {
     return json(400, { error: "Could not read the request body" });
   }
 
-  if (rawBody.length > MAX_BODY_CHARS) {
+  // `byteLength`, never `.length` — see the constant. The string is already in
+  // memory, so measuring it properly costs one pass and buys a guard that means
+  // what it says for every script.
+  if (byteLength(rawBody) > MAX_BODY_BYTES) {
     return json(413, { error: "That capture is too large to save" });
   }
 
