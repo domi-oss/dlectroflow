@@ -214,6 +214,45 @@ async function editTitle(rowText: string, next: string) {
 const COMPLETE = /complete/i;
 const RETRY = /try again/i;
 
+/**
+ * #255 — two-row fixtures whose ORDER is decided here rather than by the clock.
+ *
+ * Needs-review sorts newest-first on a millisecond `createdAt` (`bucket.ts`'s
+ * `freshnessKey`), and `makeItem()`'s default is `new Date()`. Two rows built one
+ * line apart therefore either TIE — `Array.prototype.sort` is stable, so they
+ * render in the order written — or straddle a millisecond tick and render
+ * REVERSED. Which of the two happened was decided by how loaded the machine was,
+ * so a spec that named a row by its position in `getAllByRole(...)` was reading
+ * the OTHER row about one full run in five.
+ *
+ * These two stamps pin it, and pin it to the arrangement that used to break: the
+ * row written SECOND is the newer of the pair, so it renders FIRST. The specs
+ * below therefore always run what used to be the rare interleaving.
+ */
+const RENDERS_SECOND = new Date(Date.now() - 2_000);
+const RENDERS_FIRST = new Date(Date.now() - 1_000);
+
+/**
+ * A row's ✓ Complete control, reached through the row that holds the item rather
+ * than by where that row landed in the list (#255).
+ *
+ * Every ✓ Complete in the board shares one accessible name, so the row is the only
+ * thing that tells two of them apart — and the ✎ pencil is the anchor because its
+ * `aria-label={`Edit ${item.text}`}` is the one per-row unique name in the markup,
+ * which is why {@link editTitle} above already leans on it. Re-queried on every
+ * call rather than held: the notice mounting and unmounting above the board
+ * re-renders the rows, and a stale node would fail an assertion for a reason that
+ * is not the one under test.
+ */
+function completeOnRow(itemText: string): HTMLElement {
+  const row = screen
+    .getByRole("button", { name: `Edit ${itemText}` })
+    .closest("li");
+  if (!(row instanceof HTMLElement))
+    throw new Error(`no row markup around "${itemText}"`);
+  return within(row).getByRole("button", { name: COMPLETE });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(completeItem).mockReset();
@@ -307,18 +346,18 @@ describe("InboxView — a row write that does not land (#225)", () => {
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValue(undefined);
     renderInbox([
-      makeItem({ id: "a", text: "alpha" }),
-      makeItem({ id: "b", text: "bravo" }),
+      makeItem({ id: "a", text: "alpha", createdAt: RENDERS_SECOND }),
+      makeItem({ id: "b", text: "bravo", createdAt: RENDERS_FIRST }),
     ]);
 
     await act(async () => {
-      screen.getAllByRole("button", { name: COMPLETE })[0].click();
+      completeOnRow("alpha").click();
       await flushTicks();
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(/alpha/);
 
     await act(async () => {
-      screen.getAllByRole("button", { name: COMPLETE })[1].click();
+      completeOnRow("bravo").click();
       await flushTicks();
     });
 
@@ -527,14 +566,20 @@ describe("InboxView — the double-press guard (#225)", () => {
         }),
       )
       .mockResolvedValue(undefined);
-    renderInbox([makeItem({ id: "a" }), makeItem({ id: "b" })]);
+    // Distinct titles, because the row is what tells the two ✓ Complete controls
+    // apart and two rows reading "sample item" cannot be told apart at all —
+    // which is how this spec came to identify them by list position (#255).
+    renderInbox([
+      makeItem({ id: "a", text: "alpha", createdAt: RENDERS_SECOND }),
+      makeItem({ id: "b", text: "bravo", createdAt: RENDERS_FIRST }),
+    ]);
 
     await act(async () => {
-      screen.getAllByRole("button", { name: COMPLETE })[0].click();
+      completeOnRow("alpha").click();
       await flushTicks();
     });
     await act(async () => {
-      screen.getAllByRole("button", { name: COMPLETE })[1].click();
+      completeOnRow("bravo").click();
       await flushTicks();
     });
 
@@ -676,7 +721,7 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
     // and check the whole document, since the notice is rendered in place rather
     // than portalled.
     await act(async () => {
-      screen.getAllByRole("button", { name: COMPLETE })[0].click();
+      completeOnRow("water the plants").click();
       await flushTicks();
     });
     expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -880,25 +925,23 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
         : Promise.resolve();
     });
     renderInbox([
-      makeItem({ id: "a", text: "alpha" }),
-      makeItem({ id: "b", text: "bravo" }),
+      makeItem({ id: "a", text: "alpha", createdAt: RENDERS_SECOND }),
+      makeItem({ id: "b", text: "bravo", createdAt: RENDERS_FIRST }),
     ]);
-    // Re-queried every time rather than held: the notice mounting and unmounting
-    // above the board re-renders the rows, and a stale node would make
-    // `toHaveFocus` fail for a reason that is not the one under test.
-    const completeOn = (row: 0 | 1) =>
-      screen.getAllByRole("button", { name: COMPLETE })[row];
 
     // Bravo's write is still in flight when alpha's fails, so the notice on
-    // screen is alpha's while bravo's success is still to come.
-    completeOn(1).focus();
+    // screen is alpha's while bravo's success is still to come. Which row the
+    // press lands on is named by the ITEM, never by a list position — #255, where
+    // the list rendering in the other order pressed these two the other way
+    // round and left the spec asserting the reverse of what it says.
+    completeOnRow("bravo").focus();
     await act(async () => {
-      completeOn(1).click();
+      completeOnRow("bravo").click();
       await flushTicks();
     });
-    completeOn(0).focus();
+    completeOnRow("alpha").focus();
     await act(async () => {
-      completeOn(0).click();
+      completeOnRow("alpha").click();
       await flushTicks();
     });
     await waitFor(() =>
@@ -920,13 +963,13 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
     const capture = screen.getByPlaceholderText(/Brain dump/i);
     capture.focus();
     await act(async () => {
-      completeOn(0).click();
+      completeOnRow("alpha").click();
       await flushTicks();
     });
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(capture).toHaveFocus();
-    expect(completeOn(1)).not.toHaveFocus();
+    expect(completeOnRow("bravo")).not.toHaveFocus();
   });
 
   /**
@@ -993,20 +1036,18 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
           });
     });
     renderInbox([
-      makeItem({ id: "a", text: "alpha" }),
-      makeItem({ id: "b", text: "bravo" }),
+      makeItem({ id: "a", text: "alpha", createdAt: RENDERS_SECOND }),
+      makeItem({ id: "b", text: "bravo", createdAt: RENDERS_FIRST }),
     ]);
-    const completeOn = (row: 0 | 1) =>
-      screen.getAllByRole("button", { name: COMPLETE })[row];
 
-    completeOn(1).focus();
+    completeOnRow("bravo").focus();
     await act(async () => {
-      completeOn(1).click();
+      completeOnRow("bravo").click();
       await flushTicks();
     });
-    completeOn(0).focus();
+    completeOnRow("alpha").focus();
     await act(async () => {
-      completeOn(0).click();
+      completeOnRow("alpha").click();
       await flushTicks();
     });
     await waitFor(() =>
@@ -1032,7 +1073,7 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
     const capture = screen.getByPlaceholderText(/Brain dump/i);
     capture.focus();
     await act(async () => {
-      completeOn(1).click();
+      completeOnRow("bravo").click();
       await flushTicks();
     });
 
