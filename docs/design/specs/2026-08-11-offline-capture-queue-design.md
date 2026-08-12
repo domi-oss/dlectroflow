@@ -463,9 +463,18 @@ about signing in, and a request the user never made has no business producing ei
 message-collapse this document has already been reviewed for twice.
 
 ⚠️ **The service worker's own `fetch` must still pass**, and that is asserted rather than reasoned about.
-A worker request from the installed app carries the app's origin, so it does — but it is the one caller
-whose breakage would be catastrophic and invisible, since it is the only path that works while the app is
-closed.
+A worker's `fetch` carries the worker's own origin, which is the registering origin, so it does — but it
+is the one caller whose breakage would be catastrophic and invisible, since it is the only path that works
+while no tab is open.
+
+⚠️ **An earlier draft of that sentence said "from the installed app", and installation is an explicit
+non-goal of this spec** — caught in review, and it mattered as more than a wording slip. A service worker
+registers from an **ordinary browser tab** on any secure origin; nothing here needs a manifest,
+installability or standalone mode, and the non-goals section says every trigger works in a plain tab.
+Writing "installed" implies a precondition this design does not have, and a reader could reasonably
+conclude the background path is dead until #254 lands. It is not. The same care applies to the phrase
+*"while the app is closed"*, which is corrected above to **"while no tab is open"** — an app that was
+never installed cannot be closed.
 
 **The `workspaceId` in the body is client-supplied and is never trusted for authorization.** The route
 derives the workspace from the cookie exactly as today, then *compares*. A mismatch can only produce a
@@ -486,6 +495,29 @@ Background, Chrome Android:
 
 - `registration.sync.register("capture-flush")` on every enqueue
 - `sw.js` gains a `sync` handler that drains **the IndexedDB mirror** through the route
+
+#### The `sync` handler's resolve/reject contract — the platform retries on rejection, and only then
+
+**Unspecified, this decides whether Background Sync works at all, and review of this spec was right to
+ask.** The browser retries a `sync` event only if the promise passed to `event.waitUntil()` **rejects**;
+resolve and the platform considers the work done and will not come back. So "drain the mirror" is not a
+sufficient description of the handler — it needs a rule, and the rule is not "reject on any failure":
+
+| After a drain pass | `waitUntil` | Why |
+|---|---|---|
+| Mirror empty | **resolve** | Done. Nothing to come back for |
+| Anything left for a **retryable** reason (`5xx`, network, `401`) | **reject** | The only way to get another attempt while no tab is open |
+| Everything left is **permanently blocked** (`account-revoked`, or a `409` already shown not to be fixable) | **resolve** | ⚠️ **Rejecting here is the bug.** Those entries can never flush, so the platform would retry on its own schedule forever, burn battery, and eventually give up anyway — while the *user-facing* remedy is Discard, which only a foreground tab can offer |
+| Mixed retryable and permanently blocked | **reject** | The retryable ones justify another attempt; the blocked ones are simply skipped on each pass |
+
+**So the handler's exit condition is "no retryable work remains", not "the mirror is empty".** That
+distinction is the whole content of this section, and it is the reason the terminal-mark precedence
+established for `blockedBy` is load-bearing *outside* the strip too: the worker needs the same "this can
+never succeed" signal the copy does, read from the mirrored entry, or it cannot tell the two exits apart.
+
+**Failures are per-entry, not per-pass.** One capture's `5xx` must not stop the pass from trying the rest —
+otherwise a single stuck entry blocks the queue behind it, which is the head-of-line failure this design's
+whole premise refuses. Drain everything, then decide the promise.
 
 ⚠️ **An earlier draft of that second bullet said the handler drains `df-capture-queue`, which is the
 `localStorage` key.** It cannot: the next paragraph says so in the same breath, and review of this spec
@@ -583,6 +615,25 @@ So each expanded entry carries a **Discard** control:
   to put next to a queue whose entire purpose is not losing words.
 - **It is not a flush and does not reach the network.** A discarded capture was never saved and is not
   being deleted from the server — the copy must not imply either.
+- ⚠️ **Discard must delete from the IndexedDB mirror FIRST, then from `localStorage`, and the order is the
+  whole fix.** Review of this spec found that as written the promise above is false: the mirror is cleaned
+  only by mount-time reconciliation, so a `sync` event firing between the discard and the next mount would
+  find the entry still there and **`POST` a capture the user had just discarded.** Nothing in the design
+  stopped that, and it is the one outcome a Discard control must never produce.
+
+  **Mirror first, because the two failure directions are not equally bad:**
+
+  | If the second delete does not land | Result |
+  |---|---|
+  | **Mirror deleted, `localStorage` not** | The capture is still queued and still visible. It gets re-mirrored on next mount. Annoying, honest, recoverable — the words are on screen |
+  | **`localStorage` deleted, mirror not** | The worker flushes a capture the user was told was discarded. **A silent save after an explicit refusal, unrecoverable, and a broken promise** |
+
+  So the residual after this ordering is *"a discard may not stick if the tab dies mid-press"*, which is
+  the same shape as every other exit in this design: **persisted, or refused and still visible.** There is
+  no ordering that makes both deletes atomic, and pretending otherwise is what produced the gap.
+- **The confirm is what makes the ordering affordable.** Discard already takes the app's two-step confirm,
+  so there is a natural point at which to start the mirror delete and await it before touching
+  `localStorage` — no user-visible latency is being added to a single press.
 - The polite live region announces the new count; the entry's removal is not itself an alert, because the
   user asked for it. (See the a11y section: an assertive region is for things that happen *to* the user.)
 
