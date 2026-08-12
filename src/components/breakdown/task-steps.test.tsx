@@ -18,16 +18,20 @@ vi.mock("next/link", () => ({
   // depends on it. A mock that silently drops the ref makes a working focus fix
   // look broken — which is exactly what it did on the first run of that spec.
   // React 19 passes `ref` as an ordinary prop to function components.
+  //
+  // #253 — and it now forwards EVERYTHING ELSE too, `className` included, because
+  // this double dropped that prop and the hazard its own note describes happened a
+  // second time: the ▾ list's restored focus-timer entry is a `Link` carrying
+  // `rowMenuEntry()`, and the 44px guard read `className=""` and failed on markup
+  // that is correct in the browser. Enumerating props is what makes a double diverge
+  // from the thing it stands in for, so it stops enumerating them.
   default: ({
     children,
     href,
     ref,
-  }: {
-    children: React.ReactNode;
-    href: string;
-    ref?: React.Ref<HTMLAnchorElement>;
-  }) => (
-    <a href={href} ref={ref}>
+    ...rest
+  }: React.ComponentPropsWithRef<"a"> & { href: string }) => (
+    <a href={href} ref={ref} {...rest}>
       {children}
     </a>
   ),
@@ -132,18 +136,47 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   // now the only route to what is left. Asserted as an exact set rather than three
   // `getByText` calls: a re-added mirror is the regression, and presence checks
   // cannot see one.
-  it("the 🔽 dropdown lists the three entries that are NOT on the row", async () => {
+  /**
+   * #253 — the ▾ is this STEP's canonical action list, asserted as an exact ordered
+   * list because the claim is about sequence and completeness, which presence checks
+   * cannot see.
+   *
+   * `Send back to review` leads as the step-grain "where does this belong" question
+   * (`ejectStepToInbox` re-buckets the step into Needs review — it is this row's
+   * `Move to…`, not its Delete). Then the two twins of the inline bar, restored
+   * because the list is the complete set and the bar a shortcut subset of it. Then
+   * the property edit, which takes the tail slot only because a step has nothing
+   * destructive to put there.
+   *
+   * `Edit step title` is asserted ABSENT, and that is a tenth instance of the mirror
+   * class #253 has been removing: it fired `setEditEstId(null);
+   * setEditTitleId(s.id)`, character-for-character what the ✎ pencil fires, and the
+   * pencil's `aria-label` ("Edit First") names the step, so it is strictly clearer.
+   * `Edit time estimate` STAYS by the same test applied honestly — the estimate is a
+   * plain `<span>`, not a control, so that entry is its only route.
+   */
+  it("the 🔽 dropdown is the step's canonical actions, in order, and carries no Edit-title mirror", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
     const popup = screen.getByRole("dialog", { name: "All options" });
     expect(
-      within(popup)
-        .getAllByRole("button")
-        .map((b) => b.textContent),
-    ).toEqual(["Edit time estimate", "Edit step title", "Send back to review"]);
-    expect(within(popup).queryByText("Start focus timer")).toBeNull();
-    expect(within(popup).queryByText("Complete step")).toBeNull();
+      Array.from(popup.querySelectorAll("a, button")).map((b) => b.textContent),
+    ).toEqual([
+      "Send back to review",
+      "Start focus timer",
+      "Complete step",
+      "Edit time estimate",
+    ]);
+    expect(
+      within(popup).queryByText("Edit step title"),
+      "the Edit-title mirror of the ✎ pencil is back",
+    ).toBeNull();
+    // Four groups' worth of entries in three intent groups → two rules, and they are
+    // decoration: no role, so they cannot be announced or counted as entries.
+    expect(
+      popup.querySelectorAll(":scope > [aria-hidden='true']"),
+    ).toHaveLength(2);
   });
 
   // Every ▾ entry is the sole route to its action now, so each carries the 44px
@@ -153,10 +186,15 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
-    const entries = within(
-      screen.getByRole("dialog", { name: "All options" }),
-    ).getAllByRole("button");
-    expect(entries).toHaveLength(3);
+    // `a, button` rather than the button role: the focus-timer entry is a `Link`,
+    // and the restored twins are exactly the entries most likely to be given the
+    // 44px floor last, since each has an inline sibling that already has it.
+    const entries = Array.from(
+      screen
+        .getByRole("dialog", { name: "All options" })
+        .querySelectorAll<HTMLElement>("a, button"),
+    );
+    expect(entries).toHaveLength(4);
     for (const entry of entries) {
       expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
     }
@@ -169,10 +207,12 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     );
     expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
-    // #253 — the dropdown half of this pair went with the mirror. The inline CTA
-    // is the only Resume/Start affordance now, so that is where the label lives.
+    // #253 — BOTH halves again, and the resumable variant has to reach both: the
+    // dropdown twin is restored, and it takes its label from the same `s.resumable`
+    // the inline CTA does. A pass that wired the entry to the Start label on a
+    // resumable step would be invisible without this.
     await openMenu(user);
-    expect(screen.queryByText("Resume focus timer")).not.toBeInTheDocument();
+    expect(screen.getByText("Resume focus timer")).toBeInTheDocument();
     expect(screen.queryByText("Start focus timer")).not.toBeInTheDocument();
   });
 
@@ -485,11 +525,13 @@ describe("TaskSteps — send back to review (dropdown)", () => {
 });
 
 describe("TaskSteps — inline editors", () => {
+  // #253 — reached through the ✎ pencil, which is the row's only edit route now
+  // that the ▾ mirror of it is gone. The behaviour under test (renameStep on Enter)
+  // is unchanged; only the way in is.
   it("Edit step title saves the new text via renameStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.clear(input);
     await user.type(input, "Renamed step{Enter}");
@@ -506,8 +548,7 @@ describe("TaskSteps — inline editors", () => {
   it("Edit step title Escape cancels without saving", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.type(input, "nope{Escape}");
     expect(renameStep).not.toHaveBeenCalled();

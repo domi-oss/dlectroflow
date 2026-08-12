@@ -87,6 +87,7 @@ import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import { rowMenuEntry } from "@/components/ui/anchored-popup";
+import { groupedRowMenu } from "@/components/ui/row-menu-separator";
 import {
   RowActions,
   ScheduleControl,
@@ -679,61 +680,30 @@ export const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
   not_found: "This task couldn't be found.",
 };
 
-/** ICS states carry the "Add to calendar" label; Google states carry "Schedule". */
+/**
+ * The ▾ entry's label for a row's Schedule slot, from the control's state.
+ *
+ * ICS states carry "Add to calendar"; a usable Google path carries the full
+ * "Schedule to calendar (send to Google Tasks)".
+ *
+ * #253 — the two UNUSABLE Google states are named here too, and that is new. They
+ * used to be unreachable: `ScheduleControl`'s `connect`/`reconnect` branch returned
+ * an inline `Connect Google →` link before it ever looked at `label`. The `menu`
+ * variant now renders a navigation entry instead and takes its text from here, so
+ * every state this function is asked about has an answer — and each one names the
+ * destination first, then why it cannot happen yet.
+ */
 const isIcsState = (s: ScheduleControlProps["state"]) =>
   s === "ics_ready_steps" || s === "ics_needs_duration";
 const scheduleMenuLabel = (
   s: ScheduleControlProps["state"],
   voice: Voice,
-): string =>
-  isIcsState(s)
-    ? t("action.addToCalendar", voice)
-    : t("action.schedule", voice);
-
-/**
- * A decorative rule between two intent groups of a row's ▾ list (#253).
- *
- * The owner's second complaint about that list was not only its sequence: nine
- * 44px entries in one undivided column have no rhythm, so the eye has to read
- * every label to find the one it wants. Ordering alone does not fix that — the
- * groups have to be VISIBLE.
- *
- * `<span>`, not `<div>` or `<hr>`: `RowActions` renders its `Popover.Popup` with
- * `render={<span />}`, so this sits in a phrasing context — the same constraint
- * that makes every part of `MoveToMenu` a span, and `move-to-menu.test.tsx`
- * asserts on it. An empty flex item in a `flex-col` surface stretches to the
- * popup's width and paints its `border-t` as the rule.
- *
- * `aria-hidden` is belt-and-braces rather than the mechanism: an empty element
- * with no role contributes nothing to the accessibility tree, so it cannot be
- * announced as a menu entry or counted by the target-size guards. It is written
- * anyway because that is how this file already marks decoration that sits BETWEEN
- * controls (the `·` in `deleteControl`, the `w-3` spacer in the Done bucket), and
- * an unmarked separator is the thing a future refactor gives a role to. Shaped
- * after `nav/account-menu.tsx`'s `<div className="my-1 border-t" />`, which is
- * the repo's existing answer for the same problem in a header popup.
- */
-const menuSeparator = (key: string) => (
-  <span key={key} aria-hidden="true" className="my-1 border-t" />
-);
-
-/**
- * Joins a row ▾ list's intent groups with {@link menuSeparator}.
- *
- * Falsy entries are dropped BEFORE the separators are placed, and an empty group
- * takes its separator with it. That is the whole reason this is a function rather
- * than separators written inline: the calendar group is `[schedule, icsMenu]` and
- * both are conditional — a workspace with no Google connection renders one of
- * them, a guest row can render neither — so inline rules would leave a stray line
- * against nothing, which is worse than no grouping at all.
- */
-const groupedRowMenu = (groups: React.ReactNode[][]): React.ReactNode[] =>
-  groups
-    .map((group) => group.filter(Boolean))
-    .filter((group) => group.length > 0)
-    .flatMap((group, i) =>
-      i === 0 ? group : [menuSeparator(`row-menu-sep-${i}`), ...group],
-    );
+): string => {
+  if (isIcsState(s)) return t("action.addToCalendar", voice);
+  if (s === "connect") return t("action.scheduleNotConnected", voice);
+  if (s === "reconnect") return t("action.scheduleReconnect", voice);
+  return t("action.schedule", voice);
+};
 
 export function InboxView({
   initialItems,
@@ -3099,7 +3069,7 @@ export function InboxView({
                                    argument): canonical and complete, `Move to…` and
                                    `Delete` as the bookends, what-you-do-to-the-item in
                                    between, then the calendar pair, grouped by
-                                   `menuSeparator`.
+                                   `rowMenuSeparator`.
 
                                    NOT the same entries, deliberately. This row is
                                    already broken into steps, so `Break into multi-step
@@ -3155,7 +3125,7 @@ export function InboxView({
                                           router.push(`/tasks/${item.taskId}`)
                                         }
                                       >
-                                        Start visual focus timer
+                                        {t("action.startFocusTimer", voice)}
                                       </button>
                                     ) : null,
                                     awaitingBreakdown ? (
@@ -3392,7 +3362,7 @@ export function InboxView({
                                         focusOnItem(item.id, item.text)
                                       }
                                     >
-                                      Start visual focus timer
+                                      {t("action.startFocusTimer", voice)}
                                     </button>,
                                     <button
                                       key="complete-m"
@@ -4495,7 +4465,7 @@ function ItemRow({
                question and the destructive answer — with the actions that reshape the
                item in between, in the order they escalate: break it up, keep it
                whole, park it, finish it. Then the calendar pair. Groups are drawn
-               with `menuSeparator`, because sequence alone did not give the column
+               with `rowMenuSeparator`, because sequence alone did not give the column
                any rhythm to read by.
 
                ⚠️ `Snooze 1h` is GONE from this list, by the owner's decision, and it

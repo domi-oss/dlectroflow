@@ -3,11 +3,11 @@
 import {
   useCallback,
   useEffect,
-  useId,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import Link from "next/link";
 import { Popover } from "@base-ui/react/popover";
 import { cn, touchTarget } from "@/lib/utils";
 import {
@@ -16,10 +16,12 @@ import {
   restoreFocusToTrigger,
   rowMenuEntry,
 } from "@/components/ui/anchored-popup";
-import {
-  GoogleAccountHint,
-  GOOGLE_ACCOUNT_HINT,
-} from "@/components/integrations/google-account-hint";
+// Only the SENTENCE, not the component. #253 made the `menu` variant a navigation
+// entry, so the one place this file still needs #128's guidance is the `icon`
+// variant's `title` — the component itself is rendered by the surfaces that own a
+// connect control (`settings/integrations-panel.tsx`, `breakdown/breakdown-chat.tsx`,
+// and `breakdown/task-schedule.tsx`, which passes its own id in as `accountHintId`).
+import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
 import { ScheduleMenu } from "@/components/scheduling/schedule-menu";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
 
@@ -67,9 +69,12 @@ export type ScheduleControlProps = {
   /**
    * #128 — id of a "which Google account" hint the CALLER renders, for the
    * `connect`/`reconnect` link to point at with `aria-describedby`. Supplied by
-   * a surface that has to place the sentence outside this control's own markup
-   * (the task working view wraps it in a bordered pill); omitted everywhere
-   * else, where this component decides for itself — see the connect branch.
+   * the one surface that has to place the sentence outside this control's own
+   * markup: `breakdown/task-schedule.tsx`, which wraps the pill.
+   *
+   * #253 — `icon`-variant only now. The `menu` variant no longer renders a connect
+   * link at all (it navigates to the Integrations settings section), so it has
+   * nothing to describe and supplies no hint of its own.
    */
   accountHintId?: string;
 };
@@ -109,7 +114,6 @@ export function ScheduleControl({
   /** The control that opens the duration presets — the `menu` variant's entry or
    *  the icon variant's 📅 — so `close()` can hand focus back to it (#253). */
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const ownHintId = useId();
   const isMenu = variant === "menu";
   const isIcs = state === "ics_ready_steps" || state === "ics_needs_duration";
   const needsDuration =
@@ -153,56 +157,70 @@ export function ScheduleControl({
   }, [isMenu, open, close]);
 
   if (state === "connect" || state === "reconnect") {
-    // #128 — a work/managed Google account can be refused by its own
-    // administrator at Google's consent step. Google shows its own page and the
-    // person never returns to our callback, so there is nothing to catch, log
-    // or render afterwards: the guidance has to arrive before the click.
+    // ── #253: the `menu` variant NAVIGATES, it no longer connects ─────────────
     //
-    // Where it is VISIBLE depends on how much room this control has, because
-    // the same component renders once per inbox row:
-    //   • `menu` variant — the ▾ dropdown is a full-width column and only one
-    //     is ever open, so the sentence goes under the link.
-    //   • `accountHintId` — a single-control surface renders the hint itself
-    //     (outside its own wrapper) and we point at it.
-    //   • compact icon variant — every unconnected row shows this link, so a
-    //     visible sentence would be the same paragraph a dozen times down the
-    //     page. It rides on `title` instead, which is still the link's
-    //     accessible description and matches the tooltip idiom the rest of the
-    //     end cluster already uses.
-    const ownHint = isMenu && !accountHintId;
-    const describedBy = accountHintId ?? (ownHint ? ownHintId : undefined);
-    const link = (
+    // A row's ▾ entry for an unusable Google path is a link to the Integrations
+    // settings section, labelled with the destination and the reason it cannot
+    // happen ("Schedule to calendar (not connected)"). It is one 44px entry and
+    // nothing else. The owner's call, and the measurement behind it: rendering an
+    // inline `Connect Google →` plus #128's three-line caveat made the
+    // NOT-connected menu 497px tall against the connected one's 429px at 360px —
+    // the taller list, on the surface this whole issue is about.
+    //
+    // ⚠️ **This is what keeps #128 satisfied rather than violating it.** #128
+    // requires the "prefer a personal account" caveat at every connect entry
+    // point, because a Workspace admin can refuse the app at Google's own consent
+    // step: Google shows its own page, the person never returns to our callback,
+    // and there is nothing to catch, log or render afterwards. The guidance only
+    // works BEFORE the click. A row entry that merely navigates is not that click,
+    // so the caveat belongs at the controls that are — and all three still carry
+    // it: `settings/integrations-panel.tsx` (gated on `connectHref`, so it appears
+    // exactly when a connect control does), `breakdown/breakdown-chat.tsx`, and the
+    // `icon` branch below, which is the task working view's pill.
+    //
+    // `reconnect` takes the same treatment, deliberately. Leave it as an inline
+    // link and the row is STILL a connect control, so #128's caveat has to stay for
+    // that one state — which is the tall menu returning in the state nobody
+    // screenshotted.
+    if (isMenu) {
+      // `/settings#settings-integrations` — the section id from
+      // `src/lib/section-nav.ts`, which is also the anchor the panel renders and
+      // the one `nav/collapsible-section.tsx` already scroll-restores. The
+      // repo's convention for deep-linking a settings section.
+      //
+      // ⚠️ #262 restructures this page and puts Google Tasks under Integrations →
+      // Scheduling. This link is one more entry on that issue's anchor-migration
+      // list: the id must be preserved or redirected, not silently renamed.
+      return (
+        <Link
+          href="/settings#settings-integrations"
+          className={rowMenuEntry("font-medium")}
+        >
+          {label}
+        </Link>
+      );
+    }
+    // ── The `icon` variant still connects inline, and still carries #128 ──────
+    //
+    // Its one caller is `breakdown/task-schedule.tsx`, a single bordered pill on
+    // the task working view. `accountHintId` is how that surface renders the
+    // sentence itself, outside this component's wrapper; with no id supplied the
+    // guidance rides on `title`, which is still the link's accessible description
+    // and matches the tooltip idiom the pill's neighbours use.
+    return (
       <a
         href="/api/google/oauth/start"
-        aria-describedby={describedBy}
+        aria-describedby={accountHintId}
         // Never both: `aria-describedby` already wins as the accessible
         // description, and a tooltip repeating it is noise on hover.
-        title={describedBy ? undefined : GOOGLE_ACCOUNT_HINT}
-        className={
-          isMenu
-            ? rowMenuEntry("font-medium")
-            : cn(
-                "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                touchTarget,
-              )
-        }
+        title={accountHintId ? undefined : GOOGLE_ACCOUNT_HINT}
+        className={cn(
+          "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+          touchTarget,
+        )}
       >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
-    );
-    if (!ownHint) return link;
-    return (
-      <span className="flex flex-col">
-        {link}
-        {/* `max-w-56` so a ~120-character sentence cannot stretch the popup out
-            to the `max-w-[calc(100vw-1rem)]` cap that popupSurface allows —
-            the menu's other entries are short, and a full-width popup on a
-            phone is the clipping problem #92 fixed, arriving from the inside. */}
-        <GoogleAccountHint
-          id={ownHintId}
-          className="max-w-56 px-2.5 pb-1 text-xs"
-        />
-      </span>
     );
   }
 

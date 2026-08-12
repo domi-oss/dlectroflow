@@ -104,6 +104,47 @@ describe("t() function", () => {
       "playful",
       "🗓️ Schedule to calendar (send to Google Tasks)",
     ],
+    // #253 — the same slot when the Google path is not usable yet. These exist
+    // because the row's ▾ entry stopped being an inline `Connect Google →` link and
+    // became NAVIGATION into the Integrations settings section, which means the
+    // state has to be readable from the label. Both name the destination first and
+    // the obstacle second, and both voices are pinned because the playful column
+    // carries the same words with its existing emoji (#86 freezes the register).
+    //
+    // ⚠️ The wording is load-bearing for #128, not cosmetic: a row that says
+    // "(not connected)" and takes you to settings is not a connect control, which
+    // is what lets that issue's "prefer a personal account" caveat consolidate at
+    // the three controls that do connect instead of being repeated per row.
+    [
+      "action.scheduleNotConnected",
+      "plain",
+      "Schedule to calendar (not connected)",
+    ],
+    [
+      "action.scheduleNotConnected",
+      "playful",
+      "🗓️ Schedule to calendar (not connected)",
+    ],
+    [
+      "action.scheduleReconnect",
+      "plain",
+      "Schedule to calendar (reconnect needed)",
+    ],
+    [
+      "action.scheduleReconnect",
+      "playful",
+      "🗓️ Schedule to calendar (reconnect needed)",
+    ],
+    // #253 — one key for "open this row's focus timer" on an ITEM row, replacing
+    // three spellings of one destination: two hard-coded "Start visual focus timer"
+    // literals in `inbox-view.tsx` and `library-rows.tsx` reaching for
+    // `step.startFocusTimer`, a STEP-grain key naming an action on an item. The
+    // plain value is the inbox's existing wording, so this de-duplicated without
+    // changing what anybody reads. `step.startFocusTimer` / `step.resumeFocusTimer`
+    // survive for `task-steps.tsx`, where the row IS a step and the resumable
+    // variant is real; whether the two grains converge is #259's call.
+    ["action.startFocusTimer", "plain", "Start visual focus timer"],
+    ["action.startFocusTimer", "playful", "🍽️ Start visual focus timer"],
     // #25 step-row labels — voice-aware (plain literal, playful food-themed)
     ["step.startFocus", "plain", "▶ Start Focus"],
     ["step.startFocus", "playful", "▶ Start Focus"],

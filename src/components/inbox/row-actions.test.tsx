@@ -492,8 +492,14 @@ describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () 
     expect(fn).toHaveBeenCalledWith(30);
   });
 
-  it("reconnect: renders the OAuth link even in menu variant", () => {
-    render(<ScheduleControl variant="menu" state="reconnect" />);
+  // #253 — this used to assert the menu variant rendered the OAuth link. It does
+  // not any more: an unusable Google path is a link INTO settings, so a row is never
+  // a connect control. Kept, pointed at the surface that still is — the `icon`
+  // variant, whose caller is the task working view's pill — because "reconnect
+  // reaches Google's OAuth start" is a claim worth keeping somewhere, and the
+  // `menu` half of it is now covered in the #128 block below.
+  it("reconnect: the icon variant renders the OAuth link", () => {
+    render(<ScheduleControl state="reconnect" />);
     expect(
       screen.getByRole("link", { name: /reconnect google/i }),
     ).toHaveAttribute("href", "/api/google/oauth/start");
@@ -692,32 +698,83 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
 // ── #128 — which Google account to connect ───────────────────────────────────
 // A managed work account can be refused by its own administrator at Google's
 // consent step: no callback comes back, so there is no error state to render
-// and nothing in the logs. The only fix is preventive copy before the click —
-// but this control is repeated once per inbox row, so WHERE the sentence is
-// visible depends on how much room the variant has.
+// and nothing in the logs. The only fix is preventive copy before the click.
+//
+// ⚠️ #253 narrowed WHERE this control needs it, and the test moved with the
+// obligation rather than being relaxed to pass. #128's requirement is "the caveat
+// at every connect entry point", and the `menu` variant stopped being one: it is a
+// link to the Integrations settings section now, not an OAuth start. The guidance
+// belongs at the click Google can refuse, and all three of those still carry it —
+// `settings/integrations-panel.tsx` (gated on `connectHref`, so it appears exactly
+// when a connect control does), `breakdown/breakdown-chat.tsx`, and the `icon`
+// variant below, whose caller is `breakdown/task-schedule.tsx`.
+//
+// So the two `menu`-variant specs became the pair asserting the NEW contract, and
+// the assertion they carry is stronger than the one they replace: not merely "no
+// hint" but "no OAuth link at all", which is the actual reason the hint may go.
 describe("ScheduleControl — the pick-your-account hint (#128)", () => {
   const hintFor = (link: HTMLElement) =>
     document.getElementById(link.getAttribute("aria-describedby") ?? "");
 
-  it("menu variant: the ▾ column has room, so the hint is visible and described", () => {
-    render(<ScheduleControl variant="menu" state="connect" />);
-    const link = screen.getByRole("link", { name: /connect google/i });
-    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  it("menu variant: navigates to settings instead of connecting, so it carries no hint", () => {
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="connect"
+        label="Schedule to calendar (not connected)"
+      />,
+    );
+    const link = screen.getByRole("link", {
+      name: "Schedule to calendar (not connected)",
+    });
+    // The whole justification for dropping the caveat here: this is not a connect
+    // control. #128's guidance only works before the click it warns about.
+    expect(link).toHaveAttribute("href", "/settings#settings-integrations");
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+    expect(link).not.toHaveAttribute("aria-describedby");
+    expect(link).not.toHaveAttribute("title");
+    // No route to Google from a row any more — asserted on the DOM rather than
+    // inferred from the label, since a stray second element is exactly what a
+    // partial revert would leave.
+    expect(
+      document.querySelector('a[href="/api/google/oauth/start"]'),
+    ).toBeNull();
+    // Still an entry, so still 44px (WCAG 2.5.5) — the state that used to render a
+    // link plus a paragraph is now one ordinary row of the list.
+    expect(link.className).toContain("min-h-11");
   });
 
-  it("menu variant: reconnect carries it too — an admin can block an app that used to work", () => {
-    render(<ScheduleControl variant="menu" state="reconnect" />);
-    const link = screen.getByRole("link", { name: /reconnect google/i });
-    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  it("menu variant: reconnect navigates too, so the row is never a connect control", () => {
+    // Both unusable states, deliberately. Leaving `reconnect` as an inline link
+    // would keep the row a connect control in that one state, which would drag
+    // #128's caveat — and the taller menu it produces — back in through the state
+    // nobody screenshotted.
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="reconnect"
+        label="Schedule to calendar (reconnect needed)"
+      />,
+    );
+    const link = screen.getByRole("link", {
+      name: "Schedule to calendar (reconnect needed)",
+    });
+    expect(link).toHaveAttribute("href", "/settings#settings-integrations");
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+    expect(
+      document.querySelector('a[href="/api/google/oauth/start"]'),
+    ).toBeNull();
   });
 
-  it("icon variant: no per-row paragraph — the hint rides on title instead", () => {
-    // Every unconnected row renders this link. A visible sentence on each one
-    // would be the same paragraph a dozen times down the page, so the compact
-    // control keeps the guidance as its accessible description via `title`
-    // (the same tooltip mechanism the 📅 / Scheduled ✓ controls already use).
+  it("icon variant: STILL connects inline, so it still carries the caveat (#128)", () => {
+    // #253 — this is the branch that keeps #128 satisfied, so the OAuth href is
+    // asserted here rather than assumed. Its caller is the task working view's
+    // bordered pill (`breakdown/task-schedule.tsx`), a single control on the page
+    // rather than one per row, and it keeps the guidance as its accessible
+    // description via `title` — the same tooltip mechanism its neighbours use.
     render(<ScheduleControl state="connect" />);
     const link = screen.getByRole("link", { name: /connect google/i });
+    expect(link).toHaveAttribute("href", "/api/google/oauth/start");
     expect(link).toHaveAttribute("title", GOOGLE_ACCOUNT_HINT);
     expect(link).not.toHaveAttribute("aria-describedby");
     expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
@@ -735,6 +792,9 @@ describe("ScheduleControl — the pick-your-account hint (#128)", () => {
     );
     const link = screen.getByRole("link", { name: /connect google/i });
     expect(link).toHaveAttribute("aria-describedby", "task-hint");
+    // Followed to the node, not just compared as a string: an `aria-describedby`
+    // pointing at an id that does not exist is #94, and reads as wired.
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
     // No duplicate description: `title` would be a second, competing one.
     expect(link).not.toHaveAttribute("title");
   });

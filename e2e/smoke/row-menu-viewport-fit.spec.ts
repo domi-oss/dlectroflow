@@ -18,7 +18,8 @@ import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
 //  1. LEFT-EDGE OVERFLOW, UNRECOVERABLE. The 📥 Move-to menu was
 //     `absolute right-0 min-w-40`, anchored to its own trigger. At 390 that
 //     trigger is the leftmost control of a wide end cluster (which also holds
-//     the "Connect Google →" link), so it sat at x≈73 and the 160px menu was
+//     the "Connect Google →" link that #253 has since replaced with a settings
+//     entry), so it sat at x≈73 and the 160px menu was
 //     laid out from left:-43. `document.scrollWidth === 390`, so there is no
 //     horizontal scroll to recover with — the first entry ("Needs review") was
 //     permanently unreachable.
@@ -1149,5 +1150,82 @@ test.describe("#253 the row action line is compact at 360px", () => {
         }
       });
     }
+    /**
+     * The LIBRARY row's ▾, same treatment and same measurement discipline.
+     *
+     * A separate test rather than a third pass of the loop above, because this row
+     * is a different surface with a genuinely different list — three entries, no
+     * `Move to…`, no calendar pair, no triage entries — and it lives on
+     * `/library?tab=plated` rather than the inbox.
+     *
+     * ⚠️ Measured, not assumed to inherit the inbox's headroom. The inbox pair
+     * showed that the popup's width is set by its LONGEST entry, so a renderer whose
+     * longest label is shorter gets a narrower column and can wrap where the inbox
+     * did not. This list's longest is "Start visual focus timer" — well under
+     * "Schedule to calendar (send to Google Tasks)" — so the wrap risk is real and
+     * the per-entry heights below are the thing that answers it.
+     */
+    test("captures a Library single-task row's ▾ list", async ({ page }) => {
+      const prisma = new PrismaClient();
+      const marker = `${COMPACT_MARKER} library shot`;
+      try {
+        await prisma.workspace.upsert({
+          where: { id: OWNER_WS_ID },
+          create: { id: OWNER_WS_ID, kind: "user" },
+          update: {},
+        });
+        // Triaged with no steps → the Library's `plated` (Single-task) tab, which is
+        // the `LibraryRows` renderer.
+        await prisma.brainDumpItem.create({
+          data: {
+            text: marker,
+            status: "triaged",
+            triagedAt: new Date(),
+            workspaceId: OWNER_WS_ID,
+          },
+        });
+
+        await page.goto("/library?tab=plated");
+        await waitForShell(page);
+
+        const row = page
+          .getByRole("listitem")
+          .filter({ hasText: marker })
+          .first();
+        await expect(row).toBeVisible();
+        await parkNearBottom(page, row, NARROW.height - 20);
+        await row.getByRole("button", { name: "All options" }).click();
+        const popup = page
+          .getByRole("dialog", { name: "All options" })
+          .filter({ visible: true })
+          .first();
+        await expect(popup).toBeVisible();
+
+        const rows = await entryRows(popup);
+        const box = await measure(popup);
+        console.log(
+          `[#253] ▾ list (library single-task) at ${box.vw}×${box.vh}: ` +
+            `${rows.length} entries, ` +
+            `${box.bottom - box.top}px tall, ` +
+            `${box.right - box.left}px wide, ` +
+            `top=${box.top} bottom=${box.bottom}\n` +
+            rows
+              .map((r, i) => `  ${i + 1}. ${r.height}px  ${r.label}`)
+              .join("\n"),
+        );
+
+        await page.screenshot({ path: `${SHOTS}/library-single-task-360.png` });
+
+        expectInsideViewport(box, "library ▾ list at 360px");
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(NARROW.width);
+      } finally {
+        await prisma.brainDumpItem.deleteMany({
+          where: { workspaceId: OWNER_WS_ID, text: { startsWith: marker } },
+        });
+        await prisma.$disconnect();
+      }
+    });
   });
 });

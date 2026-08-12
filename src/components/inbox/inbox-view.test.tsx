@@ -3295,19 +3295,33 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         resumeStep={null}
       />,
     );
-    // #253 — one Reconnect link per row, in the row's own ▾ list rather than
-    // inline. Opened per row so "per row" is what is actually measured.
+    // #253 — the row's ▾ carries ONE entry for an unusable Google path, and it
+    // NAVIGATES to the Integrations settings section rather than starting OAuth. The
+    // label names the destination and then why it cannot happen yet, so the row still
+    // says which state it is in — which is what this spec has always been about.
+    //
+    // Opened per row so "per row" is what is actually measured.
     const user = userEvent.setup();
-    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
     for (const text of ["plan trip", "single todo"]) {
       const row = screen.getByText(text).closest("li")!;
       await openRowMenu(user, row);
-      expect(
-        within(row).getAllByRole("link", { name: /reconnect google/i }),
-        `no Reconnect link on the "${text}" row`,
-      ).toHaveLength(1);
+      const entries = within(row).getAllByRole("link", {
+        name: "Schedule to calendar (reconnect needed)",
+      });
+      expect(entries, `no reconnect entry on the "${text}" row`).toHaveLength(
+        1,
+      );
+      expect(entries[0]).toHaveAttribute(
+        "href",
+        "/settings#settings-integrations",
+      );
       await user.keyboard("{Escape}");
     }
+    // No row is a connect control any more — the assertion that lets #128's caveat
+    // consolidate at the settings/breakdown/task-schedule controls that are.
+    expect(
+      document.querySelectorAll('a[href="/api/google/oauth/start"]'),
+    ).toHaveLength(0);
   });
 
   it("not configured: rows show the Connect link instead of the 📅 button", async () => {
@@ -3330,12 +3344,15 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     );
     const user = userEvent.setup();
     await openRowMenu(user, screen.getByText("single todo").closest("li")!);
-    expect(
-      screen.getByRole("link", { name: /connect google/i }),
-    ).toBeInTheDocument();
+    // #253 — a navigation entry into settings, not an OAuth link. Same information,
+    // one 44px row, and the row stops being a connect control (see #128).
+    const entry = screen.getByRole("link", {
+      name: "Schedule to calendar (not connected)",
+    });
+    expect(entry).toHaveAttribute("href", "/settings#settings-integrations");
   });
 
-  it("Duo fix: configured but NOT connected → Connect link, not a live 📅 button", async () => {
+  it("Duo fix: configured but NOT connected → the not-connected entry, not a live 📅 button", async () => {
     const configuredNotConnected = {
       configured: true,
       connected: false,
@@ -3356,9 +3373,17 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     await openRowMenu(user, screen.getByText("single todo").closest("li")!);
     expect(
-      screen.getByRole("link", { name: /connect google/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+      screen.getByRole("link", {
+        name: "Schedule to calendar (not connected)",
+      }),
+    ).toHaveAttribute("href", "/settings#settings-integrations");
+    // The original point of this spec, unchanged: `connected: false` must not render
+    // a live Schedule control that would fail on press.
+    expect(
+      screen.queryByRole("button", {
+        name: "Schedule to calendar (send to Google Tasks)",
+      }),
+    ).toBeNull();
   });
 
   it("a reconnect_required push failure swaps the row's control to the Reconnect link", async () => {
@@ -3381,9 +3406,17 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     );
     const row = screen.getByText("plan trip").closest("li")!;
     await openRowMenu(user, row);
-    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Schedule to calendar (send to Google Tasks)",
+      }),
+    );
+    // #253 — the swap still happens and is still visible on the row; what it swaps
+    // TO is the navigation entry rather than an inline OAuth link.
     expect(
-      await within(row).findByRole("link", { name: /reconnect google/i }),
+      await within(row).findByRole("link", {
+        name: "Schedule to calendar (reconnect needed)",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -3615,7 +3648,12 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // one instant (#168).
     await waitFor(() => {
       expect(
-        within(rowB).getByRole("link", { name: /reconnect google/i }),
+        // #253 — the reconnect prompt is a navigation entry into settings now, so
+        // the row is not a connect control. What this spec asserts is unchanged:
+        // the workspace-wide reconnect condition reaches row B.
+        within(rowB).getByRole("link", {
+          name: "Schedule to calendar (reconnect needed)",
+        }),
       ).toBeInTheDocument();
       expect(
         within(rowA).queryByText(/Reclaim-synced Google Tasks list/i),

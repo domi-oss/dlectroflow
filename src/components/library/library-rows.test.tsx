@@ -6,6 +6,7 @@ import {
   cleanup,
   fireEvent,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LibraryRows } from "@/components/library/library-rows";
@@ -111,6 +112,110 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     await user.click(screen.getByRole("button", { name: "Complete" }));
 
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("plated-1"));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  /**
+   * #253 — the ▾ is this row's CANONICAL action list, and this spec exists because
+   * nothing here asserted its contents at all: a mid-issue pass reduced the list to
+   * `[delete]` alone and the whole suite stayed green.
+   *
+   * The owner's principle is that the ▾ holds everything a row can do and the inline
+   * bar is a shortcut subset of it — so both twins are restored, and this is asserted
+   * as an exact ordered list because completeness is the claim.
+   *
+   * DERIVED for this surface rather than copied from the inbox's eight, and the three
+   * absences are asserted too, so a later "consistency" pass cannot quietly add
+   * capability this surface has no plumbing for:
+   *   • no `Move to…` — there is no bucket-move dispatcher on this page at all;
+   *   • no `Break into multi-step to-do` / `Add as single-task to-do` — both tabs are
+   *     already triaged, so one names what the row is and the other has no handler;
+   *   • no `Edit time estimate` — `EstimateEditor` is a permanently-visible 44px
+   *     control on the row's meta line, so a ▾ twin would be the `editMenuItem`
+   *     mirror the owner had removed. (`task-steps.tsx` keeps its estimate entry
+   *     because there the estimate is a plain `<span>` and the entry is the only
+   *     route — same test, opposite answer, which is what makes it a test.)
+   */
+  it.each(["plated", "pantry"] as const)(
+    "%s: the ▾ is the row's canonical actions, in order, grouped, all 44px",
+    async (tab) => {
+      const user = userEvent.setup();
+      render(
+        <LibraryRows
+          items={[makeItem({ id: "row-1" })]}
+          tab={tab}
+          voice="plain"
+          now={NOW}
+          settings={settings}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "All options" }));
+      const popup = screen.getByRole("dialog", { name: "All options" });
+      const entries = within(popup).getAllByRole("button");
+      expect(entries.map((b) => b.textContent)).toEqual([
+        "Start visual focus timer",
+        "Mark as completed",
+        "Delete",
+      ]);
+      for (const entry of entries) {
+        expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+      }
+      // One rule, before the destructive entry — decoration, so it has no role and
+      // cannot be announced or counted as an entry.
+      expect(
+        popup.querySelectorAll(":scope > [aria-hidden='true']"),
+      ).toHaveLength(1);
+      for (const absent of [
+        "Move to…",
+        "Break into multi-step to-do",
+        "Add as single-task to-do",
+        "Edit time estimate",
+      ]) {
+        expect(
+          within(popup).queryByText(absent),
+          `"${absent}" arrived on a library row without the plumbing for it`,
+        ).toBeNull();
+      }
+    },
+  );
+
+  // Both restored twins dispatch, asserted independently of their inline siblings:
+  // "the inline button works" is not evidence that the entry does, and a duplicate
+  // wired to nothing is exactly what a restore can get wrong.
+  it("the ▾ 'Start visual focus timer' entry ensures a focus step", async () => {
+    const user = userEvent.setup();
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValueOnce("st-9");
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "row-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(
+      screen.getByRole("button", { name: "Start visual focus timer" }),
+    );
+    await waitFor(() => expect(ensureFocusStep).toHaveBeenCalledWith("row-1"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/st-9"));
+  });
+
+  it("the ▾ 'Mark as completed' entry completes the item and refreshes", async () => {
+    const user = userEvent.setup();
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "row-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(screen.getByRole("button", { name: "Mark as completed" }));
+    await waitFor(() => expect(completeItem).toHaveBeenCalledWith("row-1"));
     expect(refresh).toHaveBeenCalled();
   });
 

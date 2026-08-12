@@ -126,9 +126,53 @@ export const STRINGS = {
     plain: "Schedule to calendar (send to Google Tasks)",
     playful: "🗓️ Schedule to calendar (send to Google Tasks)",
   },
+  // The same slot when the Google path is not usable yet. Both name the
+  // destination and then say, in brackets, why it cannot happen — which is the
+  // destination-naming rule applied to an unavailable action, and the reason these
+  // are entries at all rather than a connect link (#253, owner's call):
+  //
+  // The row's ▾ used to render an inline `Connect Google →` plus #128's
+  // three-line "prefer a personal account" caveat. Measured at 360px that made the
+  // NOT-connected menu taller than the connected one (497px against 429px), on the
+  // surface the whole issue is about. As a navigation entry the row stops being a
+  // connect control, so the caveat consolidates at the controls that do connect
+  // (`settings/integrations-panel.tsx`, `breakdown/breakdown-chat.tsx`, and
+  // `row-actions.tsx`'s `icon` variant for the task working view) — where #128 put
+  // it first and where the click that Google can refuse actually is.
+  //
+  // `reconnect` gets the same treatment rather than staying an inline link, and
+  // that is deliberate: leave one of the two as a connect control and the row is
+  // still a connect control, so #128's caveat has to stay for that state alone —
+  // which is the tall menu returning in the state nobody looked at.
+  "action.scheduleNotConnected": {
+    plain: "Schedule to calendar (not connected)",
+    playful: "🗓️ Schedule to calendar (not connected)",
+  },
+  "action.scheduleReconnect": {
+    plain: "Schedule to calendar (reconnect needed)",
+    playful: "🗓️ Schedule to calendar (reconnect needed)",
+  },
   "action.addToCalendar": {
     plain: "Add to calendar (.ics)",
     playful: "📅 Add to calendar (.ics)",
+  },
+  // The ▾ entry that opens a row's focus timer, on an ITEM row — the inbox's
+  // multi-step and single-task lists and the Library's in-flight tabs.
+  //
+  // A key rather than the three separate literals #253 found: the inbox hard-coded
+  // "Start visual focus timer" twice and `library-rows.tsx` reached for
+  // `step.startFocusTimer` ("Start focus timer"), a STEP-grain key naming an
+  // action on an item. One destination, three spellings, which is #259's whole
+  // subject. The plain value is the inbox's existing wording, so this de-duplicates
+  // without changing what anybody reads.
+  //
+  // ⚠️ `step.startFocusTimer` / `step.resumeFocusTimer` deliberately survive for
+  // `task-steps.tsx`, where the row IS a step and the resumable variant is real.
+  // Whether the two grains should converge on one phrase is **#259**'s call, not
+  // this issue's.
+  "action.startFocusTimer": {
+    plain: "Start visual focus timer",
+    playful: "🍽️ Start visual focus timer",
   },
 
   // ── Step rows (TaskSteps working view, #25) ────────────────────────────────

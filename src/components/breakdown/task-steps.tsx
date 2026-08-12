@@ -14,6 +14,7 @@ import {
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
 import { rowMenuEntry } from "@/components/ui/anchored-popup";
+import { groupedRowMenu } from "@/components/ui/row-menu-separator";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
@@ -452,6 +453,12 @@ export function TaskSteps({
           s.resumable ? "step.resumeFocus" : "step.startFocus",
           voice,
         );
+        // #253 — the ▾ twin of the CTA above. Restored: this list is the step's
+        // canonical action set, and the inline bar a shortcut subset of it.
+        const focusMenuLabel = t(
+          s.resumable ? "step.resumeFocusTimer" : "step.startFocusTimer",
+          voice,
+        );
         return (
           <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
             {/* Title line — mirrors the inbox ItemRow's title row. */}
@@ -542,52 +549,90 @@ export function TaskSteps({
                       />,
                       trigger,
                     ]}
-                    /* #253 — the ▾ list holds only what is NOT already on the row.
-                       "Start/Resume focus timer" pointed at the same
-                       `/focus/${s.id}` as the inline CTA and "Complete step" called
-                       the same `complete(s.id)` as the inline Complete, so both were
-                       height in a popup that is now the sole route to what remains.
-                       Each inline label is at least as clear as the entry it
-                       replaces — "▶ Start Focus" for "Start focus timer", and
-                       "Complete" on a step row, where the step IS the context — which
-                       is the condition #253's Bar puts on dropping a mirror.
+                    /* ── #253: the ▾ is this STEP's canonical action list ──────
+                       A mid-issue pass in this MR stripped the two entries that
+                       mirrored an inline button. Withdrawn — the owner's principle
+                       is that the ▾ holds everything a row can do and the inline bar
+                       is a shortcut subset, and a principle reversed on two of three
+                       surfaces is not one. Both twins are back: the focus-timer link
+                       (same `/focus/${s.id}` as the CTA) and `step.complete` (same
+                       `complete(s.id)` as the inline Complete). The list is behind a
+                       trigger, so its length costs the row no height, which is the
+                       only thing #253 is about.
 
-                       This file's `RowActions` call never passed `move`, `schedule`
-                       or `del`, so the icon cluster #253 deleted rendered nothing
-                       here: no affordance moved, and the three surviving entries are
-                       the same three as before. */
-                    menu={[
-                      <button
-                        key="edit-est-m"
-                        type="button"
-                        onClick={() => {
-                          setEditTitleId(null);
-                          setEditEstId(s.id);
-                        }}
-                        className={rowMenuEntry()}
-                      >
-                        {t("step.editEstimate", voice)}
-                      </button>,
-                      <button
-                        key="edit-title-m"
-                        type="button"
-                        onClick={() => {
-                          setEditEstId(null);
-                          setEditTitleId(s.id);
-                        }}
-                        className={rowMenuEntry()}
-                      >
-                        {t("step.editTitle", voice)}
-                      </button>,
-                      <button
-                        key="review-m"
-                        type="button"
-                        onClick={() => sendToReview(s.id)}
-                        className={rowMenuEntry()}
-                      >
-                        {t("step.sendToReview", voice)}
-                      </button>,
-                    ]}
+                       DERIVED from what a step can do, not copied from the inbox's
+                       eight — this row operates on a STEP, not an item:
+
+                       • `Send back to review` leads. It is this row's "where does
+                         this belong" question, the step-grain analogue of the inbox's
+                         `Move to…`: `ejectStepToInbox` moves the step out of the task
+                         and back into Needs review. Re-bucketing, not deletion — so
+                         it belongs in the leading slot, not the trailing one.
+                       • Nothing here is destructive. A step has no delete, so the
+                         tail slot goes to the lowest-stakes, least-frequent action
+                         instead: `Edit time estimate`, a property edit. That entry is
+                         the ONLY route to it — the estimate renders as a plain
+                         `<span>{s.estMinutes}m</span>`, not a control — which is why
+                         it stays while its Library counterpart does not.
+                       • No `Move to…`, `Schedule` or `Add to calendar`: a step has no
+                         bucket, and scheduling is a TASK-level act reached from
+                         `breakdown/task-schedule.tsx`.
+
+                       ⚠️ `Edit step title` is GONE, and it is a tenth instance of the
+                       mirror class this issue has been chasing — found here, not
+                       briefed. It fired `setEditEstId(null); setEditTitleId(s.id)`,
+                       character-for-character what the permanently-visible ✎ pencil
+                       on this row's title line fires. Same disposition as the inbox's
+                       `editMenuItem`, for the same reason and by the same test: the
+                       pencil's `aria-label={`Edit ${s.text}`}` names the step, which
+                       is strictly clearer than "Edit step title". The pencil itself is
+                       untouched.
+
+                       A DONE step never reaches here — that branch returns earlier
+                       with its own hand-rolled `step.uncomplete` row, the way the
+                       inbox's Done bucket hand-rolls its line. */
+                    menu={groupedRowMenu([
+                      [
+                        <button
+                          key="review-m"
+                          type="button"
+                          onClick={() => sendToReview(s.id)}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.sendToReview", voice)}
+                        </button>,
+                      ],
+                      [
+                        <Link
+                          key="focus-m"
+                          href={`/focus/${s.id}`}
+                          className={rowMenuEntry()}
+                        >
+                          {focusMenuLabel}
+                        </Link>,
+                        <button
+                          key="complete-m"
+                          type="button"
+                          onClick={() => complete(s.id)}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.complete", voice)}
+                        </button>,
+                      ],
+                      [
+                        <button
+                          key="edit-est-m"
+                          type="button"
+                          onClick={() => {
+                            setEditTitleId(null);
+                            setEditEstId(s.id);
+                          }}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.editEstimate", voice)}
+                        </button>,
+                      ],
+                    ])}
                   />
                   {body}
                 </>

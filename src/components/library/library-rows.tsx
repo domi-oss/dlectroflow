@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { cn, touchTarget } from "@/lib/utils";
 import { RowActions } from "@/components/inbox/row-actions";
 import { rowMenuEntry } from "@/components/ui/anchored-popup";
+import { rowMenuSeparator } from "@/components/ui/row-menu-separator";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import {
   ensureFocusStep,
@@ -317,14 +318,42 @@ export function LibraryRows({
                           // a null simply contributes nothing.
                           trigger,
                         ]}
-                        /* #253 — the ▾ list holds only what is NOT already on the
-                           row. "Start focus timer" and "Mark as completed" fired
-                           the exact same handlers as the inline ▶ Start focusing
-                           and Complete two pixels away, so they were height in a
-                           popup that is now the sole route to what remains. Both
-                           inline labels are at least as clear as the entries they
-                           replace, which is the condition #253's Bar puts on
-                           dropping a mirror.
+                        /* ── #253: the ▾ is this row's CANONICAL action list ────
+                           A mid-issue pass in this MR stripped every entry that
+                           mirrored an inline button, leaving this list as
+                           `[delete]` alone. Withdrawn, and the owner's reason is
+                           that a principle held on one surface and reversed on two
+                           others is not a principle: **the ▾ is the complete list
+                           of what a row can do; the inline bar is a shortcut subset
+                           of it.** #253 is about the row's HEIGHT, and this list is
+                           behind a trigger, so its length costs the card nothing.
+
+                           So both twins are back — `action.startFocusTimer` for the
+                           inline `▶ Start focusing`, `action.completeFull` for the
+                           inline `Complete` — with `Delete` last behind a
+                           separator, the same grouping every inbox row now uses.
+
+                           DERIVED from what this row can do, not copied from the
+                           inbox's eight. Three deliberate absences:
+
+                           • No `Move to…`. There is no bucket-move plumbing on this
+                             surface at all (`LibraryRows` has no `moveItemToBucket`
+                             and `library/page.tsx` resolves no dispatcher), so an
+                             entry would be new capability rather than a restored
+                             route. Not this issue's to add.
+                           • No `Break into multi-step to-do` / `Add as single-task
+                             to-do`. Both tabs here are ALREADY triaged — `plated` IS
+                             the single-task bucket and `pantry` the saved one — so
+                             one names what the row already is and the other has no
+                             handler here.
+                           • No `Edit time estimate`, on the rule the owner set for
+                             the ✎ pencil: a permanently-visible control on the
+                             row's own title/meta line stays OFF the canonical list.
+                             `EstimateEditor` is exactly that — a 44px button in the
+                             meta line — so a ▾ twin would be the `editMenuItem`
+                             mirror again. (Contrast `task-steps.tsx`, where the
+                             estimate is a plain `<span>` and its ▾ entry is the
+                             only route, so it stays.)
 
                            ── #213's library leg, decided here ──────────────────
                            Schedule does NOT arrive on library rows in this MR, and
@@ -332,8 +361,9 @@ export function LibraryRows({
                            `LibraryRows` never passed `schedule=`, so no affordance
                            is lost by deleting the icon cluster that prop rendered
                            through — #213's checkbox described a prop whose only
-                           render path was `row-actions.tsx:504`, which is why it
-                           could not be written independently of this change.
+                           render path was `row-actions.tsx`'s deleted cluster,
+                           which is why it could not be written independently of
+                           this change.
 
                            Making it real needs three things this surface has none
                            of: Google connection state resolved in
@@ -346,7 +376,26 @@ export function LibraryRows({
                            new place, so #213's library leg is re-specified (add a
                            `ScheduleControl variant="menu"` entry + plumb the
                            state) and sequenced after #230, not closed here. */
-                        menu={[deleteControl(item.id, "delete-m")]}
+                        menu={[
+                          <button
+                            key="focus-m"
+                            type="button"
+                            className={rowMenuEntry()}
+                            onClick={() => focusOnItem(item.id)}
+                          >
+                            {t("action.startFocusTimer", voice)}
+                          </button>,
+                          <button
+                            key="complete-m"
+                            type="button"
+                            className={rowMenuEntry()}
+                            onClick={() => run(() => completeItem(item.id))}
+                          >
+                            {t("action.completeFull", voice)}
+                          </button>,
+                          rowMenuSeparator("sep-destructive"),
+                          deleteControl(item.id, "delete-m"),
+                        ]}
                       />
                       {body}
                     </>
