@@ -376,7 +376,20 @@ body: { clientKey, text, workspaceId }
 | `clientKey` already present for this workspace | `200` | remove — already saved |
 | Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` — unless already `account-revoked`, which wins |
 | Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
+| **No resolvable session at all** — neither owner nor guest cookie | **`401`** | keep, treat as **retryable**, clear `blockedBy` — **but not `account-revoked`** |
 | Anything else | `5xx` / network failure | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
+
+⚠️ **`401` was missing from this table and is added here.** Review of this spec found it referenced as
+retryable in the Background Sync section below while never being defined as an outcome at all — so the
+document named a status its own contract did not have. It is a real response: the route answers `401` when
+neither cookie resolves, which is reachable straight after a `403` because #220 deletes the owner cookie
+in that same response, and reachable again whenever a guest cookie has also lapsed.
+
+**Retryable is the right classification, and it is not obvious.** A `401` says nothing about the capture —
+only that *this* request arrived without a usable session. The very next request mints a guest sandbox, so
+the condition clears by itself. Treating it as terminal would strand a perfectly saveable capture. But it
+must not clear an `account-revoked` mark, for the same reason `5xx` must not: a missing cookie is no
+evidence an account was un-frozen, and after a `403` a missing cookie is the *expected* next state.
 
 **The mark is a precedence, not an assignment: `account-revoked` > `session-expired` > unmarked, and
 only a successful outcome clears it** (by removing the entry). Why that is needed, and why the obvious
@@ -514,6 +527,29 @@ sufficient description of the handler — it needs a rule, and the rule is not "
 distinction is the whole content of this section, and it is the reason the terminal-mark precedence
 established for `blockedBy` is load-bearing *outside* the strip too: the worker needs the same "this can
 never succeed" signal the copy does, read from the mirrored entry, or it cannot tell the two exits apart.
+
+⚠️ **The worker READS the mark. It never computes one — and this spec previously implied it could.**
+Review asked how the worker is supposed to obtain "the live session's resolved workspace" needed to tell a
+fresh `409` from one already shown to be unfixable, since that comparison is described elsewhere as
+available only to the foreground app. **It cannot, and it must not try.** Resolving a session means reading
+a cookie and a workspace the worker has no access to, so:
+
+- **The `blockedUnder` comparison is the foreground's alone.** It runs at render time out of state the app
+  is already holding — that is the property that made it better than a `signInTried` flag in the first
+  place, and it does not survive being moved into a worker.
+- **The worker's input is the persisted `blockedBy` on the mirrored entry**, written by a foreground tab.
+  It is a plain, already-decided verdict: `account-revoked` means never; a `session-expired` entry that the
+  foreground has already judged unfixable is **marked as such by the foreground before it is mirrored**,
+  and the worker reads that mark rather than re-deriving it.
+- **So a `409` the worker sees for the first time is simply retryable**, and it stays that way until a
+  foreground tab makes the comparison and updates the mark. That is the correct outcome: the worker
+  retrying a capture that a later sign-in *will* save is exactly the behaviour wanted, and the only cost of
+  the worker not knowing is an extra background attempt nobody sees.
+
+**Which means the mirrored entry has to carry `blockedBy`, not just the capture.** Stated here because the
+mirror is described above as "a cache of the real thing" and a reader could reasonably mirror only the
+fields the `POST` body needs, which would silently remove the worker's only way to skip a terminal entry —
+and put it straight back into rejecting forever.
 
 **Failures are per-entry, not per-pass.** One capture's `5xx` must not stop the pass from trying the rest —
 otherwise a single stuck entry blocks the queue behind it, which is the head-of-line failure this design's
