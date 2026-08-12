@@ -34,6 +34,28 @@ function throwingStore(seed: Record<string, string> = {}): QueueStore {
   };
 }
 
+/**
+ * A store that refuses EVERY write, `removeItem` included.
+ *
+ * `throwingStore` above models a full quota, where only `setItem` throws. This
+ * models a blocked-storage policy, and it is the only way to exercise the
+ * `removeItem` branch of `write` — the one a flush takes when it empties the
+ * queue, which is precisely the write whose failure used to be invisible.
+ */
+function writeBlockedStore(seed: Record<string, string> = {}): QueueStore {
+  const map = new Map(Object.entries(seed));
+  const refuse = (): never => {
+    const e = new Error("storage is blocked by policy");
+    e.name = "SecurityError";
+    throw e;
+  };
+  return {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: refuse,
+    removeItem: refuse,
+  };
+}
+
 function capture(over: Partial<QueuedCapture> = {}): QueuedCapture {
   return {
     clientKey: "k1",
@@ -360,6 +382,102 @@ describe("capture queue — flush outcomes (#175)", () => {
   it("never throws without storage", () => {
     expect(() => applyFlushOutcome(null, "a", "saved")).not.toThrow();
   });
+
+  it("refuses without storage rather than reporting a queue, exactly as enqueue does", () => {
+    const result = applyFlushOutcome(null, "a", "saved");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("storage-unavailable");
+  });
+
+  it("reports the queue it wrote when the write does land", () => {
+    const store = seeded(two);
+    const result = applyFlushOutcome(store, "a", "saved");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.queue.map((c) => c.clientKey)).toEqual(["b"]);
+  });
+});
+
+// ⚠️ A write that did not land, reported as one that did, is the strip telling
+// somebody their words are safe on the strength of nothing. `enqueue` has always
+// checked `write`'s answer and named the failure `storage-unavailable`; this is
+// the same contract arriving at the other writer.
+//
+// Reachable: a full quota, or Safari private mode, on the very write that removes
+// a flushed capture. It self-heals — the capture is still queued, the next flush
+// gets a 200 duplicate and removes it — but a self-healing lie is still a lie
+// until it heals, and "were my words saved?" is the one question this feature
+// exists to answer.
+describe("capture queue — a write that does not land (#175)", () => {
+  const two = [
+    capture({ clientKey: "a", capturedAt: 1 }),
+    capture({ clientKey: "b", capturedAt: 2 }),
+  ];
+
+  it("reports that a removal did not persist when setItem is refused", () => {
+    const store = throwingStore({
+      [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify(two),
+    });
+
+    const result = applyFlushOutcome(store, "a", "saved");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("storage-unavailable");
+    // The store is untouched, so both captures are still queued — which is what
+    // makes the old return value a lie rather than merely incomplete.
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual(["a", "b"]);
+  });
+
+  // The `removeItem` branch, which `throwingStore` cannot reach: emptying the
+  // queue deletes the key rather than writing "[]", so the last capture to flush
+  // is the one whose failure takes a different code path.
+  it("reports that emptying the queue did not persist when removeItem is refused", () => {
+    const store = writeBlockedStore({
+      [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify([
+        capture({ clientKey: "a" }),
+      ]),
+    });
+
+    const result = applyFlushOutcome(store, "a", "saved");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("storage-unavailable");
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual(["a"]);
+  });
+
+  // The mark has the worse version of the consequence. A `blockedBy` that did not
+  // persist means the capture comes back after the reload a discarded tab forces
+  // with no record of why it is stuck — so the strip offers a Retry that cannot
+  // work, which is the whole reason the mark is persisted rather than held in
+  // component state.
+  it("reports that a refusal mark did not persist", () => {
+    const store = throwingStore({
+      [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify(two),
+    });
+
+    const result = applyFlushOutcome(store, "a", "session-expired");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("storage-unavailable");
+    expect(readQueue(store)[0].blockedBy).toBeUndefined();
+  });
+
+  // `enqueue` is the model this copies, not a second site of the same defect.
+  // Asserted here so the pair are read together and cannot drift apart.
+  it("matches enqueue, which has always reported a refused write", () => {
+    const store = throwingStore();
+    const enqueued = enqueue(store, capture());
+    const applied = applyFlushOutcome(
+      throwingStore({ [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify(two) }),
+      "a",
+      "saved",
+    );
+
+    expect(enqueued.ok).toBe(false);
+    expect(applied.ok).toBe(false);
+    if (!enqueued.ok && !applied.ok) {
+      expect(applied.reason).toBe(enqueued.reason);
+    }
+  });
 });
 
 // #233 established that the only concurrency this app genuinely has needs two
@@ -504,13 +622,14 @@ describe("capture queue — two tabs against one origin (#175)", () => {
       },
     );
 
-    const returned = applyFlushOutcome(store, "a", "saved");
+    const result = applyFlushOutcome(store, "a", "saved");
 
     expect(readQueue(store).map((c) => c.clientKey)).toEqual([
       "b",
       "other-tab",
     ]);
-    expect(returned).toEqual(readQueue(store));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.queue).toEqual(readQueue(store));
   });
 
   // ⚠️ The assertion that stops the merge being written as a set union of the two

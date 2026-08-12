@@ -158,6 +158,30 @@ export type EnqueueResult =
   { ok: true; queue: QueuedCapture[] } | { ok: false; reason: EnqueueRefusal };
 
 /**
+ * What `applyFlushOutcome` did, or why it could not.
+ *
+ * **Deliberately the same shape as `EnqueueResult`, and deliberately NOT
+ * `{ queue, persisted }`.** Both writers can fail the same way and for the same
+ * reason, so they answer in the same vocabulary — and more to the point, `queue`
+ * exists only on the `ok: true` arm, so it cannot be read without checking first.
+ * A flag beside an always-present queue would have left the original bug's exact
+ * shape available to any caller that ignored it, which is not a contract, only a
+ * suggestion.
+ *
+ * There is no queue on the refusal arm because there is nothing new to report: a
+ * write that did not land leaves the store exactly as it was, so a caller that
+ * needs the current queue calls `readQueue` — the same thing `enqueue`'s refusals
+ * already require of it.
+ *
+ * One reason rather than a union: unlike an enqueue, recording an outcome has no
+ * caps and no emptiness rule to fail. The only way it does not land is the store
+ * refusing the write.
+ */
+export type ApplyFlushResult =
+  | { ok: true; queue: QueuedCapture[] }
+  | { ok: false; reason: "storage-unavailable" };
+
+/**
  * What the server said about one queued capture.
  *
  * Mirrors `POST /api/braindump` one-to-one: `201` → `saved`, `200` → `duplicate`,
@@ -357,13 +381,21 @@ export function enqueue(
  *
  * The removal or the mark is applied to the queue as it is in the store, not to
  * the one this tab last saw — `applyOutcome` below is where that matters and why.
+ *
+ * ⚠️ **Reports whether the write actually landed**, and the caller has to look. A
+ * refused `setItem` or `removeItem` means the capture is still queued, so a caller
+ * told only "here is the queue after" would drop it from the strip and report
+ * somebody's words as safe on the strength of a write that never happened. It does
+ * self-heal — the next flush gets a 200 duplicate and removes it — but a
+ * self-healing lie is still a lie until it heals, and "were my words saved?" is
+ * the one question this feature exists to answer.
  */
 export function applyFlushOutcome(
   store: QueueStore | null | undefined,
   clientKey: string,
   outcome: FlushOutcome,
-): QueuedCapture[] {
-  if (!store) return [];
+): ApplyFlushResult {
+  if (!store) return { ok: false, reason: "storage-unavailable" };
 
   for (let attempt = 1; ; attempt++) {
     const { raw, queue: latest } = readStored(store);
@@ -374,8 +406,10 @@ export function applyFlushOutcome(
     // value another tab has already replaced.
     if (attempt < COMMIT_ATTEMPTS && readRaw(store) !== raw) continue;
 
-    write(store, payload);
-    return next;
+    if (!write(store, payload)) {
+      return { ok: false, reason: "storage-unavailable" };
+    }
+    return { ok: true, queue: next };
   }
 }
 
