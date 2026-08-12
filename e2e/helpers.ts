@@ -23,6 +23,75 @@ export function needsReviewRow(page: Page, label: string) {
     .filter({ hasText: label });
 }
 
+/**
+ * What `document.activeElement` is once every queued focus move has run — its
+ * `aria-label`, else its visible text.
+ *
+ * ⚠️ Use this, not `toBeFocused()`, for "focus came back to X after a popup
+ * closed". `expect(locator).toBeFocused()` is a RETRYING matcher: it passes on
+ * the first poll where the condition holds, so a focus that lands on the right
+ * control for one frame and is then stolen satisfies it. That is not a
+ * hypothetical here — Base UI's `Popover.Popup` focus manager restores focus to
+ * the popup CONTAINER when a descendant loses it, queued from a microtask into
+ * the next animation frame (see `restoreFocusToTrigger` in
+ * src/components/ui/anchored-popup.ts for the whole mechanism), so a nested
+ * dismissal passes through exactly that shape. #253 shipped one nested layer
+ * whose focus never landed on the entry at all, which a retrying matcher DID
+ * catch — and one whose focus landed and was then taken away a frame later,
+ * which it did not.
+ *
+ * Two frames, because the steal is queued one frame ahead: sampling after them
+ * reads the settled state rather than racing it. Returns a label rather than a
+ * boolean so a failure names what actually holds focus instead of only saying
+ * that the expected control does not.
+ *
+ * A non-control is suffixed, and that is load-bearing rather than cosmetic: the
+ * ▾ popup and the ▾ trigger carry the SAME accessible name ("All options"), so a
+ * bare name would have reported the container that fails the criterion and the
+ * button that satisfies it identically.
+ */
+export async function settledFocusLabel(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        const sample = () => {
+          const el = document.activeElement as HTMLElement | null;
+          if (!el || el === document.body) {
+            resolve("(document body — focus was lost)");
+            return;
+          }
+          const name =
+            el.getAttribute("aria-label") ??
+            el.textContent?.trim().slice(0, 60) ??
+            "";
+          const role = el.getAttribute("role");
+          const operable =
+            el.matches("button, a[href], input, select, textarea") ||
+            ["button", "link", "menuitem", "option"].includes(role ?? "");
+          resolve(
+            operable
+              ? name
+              : `${name} (not a control: <${el.tagName.toLowerCase()}` +
+                  `${role ? ` role=${role}` : ""}>)`,
+          );
+        };
+        let sampled = false;
+        const once = () => {
+          if (sampled) return;
+          sampled = true;
+          sample();
+        };
+        requestAnimationFrame(() => requestAnimationFrame(once));
+        // Fallback, and not decoration: a page that is not currently rendering
+        // never fires `requestAnimationFrame`, so waiting on it alone hangs until
+        // the test's own timeout and reports "target closed" instead of naming
+        // what held focus. Timers still fire. 250ms is well past the one queued
+        // frame this is waiting out.
+        setTimeout(once, 250);
+      }),
+  );
+}
+
 // ── Shared viewports / theme / shell helpers ────────────────────────────────
 // Extracted for #90: the guest axe pass needs the same two viewports, the same
 // theme bootstrap and the same "is the shell rendered?" wait that

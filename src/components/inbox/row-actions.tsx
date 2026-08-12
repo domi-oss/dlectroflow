@@ -13,6 +13,7 @@ import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
+  restoreFocusToTrigger,
   rowMenuEntry,
 } from "@/components/ui/anchored-popup";
 import {
@@ -105,6 +106,9 @@ export function ScheduleControl({
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const rootRef = useRef<HTMLSpanElement>(null);
+  /** The control that opens the duration presets — the `menu` variant's entry or
+   *  the icon variant's 📅 — so `close()` can hand focus back to it (#253). */
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const ownHintId = useId();
   const isMenu = variant === "menu";
   const isIcs = state === "ics_ready_steps" || state === "ics_needs_duration";
@@ -115,7 +119,15 @@ export function ScheduleControl({
   // reappear on reopen (Duo review). #23 — every close route calls this
   // instead of an effect watching `open` (react-hooks/set-state-in-effect),
   // which cost an extra render pass on each dismissal.
+  //
+  // #253 — and it hands focus back to this control's own trigger first. The
+  // `menu` variant's presets collapse INSIDE a row's ▾ popover, so whichever
+  // preset was pressed unmounts with focus on it, and that popover then claims
+  // the loose focus for its own container — no control, place in the list lost
+  // (WCAG 2.4.3). `restoreFocusToTrigger` carries the mechanism and why the
+  // hand-off has to be synchronous.
   const close = useCallback(() => {
+    restoreFocusToTrigger(triggerRef.current);
     setOpen(false);
     setCustom("");
   }, []);
@@ -383,6 +395,7 @@ export function ScheduleControl({
     return (
       <span ref={rootRef} className="flex flex-col">
         <button
+          ref={triggerRef}
           type="button"
           aria-haspopup={needsDuration ? "dialog" : undefined}
           aria-expanded={needsDuration ? open : undefined}
@@ -460,6 +473,7 @@ export function ScheduleControl({
         onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : close())}
       >
         <Popover.Trigger
+          ref={triggerRef}
           aria-label={iconBusyLabel}
           title={iconBusyLabel}
           disabled={pending}

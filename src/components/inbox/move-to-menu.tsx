@@ -8,6 +8,7 @@ import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
+  restoreFocusToTrigger,
 } from "@/components/ui/anchored-popup";
 
 /**
@@ -20,7 +21,9 @@ import {
  * also brings what the hand-rolled version had to state explicitly, and a
  * little more: `aria-haspopup`/`aria-expanded`/`aria-controls`, Escape and
  * outside-press dismissal, focus returned to the trigger on close, and
- * arrow-key roving focus over the entries.
+ * arrow-key roving focus over the entries. The focus return is the one that
+ * needed help — Base UI does it asynchronously, and #253 put this menu somewhere
+ * that out-races it (see `onOpenChange` below).
  *
  * The popup is portaled into this component's own wrapper (`container={host}`)
  * rather than to `<body>`: it keeps the menu inside the row it belongs to — so
@@ -50,6 +53,7 @@ export function MoveToMenu({
   describedById?: string;
 }) {
   const host = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const targets = BUCKET_ORDER.filter((b) => b !== currentBucket);
 
   return (
@@ -57,8 +61,23 @@ export function MoveToMenu({
       {/* modal={false} — Base UI's Menu default locks document scroll. Row
           menus must not: the page has to stay scrollable underneath, and a
           scroll must not dismiss the menu. */}
-      <Menu.Root modal={false}>
+      <Menu.Root
+        modal={false}
+        // #253 — hand focus back here rather than leaving it to Base UI's own
+        // async restoration, which the enclosing ▾ popover out-races: see
+        // `restoreFocusToTrigger`. This is the ONLY route to a bucket now that
+        // the compact 📥 has gone, so losing the user's place in that list on
+        // every Escape is a WCAG 2.4.3 failure on the row's only move path.
+        //
+        // Runs on the item-select close too, which is what it should do — that
+        // is the case move-to-menu.test.tsx already asserts, and it cannot see
+        // this bug because it renders the menu with no outer popup to lose to.
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) restoreFocusToTrigger(triggerRef.current);
+        }}
+      >
         <Menu.Trigger
+          ref={triggerRef}
           aria-label={compact ? "Move to" : undefined}
           aria-describedby={describedById}
           title={compact ? "Move to" : undefined}

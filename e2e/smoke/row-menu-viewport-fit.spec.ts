@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { MOBILE, NARROW, waitForShell } from "../helpers";
+import { MOBILE, NARROW, settledFocusLabel, waitForShell } from "../helpers";
 import { OWNER_WS_ID } from "../constants";
 
 // #92 — row-action popups must stay inside the viewport at phone width.
@@ -421,6 +421,58 @@ test.describe("#92/#253 the expanded duration presets fit the phone viewport", (
       .toBe(0);
     expectInsideViewport(await measure(popup), "▾ list with presets expanded");
   });
+
+  // The same presets, on the way OUT. Collapsing them is a focus hand-off inside
+  // the ▾ list, and it belongs to the class described on the sibling test
+  // "dismissing the nested Move-to menu hands focus back to the entry" — the
+  // pressed preset unmounts, and the enclosing popover claims the loose focus for
+  // its own container unless the control that opened the presets takes it first.
+  //
+  // This route is the one with no popup of its own, so it is easy to miss: the
+  // presets are ordinary flow content, and nothing about them looks like a
+  // dismissal. Reached by pressing ▾ on a stepless to-do, then Add to calendar
+  // (.ics), then a duration — which is a guest's ONLY way to schedule anything.
+  test("collapsing the presets hands focus back to the entry that opened them", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitForShell(page);
+
+    const capture = page.getByPlaceholder(
+      "Brain dump anything… (Enter to save)",
+    );
+    await capture.fill(`${SEED_MARKER} focus`);
+    await capture.press("Enter");
+    const row = page
+      .getByRole("listitem")
+      .filter({ hasText: `${SEED_MARKER} focus` });
+    await expect(row).toBeVisible();
+
+    await row.getByRole("button", { name: "All options" }).click();
+    const popup = page
+      .getByRole("dialog", { name: "All options" })
+      .filter({ visible: true })
+      .first();
+    await expect(popup).toBeVisible();
+
+    const entry = popup.getByRole("button", {
+      name: "Add to calendar (.ics)",
+      exact: true,
+    });
+    await entry.click();
+    const preset = popup.getByRole("button", { name: "30 min" });
+    await expect(preset).toBeVisible();
+    await preset.click();
+    await expect(preset).toBeHidden();
+
+    // The list stays open (the presets are its content, not a layer over it), so
+    // the entry is still there to receive focus.
+    await expect(popup).toBeVisible();
+    expect(
+      await settledFocusLabel(page),
+      "focus after picking a duration in the ▾ list",
+    ).toBe("Add to calendar (.ics)");
+  });
 });
 
 // ── #44 — the action group grew a third inline button at phone width ────────
@@ -807,6 +859,111 @@ test.describe("#253 the row action line is compact at 360px", () => {
       // own menu off the screen would be a straight trade of one height bug for
       // another.
       expectInsideViewport(await measure(popup), "▾ list at 360px");
+    } finally {
+      await prisma.brainDumpItem.deleteMany({
+        where: {
+          workspaceId: OWNER_WS_ID,
+          text: { startsWith: COMPACT_MARKER },
+        },
+      });
+      await prisma.$disconnect();
+    }
+  });
+
+  // ── The third half of the trade: the LAYERED dismissal (WCAG 2.4.3) ────────
+  //
+  // #253 leaves two entries in the ▾ list that open a second floating layer of
+  // their own — "Move to…" (a Base UI `Menu`) and Schedule (the #106 dialog) —
+  // and both are now the row's ONLY route to what they do. So dismissing that
+  // inner layer has to leave focus on an operable control, and the only sensible
+  // one is the entry that opened it: the ▾ list is still standing, so the entry
+  // is still visible and still pressable.
+  //
+  // It did not. Base UI's `Popover.Popup` mounts its focus manager with
+  // `restoreFocus: "popup"` (row-actions.tsx renders the ▾ list as one), and that
+  // handler fires when a descendant loses focus while `document.activeElement`
+  // has fallen back to `<body>` — which is exactly the state an inner popup's own
+  // async focus restoration passes through as it unmounts. It then focuses the
+  // popup CONTAINER, and re-focuses it a frame later, so it wins the race: focus
+  // ended on a `tabindex="-1"` span, on no control at all, with the user's place
+  // in the list lost. Reachable by pressing ▾, then Move to…, then Escape.
+  //
+  // Fixed in the inner layers rather than here — `MoveToMenu` and `ScheduleMenu`
+  // now restore focus to their own trigger synchronously, which keeps
+  // `activeElement` off `<body>` and leaves that `restoreFocus` branch unentered.
+  // See `restoreFocusToTrigger` in src/components/ui/anchored-popup.ts.
+  //
+  // Move to… is the case with no other coverage; the Schedule dialog's half of
+  // the same fix is asserted by e2e/smoke/schedule-menu.spec.ts (which needs a
+  // seeded Google credential, so it lives with the other menu specs). The unit
+  // test in move-to-menu.test.tsx cannot see this: it renders the menu on its own,
+  // where there is no outer popup to take the focus away.
+  test("dismissing the nested Move-to menu hands focus back to the entry, then to ▾", async ({
+    page,
+  }) => {
+    const prisma = new PrismaClient();
+    try {
+      await prisma.workspace.upsert({
+        where: { id: OWNER_WS_ID },
+        create: { id: OWNER_WS_ID, kind: "user" },
+        update: {},
+      });
+      await prisma.brainDumpItem.create({
+        data: {
+          text: `${COMPACT_MARKER} focus`,
+          status: "inbox",
+          workspaceId: OWNER_WS_ID,
+        },
+      });
+
+      await page.goto("/");
+      await waitForShell(page);
+
+      const row = page
+        .getByRole("listitem")
+        .filter({ hasText: `${COMPACT_MARKER} focus` })
+        .first();
+      await expect(row).toBeVisible();
+      const overflow = row.getByRole("button", { name: "All options" });
+      await overflow.click();
+
+      const popup = page
+        .getByRole("dialog", { name: "All options" })
+        .filter({ visible: true })
+        .first();
+      await expect(popup).toBeVisible();
+
+      const entry = popup.getByRole("button", { name: "Move to…" });
+      await entry.click();
+      const nested = page.getByRole("menu").filter({ visible: true }).first();
+      await expect(nested).toBeVisible();
+
+      await page.keyboard.press("Escape");
+      await expect(nested).toBeHidden();
+
+      // The precondition, stated so a pass cannot come from a list that closed
+      // too: one Escape dismisses the inner layer only.
+      await expect(popup).toBeVisible();
+
+      // `settledFocusLabel`, not `toBeFocused()`, and that choice is the whole
+      // reason this test can see the bug — see the helper: a retrying matcher is
+      // satisfied by focus that lands on the entry for one frame and is then
+      // taken by the popup container, which is precisely this failure mode.
+      expect(
+        await settledFocusLabel(page),
+        "focus after dismissing the nested Move-to menu",
+      ).toBe("Move to…");
+
+      // …and the way out stays operable: the next Escape closes the list and
+      // hands focus to the ▾ that opened it. Two presses, two hand-offs, no
+      // step that lands on nothing.
+      await page.keyboard.press("Escape");
+      await expect(popup).toBeHidden();
+      expect(
+        await settledFocusLabel(page),
+        "focus after dismissing the ▾ list itself",
+      ).toBe("All options");
+      await expect(overflow).toBeFocused();
     } finally {
       await prisma.brainDumpItem.deleteMany({
         where: {

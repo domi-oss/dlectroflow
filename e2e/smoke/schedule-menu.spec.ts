@@ -4,6 +4,7 @@ import {
   waitForShell,
   setTheme,
   expectThemeApplied,
+  settledFocusLabel,
   THEMES,
   MOBILE,
   DESKTOP,
@@ -131,6 +132,17 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   await expect(dialog).toBeHidden();
   // Focus comes back to the control that opened it, not to the document.
   await expect(trigger).toBeFocused();
+  // …and it STAYS there, which `toBeFocused()` above cannot tell you: it is a
+  // retrying matcher, so it is satisfied by focus that touches the entry for one
+  // frame on its way somewhere else. #253 made that distinction matter — the ▾
+  // popover this entry lives in re-grabs focus onto its own container a frame
+  // after an inner popup closes, so both the "never arrived" and the "arrived and
+  // was taken away" shapes are live here. See `settledFocusLabel` and
+  // `restoreFocusToTrigger` (src/components/ui/anchored-popup.ts).
+  expect(
+    await settledFocusLabel(page),
+    "focus after the Schedule dialog closes",
+  ).toBe("Schedule");
 });
 
 test("the menu remembers the choice, and the .ics path keeps its one click", async ({
@@ -163,10 +175,14 @@ test("the menu remembers the choice, and the .ics path keeps its one click", asy
   // no dialog, no second step. A guest has nothing the menu could offer beyond a
   // deadline.
   //
-  // No re-open: Escape dismissed the Schedule dialog and left the ▾ list standing,
-  // which is what the `toBeFocused()` assertion on the sibling spec above proves
-  // (focus returns to the Schedule ENTRY, so the list it lives in is still open).
-  // Pressing the trigger again would have toggled the list shut.
+  // No re-open: Escape dismisses the Schedule dialog and leaves the ▾ list
+  // standing — one Escape per layer. Asserted here directly rather than inferred
+  // from the sibling spec's focus check, which is what the note here used to do:
+  // it read that check as evidence the list was open while the check was in fact
+  // failing (the entry never kept focus — see `restoreFocusToTrigger`). Two
+  // claims about the same behaviour, one of them unverified, and the false one was
+  // the one being cited. Pressing the trigger again would have toggled the list
+  // shut.
   await expect(row.getByRole("dialog", { name: "All options" })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await row.getByRole("button", { name: "Add to calendar (.ics)" }).click();

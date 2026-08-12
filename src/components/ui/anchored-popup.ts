@@ -90,6 +90,47 @@ export function popupSurface(className?: string): string {
 }
 
 /**
+ * Hand focus back to the control that opened a popup — synchronously, in the
+ * same task as the close, and BEFORE the state update that unmounts it.
+ *
+ * #253 is why this exists, and the "synchronously" is the entire content of the
+ * fix rather than a stylistic preference.
+ *
+ * Deleting the row's trailing icon cluster left the ▾ list as the only route to
+ * Move to and to Schedule, and both of those entries open a second floating layer
+ * of their own inside it. Base UI restores focus on close by itself — but
+ * ASYNCHRONOUSLY, and it loses a race to the enclosing list. `Popover.Popup`
+ * (which `RowActions` renders the ▾ list as) mounts its focus manager with
+ * `restoreFocus: "popup"`, whose `focusout` handler fires in a microtask and
+ * checks for `document.activeElement === document.body`. An inner popup's own
+ * unmount-then-restore passes through exactly that state, so the handler
+ * concludes focus is being lost, focuses the popup CONTAINER, and — because the
+ * mode is `"popup"` — focuses it AGAIN on the next animation frame, which lands
+ * after the inner layer's restoration and overwrites it.
+ *
+ * The end state was a `tabindex="-1"` span: focus on no control at all, and the
+ * user's place in the list gone (WCAG 2.4.3 Focus Order). Measured on this branch
+ * before the fix, 10 consecutive runs of "dismissing the nested Move-to menu
+ * hands focus back to the entry" (e2e/smoke/row-menu-viewport-fit.spec.ts):
+ * **7 failed**, and the Schedule dialog's equivalent
+ * (e2e/smoke/schedule-menu.spec.ts) failed 2 for 2 including its CI retry.
+ *
+ * Moving focus first is what defuses it: by the time the inner popup unmounts,
+ * `activeElement` is the trigger rather than `<body>`, so the branch above is
+ * never entered and nothing is queued to overwrite. A `finalFocus`/`returnFocus`
+ * ref would not do — that is the same async restoration, just aimed differently.
+ *
+ * Call it from the close path itself, not from an effect watching `open`: an
+ * effect runs after the commit that already unmounted the popup, which is the
+ * race this avoids. Safe on an unmounted trigger (a move that re-buckets its own
+ * row) — `null?.focus()` is a no-op, and Base UI's own restoration remains as the
+ * fallback for any close route that does not come through here.
+ */
+export function restoreFocusToTrigger(trigger: HTMLElement | null): void {
+  trigger?.focus();
+}
+
+/**
  * One row-action menu entry.
  *
  * #253 — this exists because that issue **promoted** these entries. The ▾ list
