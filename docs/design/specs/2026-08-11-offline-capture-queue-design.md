@@ -250,7 +250,8 @@ synchronous-localStorage pattern with a `useSyncExternalStore` subscription (`sr
 and an async store would make the write-before-network guarantee harder to hold. Chrome Android
 applies no 7-day script-writable-storage eviction, so durability is measured in weeks.
 
-**Cap: 20 items, or 64 KB total, whichever binds first** (owner decision 2026-08-11 — an earlier draft
+**Cap: 20 items, or 64 KB total, whichever binds first** — "64 KB" throughout this document means **64 Ki
+UTF-16 code units**, defined once under *"What '64 KB' is measured in"* below (owner decision 2026-08-11 — an earlier draft
 said 200). At the cap a new capture is **refused with a visible message** and the words stay in the
 field. It does not silently evict the oldest — losing the newest *with the user watching* is honest;
 losing the oldest quietly is the bug this issue exists to fix, in a new costume.
@@ -282,6 +283,38 @@ they have different remedies, and the wording table below carries a separate sen
 |---|---|---|
 | **One capture exceeds 64 KB on its own** | Nothing that is already queued is relevant; this capture cannot ever fit | Shorten *this* one, or copy it elsewhere |
 | **The queue total is at 64 KB and a further capture, however short, does not fit** | This capture is fine; the queue is full | Wait for some to save — **shortening will not help** |
+
+#### What "64 KB" is measured in — UTF-16 code units, and the unit has to be named
+
+**Review of this spec asked whether the bound is UTF-8 bytes or UTF-16 code units, and it was right to:
+this document said "64 KB" eight times without ever saying, and the two differ by up to 2× on the
+non-ASCII text this app's users type.** Unspecified, an implementer picks one and nobody finds out which.
+
+**The bound is on UTF-16 code units — `JSON.stringify(queue).length` — and the constant is named for
+that**, `QUEUE_MAX_CODE_UNITS = 64 * 1024`, not `..._BYTES`. Reasons, in order:
+
+- **That string is already being computed**, once, on the write path. The two-tab section above establishes
+  that this write is CPU-bound on `JSON.stringify` over as much as 64 KB, and that the whole fix was to
+  get expensive work *out* of the read-compare-write window. Adding a `TextEncoder().encode()` pass over
+  the same string purely to re-express the number in a different unit would widen the window the
+  reconciliation exists to narrow, to buy nothing the bound needs.
+- **A code-unit count never *under*-states length relative to characters**, so the bound cannot be
+  overshot by a surprising input. It over-states for non-BMP characters (an emoji is two code units), and
+  that direction is the safe one for a guard whose job is refusing an unbounded write.
+- **The user-facing copy names no unit at all** — *"too long to hold safely"*, *"no room to hold more"* —
+  and must keep not doing so. A byte figure is not something anyone can count in their own queue; that is
+  the same reason the byte-total sentence deliberately quotes no number while the item cap quotes 20.
+
+**Honest consequence, stated because it is the thing a reader would otherwise discover:** a queue of CJK
+or emoji text reaches the bound after fewer visible characters than an ASCII one. That is acceptable — the
+bound exists to stop one pasted essay exhausting the quota, not to promise a character budget — and it is
+why no copy anywhere quotes a length the user could check.
+
+⚠️ **What this spec deliberately does not claim: how a given browser charges `localStorage` against its
+quota.** Accounting is implementation-defined, so tying the constant to a real `QuotaExceededError`
+threshold is an implementation-time **measurement**, not something to assert here. 64 Ki code units is
+comfortably inside every engine's documented floor, and `QuotaExceededError` recovery is a tested path
+regardless — see the testing section.
 
 Collapsing them repeats round 1's defect in a new place: telling someone whose two-word capture was
 refused to *"shorten it"* is advice that cannot work, in exactly the way telling someone who pasted one
@@ -452,10 +485,27 @@ Foreground, in the inbox:
 Background, Chrome Android:
 
 - `registration.sync.register("capture-flush")` on every enqueue
-- `sw.js` gains a `sync` handler that drains `df-capture-queue` through the route
+- `sw.js` gains a `sync` handler that drains **the IndexedDB mirror** through the route
+
+⚠️ **An earlier draft of that second bullet said the handler drains `df-capture-queue`, which is the
+`localStorage` key.** It cannot: the next paragraph says so in the same breath, and review of this spec
+caught the contradiction. The worker's *only* view of the queue is the mirror.
 
 The worker cannot read `localStorage`. The queue is therefore mirrored into IndexedDB **for the
 worker's benefit only** — a single object store, treated as a cache of the real thing.
+
+**And it cannot write `localStorage` either, which has a consequence worth stating rather than
+discovering.** When the worker flushes a capture successfully it can remove that entry from the mirror
+and nothing more; `localStorage` still lists it as waiting until a foreground tab next runs. So on the
+next open, reconciliation re-mirrors it (the second direction below), the foreground flush re-`POST`s it,
+and the route answers `200` — *already saved* — which removes it from both stores.
+
+**The `clientKey` idempotency column is what makes that safe, and it is load-bearing in a way that is
+invisible from either side.** Without it the worker's success would become a duplicate row on the next
+open. Read this paragraph before simplifying either the mirror reconciliation or the idempotency column:
+each looks redundant while the other stands. The cost of the arrangement is **one redundant `POST` per
+worker-flushed capture**, paid once, and that is the right trade against the worker being unable to
+report back at all.
 
 The ordering matters and is the reason this is not simply "use IndexedDB": the `localStorage` write
 completes synchronously inside `submit()`, and the IndexedDB write is *initiated* in the same block
