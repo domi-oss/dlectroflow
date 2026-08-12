@@ -129,23 +129,31 @@ type QueuedCapture = {
    */
   blockedBy?: "session-expired" | "account-revoked";
   /**
-   * Has a flush been attempted for this capture AFTER a fresh sign-in?
+   * The workspace the CLIENT was running under when a `409` was last recorded.
    *
-   * Only meaningful alongside `blockedBy: "session-expired"`, and it exists
-   * because a `409` does not distinguish "that workspace isn't yours" from "that
-   * workspace was purged" — deliberately, since telling a caller which one it is
-   * would leak the existence of a workspace to whoever supplied its id. A guest
-   * sandbox that has been purged can never be resolved again, so *"sign in and
-   * these will save"* becomes a promise the app cannot keep, repeated forever.
+   * Not the capture's own `workspaceId` above — that is what the capture declares
+   * and is what the `409` disagreed with. This is what the app's live session
+   * resolved to at the moment of the refusal, which is the only thing the client
+   * has that can change when the user signs in.
    *
-   * The client cannot ask which case it is in, but it can notice that the remedy
-   * it offered has already failed: a `409` on a flush attempted after a sign-in
-   * has falsified the promise, and the copy stops offering the control. Persisted
-   * for the same reason `blockedBy` is — otherwise the distinction dies on the
-   * reload a discarded tab forces, and the user is told to sign in again by an app
-   * that has already watched them do it.
+   * It exists because a `409` does not distinguish "that workspace isn't yours"
+   * from "that workspace was purged" — deliberately, since answering that would
+   * tell whoever supplied a `workspaceId` whether it exists. A purged guest
+   * sandbox can never be resolved again, so *"sign in and these will save"*
+   * becomes a promise the app cannot keep, repeated forever.
+   *
+   * The client cannot ask which case it is in. What it CAN observe is that the
+   * remedy it offered has already been taken and did not work: a fresh `409`
+   * arriving while the live session resolves to a DIFFERENT workspace than
+   * `blockedUnder` means the session changed between the two refusals — a sign-in,
+   * or a new guest sandbox — and the capture is still refused. At that point the
+   * copy withdraws the sign-in control.
+   *
+   * Persisted for the same reason `blockedBy` is: otherwise the comparison dies on
+   * the reload a discarded tab forces, and the app tells the user to sign in when
+   * it has already watched them do it.
    */
-  signInTried?: true;
+  blockedUnder?: string;
 };
 ```
 
@@ -155,6 +163,48 @@ the flush table below said a refusal "marks `needsSignIn`", and it collapsed two
 different refusals into that one mark. Both were caught in review of this spec and
 are corrected here; the second is the more serious, because the two refusals need
 **different words and a different remedy**.
+
+#### Two tabs on one storage key — a lost update, and what actually fixes it
+
+`localStorage` is shared across every tab of the origin, and one key holds the whole queue, so a
+read-modify-write can lose another tab's capture. Two tabs of the inbox is ordinary, and on the Android
+Chrome target a discarded-and-reopened tab makes overlapping lifetimes normal rather than exceptional. A
+lost capture is the exact failure this feature exists to prevent, so this is not deferrable in full.
+
+**Three things were established by measurement rather than argument, and each contradicts the obvious
+answer:**
+
+1. **"Re-read immediately before writing" is a no-op here.** Both `enqueue` and `applyFlushOutcome`
+   *already* read immediately before writing, in one synchronous block. What was actually open was the CPU
+   time between read and `setItem` — dominated by **three** `JSON.stringify` passes over as much as 64 KB.
+   So the fix is: do all the expensive work **first**, then re-read, and abandon the write if the stored
+   string moved. Only `setItem` stays inside the window.
+2. **Union by `clientKey` is the wrong primitive for `applyFlushOutcome`, and introduces a worse bug than
+   it fixes.** Unioning "the queue I computed" with "the queue I now find" **resurrects the capture that
+   just saved** — the computed queue lacks the key, the store still holds it because nothing has been
+   written yet, so the union puts it back permanently after the user was told it saved. The correct
+   primitive is **re-applying this tab's own delta to the fresh read**. Measured: a union implementation
+   passes **37 of 39** tests, including all 31 that predate this work, and fails only the two resurrection
+   cases.
+3. **No tombstones and no per-entry timestamps are needed** — which follows from (2). "Deliberately
+   removed" never has to be *inferred*, because the only entry ever added is the one `enqueue` was handed,
+   and the tab doing the removing removes from a read it took itself. A capture another tab flushed is
+   simply absent, so the filter and the map are no-ops on it.
+
+**Caps are evaluated against the merged result, not the stale read**, or the reconciliation becomes a way
+to exceed the bound. If the merge would breach a cap, the **incoming** capture is the one refused, with the
+words kept in the field.
+
+**Ties break by write order, not `capturedAt`** — two devices' clocks are skewed independently, and
+re-sorting would move a capture the user is already watching in the strip.
+
+⚠️ **The residual is real and belongs to MR 2, named here so it is not read as an oversight.** `getItem`
+carries **no ordering guarantee** against another tab's `setItem`, so a read can be stale the instant it
+returns and **no amount of re-reading detects that**. The `storage` event does not fix it by letting a tab
+learn before writing; it fixes it by letting the **losing** tab notice, after the fact, that the queue no
+longer holds its own pending capture — and re-enqueue. That needs "what I am still waiting on" in memory
+plus subscribe/unsubscribe, i.e. a component lifecycle. **Do not close this by putting a listener in a pure
+module.**
 
 `localStorage` over IndexedDB deliberately: the payload is short text, the repo already has a
 synchronous-localStorage pattern with a `useSyncExternalStore` subscription (`src/lib/use-hyper-focus.ts`),
@@ -274,6 +324,40 @@ The foreground path uses this same route rather than the server action, so there
 one set of semantics to test. `createBrainDumpItem` stays for non-queued callers and is refactored to
 share the route's core.
 
+#### CSRF — the protection that was lost in the trade, and has to be put back by hand
+
+**Next gives server actions automatic CSRF protection. A plain route handler gets none.** That matters
+here more than anywhere, because the *entire reason* this route exists is that a service worker cannot
+replay a server action — so the guard was given up deliberately, and nothing replaced it. This was
+missing from an earlier draft of this spec **and from the first implementation of the route**, which is
+exactly the shape of gap that reaches production: the trade was reasoned about carefully and its
+consequence was not enumerated.
+
+The route therefore carries the house pattern, which the repo already has and documents:
+
+- `requestOrigin(req)` from `@/lib/origin` gives the allowed origin;
+- **reject when `Origin` is present and does not match**;
+- **allow a missing `Origin`**, deliberately, for non-browser clients — POST-only plus `SameSite=lax`
+  still bound it.
+
+Copied from `src/app/api/auth/logout/route.ts`, which carries the same three rules under a CWE-352
+comment, and cited there so the two cannot drift apart the way `focus-timer.tsx` and the inbox notice
+already did once.
+
+**Why it is worth doing when `SameSite=lax` already blocks a cross-site POST:** `logout/route.ts`'s own
+comment is explicit that **lax does not block a *same-site* POST**, and the repo chose defence-in-depth
+there for a route that merely ends a session. This one **creates rows in a user's inbox**, which is
+strictly more valuable to an attacker, so the same reasoning applies at least as strongly.
+
+**The rejection must not reuse the `409` or `403` copy.** Those two carry specific user-facing sentences
+about signing in, and a request the user never made has no business producing either — that is the same
+message-collapse this document has already been reviewed for twice.
+
+⚠️ **The service worker's own `fetch` must still pass**, and that is asserted rather than reasoned about.
+A worker request from the installed app carries the app's origin, so it does — but it is the one caller
+whose breakage would be catastrophic and invisible, since it is the only path that works while the app is
+closed.
+
 **The `workspaceId` in the body is client-supplied and is never trusted for authorization.** The route
 derives the workspace from the cookie exactly as today, then *compares*. A mismatch can only produce a
 refusal, never a grant — so the input cannot widen access, only narrow it. This is what closes the
@@ -360,8 +444,8 @@ it. It says what is true, and each state gets its own sentence because each has 
 | State | What it says |
 |---|---|
 | waiting | *"3 waiting to save"* |
-| `blockedBy: "session-expired"` (409), sign-in not yet tried | *"Your session expired. Sign in and these will save."* |
-| `blockedBy: "session-expired"` (409), **and it 409'd again after a sign-in** | *"These can't be saved to this account any more. Your words are still here — copy them somewhere safe."* — no sign-in offered, because it has already been tried and did not work |
+| `blockedBy: "session-expired"` (409), live session still resolves to `blockedUnder` | *"Your session expired. Sign in and these will save."* |
+| `blockedBy: "session-expired"` (409), **live session resolves to something other than `blockedUnder`** | *"These can't be saved to this account any more. Your words are still here — copy them somewhere safe."* — no sign-in offered, because it has already been tried and did not work |
 | `blockedBy: "account-revoked"` (403) | *"This account can no longer save. Your words are still here — copy them somewhere safe."* — no sign-in offered, because signing in will not help |
 | item cap reached | *"20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to."* |
 | **one capture** over the byte bound | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
@@ -380,18 +464,33 @@ telling a caller which one it is would leak the existence of a workspace to some
 and this route's whole security property is that the declared `workspaceId` can only ever *narrow*
 access. So the server keeps saying `409` and says nothing more.
 
-What the client knows without asking is whether **a sign-in has happened since the block**. The promise
-is therefore made **once**: a `409` that arrives on a flush attempted *after* a fresh sign-in has
-falsified it, and the copy moves to the second sentence and stops offering a control that has already
-been shown not to work. No new server state, no new response code, no existence oracle — just refusing
-to repeat a claim the app has already watched fail.
+**How the client detects that a sign-in has happened — an earlier draft of this section leaned on the
+notion without specifying it, which is a gap that would have reached implementation.** It does not detect
+a sign-in as an *event*: there is no event to hook, because a sign-in leaves the app by full navigation to
+`/login` and returns as a fresh boot. What it compares is **the workspace the live session resolves to**,
+which the app already holds because it needs it to make a capture at all:
 
-⚠️ **This is not the same as `403`**, even though the two second sentences are nearly identical. `403`
-knows on the first attempt that sign-in cannot help. The `409`-after-sign-in state only learns it by
-trying, which is why it is a transition rather than a state the server can hand over — and why
-`blockedBy` alone cannot encode it. The persisted queue entry needs to record that a sign-in has been
-attempted for it, or the distinction dies on the reload a discarded tab forces, which is the same
-argument that made `blockedBy` persisted rather than component state.
+- when a `409` is recorded, store that live value on the entry as `blockedUnder`. **Not** the capture's own
+  `workspaceId` — that is the value the `409` disagreed with, and it never changes;
+- on any later `409`, if the live session now resolves to something **other than** `blockedUnder`, the
+  session changed between the two refusals and the capture is *still* refused. The remedy has been taken
+  and has failed, so the copy withdraws it.
+
+No new server state, no new response code, no existence oracle — just refusing to repeat a claim the app
+has already watched fail.
+
+⚠️ **This replaced a `signInTried` boolean, and the derived form is better for a reason worth keeping.** A
+flag has to be *set* by whichever code path notices the sign-in — and that is exactly the code path that
+does not exist, since there is no sign-in event in the app. A flag nothing sets reads false forever, which
+is **precisely the forever-promise bug it was added to fix**. `blockedUnder` cannot fail that way: the
+comparison is made at render time out of state the app is already holding, so there is no moment at which
+someone has to remember to write it.
+
+⚠️ **And it is not the same as `403`**, even though the two second sentences are nearly identical. `403`
+knows on the *first* attempt that signing in cannot help. This state can only be **learned by trying**,
+which is why it is a comparison rather than something the server could ever hand over, and why `blockedBy`
+alone cannot encode it. `blockedUnder` is persisted for the same reason `blockedBy` is: otherwise the
+comparison dies on the reload a discarded tab forces.
 
 **a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
 `role="status"` announces the waiting count (a background count is not an interruption); an assertive
@@ -462,14 +561,24 @@ TDD, failing test first, in this order:
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
-   - **`signInTried` is asserted as a transition, not a state:** a `409` sets
-     `blockedBy: "session-expired"` and offers a sign-in; a second `409` on a flush attempted after a
-     sign-in sets `signInTried` and the copy stops offering it. A test that only checks "a 409 keeps
-     the capture" passes an implementation that promises a sign-in forever to a user whose guest
-     sandbox was purged and can never be resolved again.
+   - **`blockedUnder` is asserted as a comparison, not a flag:** a `409` sets
+     `blockedBy: "session-expired"` plus `blockedUnder` = the live session's workspace, and offers a
+     sign-in; a later `409` arriving while the live session resolves to a *different* workspace
+     withdraws the offer. Both arms are separate tests, **and one of them asserts that the offer is
+     still made when the live workspace is unchanged** — without that, an implementation that withdraws
+     the sign-in immediately passes, and a user whose session merely expired is told their words can
+     never be saved. A test that only checks "a 409 keeps the capture" passes both bugs.
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
+   - **CSRF, all three arms**: a mismatched `Origin` is refused **and writes no row**; a **missing**
+     `Origin` is allowed, because that arm is a deliberate decision and a test is what stops someone
+     "tightening" it later and breaking non-browser callers; and the **service worker's own request
+     passes**. That last one is asserted rather than reasoned about — it is the only caller whose
+     breakage is both catastrophic and invisible, since it is the sole path that runs while the app is
+     closed.
+   - The CSRF refusal **does not** carry the `409` or `403` user-facing copy. Asserted, because those
+     sentences tell the user to sign in, and a request they never made must not.
 3. **Migration** — the `@@unique([workspaceId, clientKey])` index exists, the same `clientKey` in two
    different workspaces yields two rows, and multiple null `clientKey`s coexist. This gets **its own
    integration test** (`src/lib/braindump-client-key-unique.integration.test.ts`) and is **not**
