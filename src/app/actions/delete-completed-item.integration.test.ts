@@ -70,14 +70,21 @@ async function wipe() {
   }
 }
 
-/** Bank `n` reward rows of one type — what a completion would have paid. */
-async function bank(workspaceId: string, type: string, n: number) {
+/**
+ * Bank `n` reward rows of one type — what a completion would have paid.
+ *
+ * `at` dates them, which the #251-review cases need: the defect they pin is that
+ * a reversal reached for TODAY's rows to pay for work finished on an earlier day,
+ * and "an earlier day" is not expressible without writing `createdAt`.
+ */
+async function bank(workspaceId: string, type: string, n: number, at?: Date) {
   if (!n) return;
   await prisma.rewardEvent.createMany({
     data: Array.from({ length: n }, () => ({
       type,
       points: RewardPoints[type as keyof typeof RewardPoints],
       workspaceId,
+      ...(at ? { createdAt: at } : {}),
     })),
   });
 }
@@ -96,7 +103,19 @@ async function completedTodo({
   steps = 0,
   completed = true,
   workspaceId = WS,
-}: { steps?: number; completed?: boolean; workspaceId?: string } = {}) {
+  at,
+}: {
+  steps?: number;
+  completed?: boolean;
+  workspaceId?: string;
+  /**
+   * When this to-do was finished. Dates `completedAt` AND the reward rows the
+   * completion banked, so the two agree the way `completeItem` leaves them —
+   * a fixture that stamped one and not the other would be testing a state the
+   * app cannot produce.
+   */
+  at?: Date;
+} = {}) {
   const task = await prisma.task.create({
     data: { title: "demo", workspaceId, status: completed ? "done" : "active" },
   });
@@ -118,11 +137,27 @@ async function completedTodo({
       workspaceId,
       taskId: task.id,
       status: "triaged",
-      completedAt: completed ? new Date() : null,
+      completedAt: completed ? (at ?? new Date()) : null,
     },
   });
-  await bank(workspaceId, RewardType.StepDone, steps);
-  if (completed) await bank(workspaceId, RewardType.TaskComplete, 1);
+  // `completeItem` banks the step points BEFORE it stamps `completedAt` and the
+  // `task_complete` after it (measured: two `step_done` at the stamp or 2ms
+  // earlier, the `task_complete` 3ms later). The fixture reproduces that
+  // ordering, because it is exactly what makes `completedAt` a sound upper bound
+  // for the item's own step rows and an unsound one for its completion row.
+  await bank(
+    workspaceId,
+    RewardType.StepDone,
+    steps,
+    at ? new Date(at.getTime() - 1000) : undefined,
+  );
+  if (completed)
+    await bank(
+      workspaceId,
+      RewardType.TaskComplete,
+      1,
+      at ? new Date(at.getTime() + 1000) : undefined,
+    );
   return { item, task };
 }
 
@@ -472,6 +507,148 @@ describe("deleteBrainDumpItem — badge revocation (#251)", () => {
 
     expect(await countRewards(WS, RewardType.TaskComplete)).toBe(0); // it did reverse
     expect(await hasBadge(WS, BadgeKey.TenStepsDay)).toBe(true);
+  });
+});
+
+/**
+ * #251 review — the reversal must take back the DELETED ITEM's points, not the
+ * newest points in the workspace.
+ *
+ * `reverseLatestReward` takes "the newest row of that type", and the docblock on
+ * `reverseStepCompletionRewards` rested that whole design on one claim: *within a
+ * type, which row goes is unobservable*. `revokeUnqualifiedBadges` is the first
+ * per-day read of `RewardEvent` in a reversal path, and it falsifies that claim —
+ * it recounts `step_done` rows from `startOfToday()`, so a delete that consumed
+ * today's rows to pay for an earlier day's work drops today's count and revokes a
+ * badge earned today by work that still exists.
+ *
+ * Measured before the fix: `step_done×13, stepsToday=10, ten_steps_day held` →
+ * delete an item completed yesterday → `step_done×10, stepsToday=7, badge gone`.
+ */
+describe("deleteBrainDumpItem — which rows come back (#251 review)", () => {
+  const yesterday = () => new Date(Date.now() - 86_400_000);
+  const startOfToday = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const stepsToday = () =>
+    prisma.rewardEvent.count({
+      where: {
+        workspaceId: WS,
+        type: RewardType.StepDone,
+        createdAt: { gte: startOfToday() },
+      },
+    });
+  const totalPoints = async () =>
+    (
+      await prisma.rewardEvent.aggregate({
+        where: { workspaceId: WS },
+        _sum: { points: true },
+      })
+    )._sum.points ?? 0;
+
+  it("keeps a ten_steps_day earned today when the deleted item was finished yesterday", async () => {
+    // Complete a to-do Monday; do ten steps Tuesday and earn the badge; delete
+    // Monday's row from the Library's Done tab on Tuesday. Every one of those is
+    // an ordinary press, and the badge was earned by ten steps that still exist.
+    const { item } = await completedTodo({ steps: 3, at: yesterday() });
+    await bank(WS, RewardType.StepDone, 10); // today's ten, still standing
+    await prisma.badge.create({
+      data: {
+        workspaceId: WS,
+        key: BadgeKey.TenStepsDay,
+        earnedAt: new Date(),
+      },
+    });
+    expect(await countRewards(WS, RewardType.StepDone)).toBe(13);
+    expect(await stepsToday()).toBe(10);
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await countRewards(WS, RewardType.StepDone)).toBe(10);
+    // The assertion the whole case exists for: the three rows that went were
+    // YESTERDAY's, so today is untouched and the day's badge still qualifies.
+    expect(await stepsToday()).toBe(10);
+    expect(await hasBadge(WS, BadgeKey.TenStepsDay)).toBe(true);
+  });
+
+  it("still takes back exactly what the item banked — nothing more, nothing less", async () => {
+    // The bound must not turn into "reverse less". The arithmetic is the same
+    // arithmetic as an unbounded reversal; only the choice of rows differs.
+    const { item } = await completedTodo({ steps: 3, at: yesterday() });
+    await bank(WS, RewardType.StepDone, 10);
+    const before = await totalPoints();
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(before - (await totalPoints())).toBe(
+      3 * RewardPoints[RewardType.StepDone] +
+        RewardPoints[RewardType.TaskComplete],
+    );
+  });
+
+  it("takes today's rows when the item was completed today — the bound is not a filter", async () => {
+    // The negative control. A bound that excluded the item's own rows would look
+    // identical to the fix on the case above and be wrong on the common one:
+    // almost every delete is of something finished the same day.
+    const { item } = await completedTodo({ steps: 2 });
+    expect(await stepsToday()).toBe(2);
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await stepsToday()).toBe(0);
+  });
+
+  it("falls back past the bound rather than stopping short of what it owes", async () => {
+    // The floor is unchanged: the workspace owes 3 and holds only 1 row inside
+    // the bound, so the reversal keeps going into the unbounded set rather than
+    // leaving two payouts banked forever. An inconsistent store (a reopen already
+    // took some, or the rows predate the reward table) must not become a
+    // permanent over-payment — the same reasoning the floor guard above carries.
+    const { item } = await completedTodo({ steps: 3, at: yesterday() });
+    await prisma.rewardEvent.deleteMany({
+      where: { workspaceId: WS, type: RewardType.StepDone },
+    });
+    await bank(WS, RewardType.StepDone, 1, new Date(Date.now() - 86_400_000));
+    await bank(WS, RewardType.StepDone, 5);
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await countRewards(WS, RewardType.StepDone)).toBe(3);
+  });
+
+  it("takes the item's OWN task_complete, which is banked after the stamp", async () => {
+    // Why the bound is on the step rows only, stated as a test rather than as a
+    // comment nobody can check. `completeItem` logs `step_done` BEFORE stamping
+    // `completedAt` and `task_complete` AFTER it — measured on real Postgres at
+    // -2ms and +3ms — so `completedAt` covers the item's step rows and EXCLUDES
+    // its own completion row. Bounding `task_complete` by it would reach past the
+    // item's row to an older one every time, which is the defect being fixed
+    // wearing the fix's clothes.
+    //
+    // Here the workspace holds one older `task_complete` from a to-do completed
+    // three days ago that still exists; deleting yesterday's must take
+    // yesterday's, leaving the older one alone.
+    const older = new Date(Date.now() - 3 * 86_400_000);
+    await completedTodo({ steps: 0, at: older });
+    const { item } = await completedTodo({ steps: 0, at: yesterday() });
+    expect(await countRewards(WS, RewardType.TaskComplete)).toBe(2);
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    const left = await prisma.rewardEvent.findMany({
+      where: { workspaceId: WS, type: RewardType.TaskComplete },
+      select: { createdAt: true },
+    });
+    expect(left).toHaveLength(1);
+    // The survivor is the OLD one: the row that went was the deleted item's.
+    expect(left[0].createdAt.getTime()).toBeLessThan(yesterday().getTime());
   });
 });
 

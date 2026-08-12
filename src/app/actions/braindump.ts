@@ -336,9 +336,28 @@ export async function deleteBrainDumpItem(id: string) {
 
     // On `tx`, not `prisma`: a reversal that committed independently would
     // survive the rollback, which is the bug wearing the fix's clothes.
+    //
+    // #251 review — `stepDoneNotAfter` is what stops this taking TODAY's step
+    // points to pay for a to-do finished on an earlier day. `revokeUnqualifiedBadges`
+    // below recounts `step_done` from `startOfToday()`, so without the bound,
+    // deleting Monday's completed row on Tuesday consumed three of Tuesday's rows,
+    // dropped the day's count from ten to seven and revoked a `ten_steps_day`
+    // earned by ten steps that still exist. Measured, and now pinned by
+    // `delete-completed-item.integration.test.ts`.
+    //
+    // `existing.completedAt` is the right instant and `existing` is the right
+    // place to read it from: the guarded `updateMany` above has already cleared
+    // the column, so the pre-transaction snapshot is the only copy left. A row
+    // that was never stamped (the `isFullyDone` route) passes `undefined` and gets
+    // the unbounded behaviour, which is correct — there is no completion instant
+    // to bound by, and its steps were banked whenever they were ticked.
     const reversed = await reverseItemCompletionRewards(
       workspaceId,
-      { stepDone, includeTaskComplete: tookCompletion > 0 },
+      {
+        stepDone,
+        includeTaskComplete: tookCompletion > 0,
+        stepDoneNotAfter: existing.completedAt ?? undefined,
+      },
       tx,
     );
 
