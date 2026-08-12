@@ -35,7 +35,8 @@ save themselves when the network comes back, whether or not you reopen the app.*
 - **Changing `proxy.ts` or the auth middleware.** The expired-session hole is closed here by a guard
   in the queue and in the new route, both of which can only *refuse* a write. Fixing the middleware's
   guest-sandbox minting is real but belongs to its own issue; this repo has recorded auth-flow
-  regressions from middleware edits (#119, and the PKCE/host loop documented at `src/proxy.ts:33-43`).
+  regressions from middleware edits (#119, and the PKCE/host loop documented in the comment above
+  `canonicalOriginRedirect`'s call site in `src/proxy.ts`).
 - **Rewards or streak changes.** A queued capture that flushes advances the streak exactly as an
   online one does, via the existing `touchStreakOnEngagement`. Nothing new.
 
@@ -45,8 +46,8 @@ save themselves when the network comes back, whether or not you reopen the app.*
 the words restored into the field, a Retry, a Reload when the deployment moved on, and a bounded
 wait. It deliberately holds **one** failure notice rather than a queue.
 
-Verified against `main` at `8d5db9a`, 2026-08-11 — not inherited from the 2026-08-08 grounding note,
-two of whose line references had already rotted:
+Verified against `main` at `8d5db9a`, 2026-08-11, and **re-verified against `cb3aeee` on 2026-08-12** —
+not inherited from the 2026-08-08 grounding note, two of whose line references had already rotted:
 
 ⚠️ **Two different kinds of claim live in this document and review of it was right to say they had been
 blurred together. They are labelled from here on.**
@@ -55,8 +56,15 @@ blurred together. They are labelled from here on.**
 - **Sibling-branch verified** — anything describing `src/lib/capture-queue.ts`, `src/lib/capture-write.ts`
   or `POST /api/braindump` as *existing code*: `byteLength`, `COMMIT_ATTEMPTS`, `newClientKey`'s three
   tiers, `isQueuedCapture`, `MAX_BODY_BYTES`, and every measurement taken against them. **None of that is
-  on `main`.** It lives on `feat/175-capture-queue-server` — the branch of `!334`, still open — and this
-  spec's own sequencing says `!332` merges **first**.
+  on `main`.** It lives on `feat/175-capture-queue-server` — the branch of **!334 — _"the capture route
+  and the queue module"_**, still open — and MR 1 (below) merges **first**.
+- **Not implemented anywhere yet** — ⚠️ **`blockedUnder`.** Verified at `fd768ff`, the sibling branch's
+  head: the identifier appears nowhere in `src/`. `QueuedCapture` there carries `blockedBy` and nothing
+  else, so every statement in this document about the `blockedUnder` comparison — the withdrawn sign-in
+  offer, the *"these can't be saved to this account any more"* sentence, the worker's inability to compute
+  it — describes **design, not code**. It is called out because this list exists precisely to flag claims
+  a reader cannot check, and it omitted the one field that needed it: `blockedUnder` is the only member of
+  the type that is not on the branch, so it was the only entry the list was for.
 
 **So for a window after this document lands, its most concrete statements describe code a reader on `main`
 cannot find**, which is the mirror image of the dangling-reference problem the merge order exists to
@@ -65,19 +73,31 @@ neither is resolved by pretending the other side already exists. **Where this do
 does X", read it as "the implementation on `!334` does X, and this design is what it was written
 against."**
 
+⚠️ **Every citation in this table names a symbol, not a line, and that is a correction rather than a
+style choice.** This document's own preamble says it exists because an earlier grounding note's line
+references had rotted — and then **five of its own rotted inside a single day**, between `8d5db9a` and
+`cb3aeee`, which review of this spec caught and this pass re-verified against `cb3aeee`:
+`braindump.ts:53` (`createBrainDumpItem` had moved to 55), `schema.prisma:327` (`BrainDumpItem.id`'s
+`cuid()` line to 357), `schema.prisma:326-336` (`model BrainDumpItem` to 356-435), `workspace.ts:129-141`
+(the owner→guest fallthrough to 133-145) and `inbox-view.tsx:866-880` (`returnFocusToInput` and its effect
+to 879-886). **The six that had not rotted are converted too**, verified in the same pass: two conventions
+in one table is how a reader learns which numbers to trust, and a line reference that happens to still be
+right today is a rot claim waiting to be made.
+
 | Fact | Where |
 |---|---|
-| `createBrainDumpItem(text: string)` takes **only text**; the row id is a server-side `cuid()` | `src/app/actions/braindump.ts:53`, `prisma/schema.prisma:327` |
-| **A retry is therefore not idempotent.** No unique constraint, no client-supplied key | `prisma/schema.prisma:326-336` |
-| A timed-out write **may still land** — `withActionTimeout` bounds the UI's wait, not the request | `src/lib/server-action-failure.ts:131` and its docblock |
-| Capture's bounded wait is **10s** | `CAPTURE_TIMEOUT_MS`, `src/components/inbox/inbox-view.tsx:137` |
-| `public/sw.js` is live, registered from the inbox, **notifications only** — no `fetch`, no `sync`, no Cache Storage | `public/sw.js`, `src/lib/notifications.ts:40` |
+| `createBrainDumpItem(text: string)` takes **only text**; the row id is a server-side `cuid()` | `createBrainDumpItem`, `src/app/actions/braindump.ts`; `BrainDumpItem.id`'s `@default(cuid())`, `prisma/schema.prisma` |
+| **A retry is therefore not idempotent.** No unique constraint, no client-supplied key | `model BrainDumpItem`, `prisma/schema.prisma` |
+| A timed-out write **may still land** — `withActionTimeout` bounds the UI's wait, not the request | `withActionTimeout` and its docblock, `src/lib/server-action-failure.ts` |
+| Capture's bounded wait is **10s** | `CAPTURE_TIMEOUT_MS`, `src/components/inbox/inbox-view.tsx` |
+| `public/sw.js` is live, **notifications only** — no `fetch`, no `sync`, no Cache Storage | `public/sw.js`; `registerServiceWorker`, `src/lib/notifications.ts` |
+| It is registered from **four** surfaces, not the inbox alone | `registerServiceWorker`'s callers: `inbox-view.tsx`, `review-nudge.tsx`, `roundup-card.tsx`, `notifications-section.tsx` |
 | **Nothing in `src/` reads `navigator.onLine`**, and there are no `online`, `visibilitychange` or `pagehide` listeners anywhere | verified by grep across `src/` |
-| Client-side persistence today is five keys, **all flags and preferences** — no user-typed text is stored client-side anywhere | `df-theme`, `df-hyper-focus`, two day-keys, a guest-banner flag |
-| The privacy notice names browser storage **once**, pinned to one key: *"your light/dark theme choice … never leaves your device"* | `src/app/privacy/page.tsx:1080` |
-| Any prose edit to a legal page **reds CI** until `LEGAL_EFFECTIVE_DATE` is bumped | `src/lib/legal.ts:153`, `src/lib/legal-fingerprint.test.tsx` |
+| Client-side persistence today is five keys, **all flags and preferences** — no user-typed text is stored client-side anywhere | `df-theme` (`theme-toggle.tsx`), `df-hyper-focus` (`hyper-focus.ts`), `df-guest-banner` (`guest-indicator.tsx`, in **`sessionStorage`**), and two `localStorage` day-keys, `dlectroflow-review-nudge-fired-<date>` (`reviewNudgeDayKey`) and `dlectroflow-roundup-fired-<date>` |
+| The privacy notice names browser storage **once**, pinned to one key: *"your light/dark theme choice … never leaves your device"* | the `df-theme` paragraph in the cookies `LegalSection`, `src/app/privacy/page.tsx` |
+| Any prose edit to a legal page **reds CI** until `LEGAL_EFFECTIVE_DATE` is bumped | `LEGAL_EFFECTIVE_DATE`, `src/lib/legal.ts`; `src/lib/legal-fingerprint.test.tsx` |
 | A **frozen** account can no longer write — `currentWorkspaceId` reads `User.status`, calls `clearOwnerSession` and throws `RevokedAccountError` | the `WorkspaceKind.User` arm of `currentWorkspaceId`, `src/lib/workspace.ts` (#220, closed 10 Aug) |
-| An **expired** owner cookie still falls through to the guest arm, skipping that status check, and the dump lands in an invisible sandbox purged within ~24h | `resolveWorkspace`, `src/lib/workspace.ts:129-141` |
+| An **expired** owner cookie still falls through to the guest arm, skipping that status check, and the dump lands in an invisible sandbox purged within ~24h | `resolveWorkspace`'s owner arm falling through to its `input.guest` arm, `src/lib/workspace.ts` |
 
 ### The residual #210 handed over
 
@@ -259,12 +279,17 @@ three were**, which review of this spec was right to call out: (3) says outright
    just saved** — the computed queue lacks the key, the store still holds it because nothing has been
    written yet, so the union puts it back permanently after the user was told it saved. The correct
    primitive is **re-applying this tab's own delta to the fresh read**. Measured: a union implementation
-   passes **37 of 39** tests, including all 31 that predate this work, and fails only the two resurrection
-   cases. ⚠️ **That measurement is sibling-branch evidence, reproducible only on
-   `feat/175-capture-queue-server`** (`!334`) — `src/lib/capture-queue.test.ts` there, by replacing
-   `applyOutcome`'s delta with a union. Labelled because review of this spec correctly pointed out that a
-   test count cited as evidence cannot be checked from a docs-only MR, and an unverifiable number reads as
-   stronger than a described mechanism — the same trap as a citation to a file nobody opens.
+   passes **37 of the 39** tests `src/lib/capture-queue.test.ts` held **at `2136f51`**, including all 31
+   that predate this work, and fails only the two resurrection cases. ⚠️ **The commit is part of the
+   measurement, not decoration.** This read *"37 of 39 tests"* against a reproduction recipe naming only
+   the branch, and the number was true at exactly one commit: that file is up to **66** tests at the
+   branch head (`fd768ff`), so anyone following the recipe as written gets a different denominator and
+   concludes the document is wrong. The recipe is therefore: `git checkout 2136f51` on
+   `feat/175-capture-queue-server` (!334) and replace `applyOutcome`'s delta with a union.
+   ⚠️ **Sibling-branch evidence, and the label matters** — review of this spec correctly pointed out that
+   a test count cited as evidence cannot be checked from a docs-only MR, and an unverifiable number reads
+   as stronger than a described mechanism, which is the same trap as a citation to a file nobody opens.
+   **The delta-vs-union argument above stands without either figure**; they are corroboration.
 3. **No tombstones and no per-entry timestamps are needed** — which follows from (2). "Deliberately
    removed" never has to be *inferred*, because the only entry ever added is the one `enqueue` was handed,
    and the tab doing the removing removes from a read it took itself. A capture another tab flushed is
@@ -370,10 +395,17 @@ implementation cost has to be checked against the implementation; this one was n
 - **The bound's whole job is preventing `QuotaExceededError`**, which is about storage, and storage is
   charged in bytes. Code units are a property of the JavaScript string, not of what gets stored.
 - **The constant is called `..._BYTES`.** A name that contradicts its unit is precisely how the same
-  confusion reached the route's own body-size backstop — `MAX_BODY_CHARS`, derived from
-  `CAPTURE_QUEUE_MAX_BYTES` but compared against `rawBody.length`, letting a Cyrillic or CJK body reach
+  confusion reached the route's own body-size backstop: it **was** `MAX_BODY_CHARS`, derived from
+  `CAPTURE_QUEUE_MAX_BYTES` but compared against `rawBody.length`, which let a Cyrillic or CJK body reach
   roughly 3× the intended budget. **Same defect, same document, two surfaces** — which is the argument for
-  naming the unit once and reusing one helper rather than re-deriving the measurement.
+  naming the unit once and reusing one helper rather than re-deriving the measurement. ⚠️ **Past tense:
+  fixed on !334, and the constant is now `MAX_BODY_BYTES = 2 * CAPTURE_QUEUE_MAX_BYTES`, compared with
+  `byteLength(rawBody)`.** This paragraph described it in the present tense and would have read as a live
+  defect on the day it landed. ⚠️ **And it is not the only `MAX_BODY_CHARS` in the repo** —
+  `src/app/api/breakdown/route.ts` has its own, `10_000`, compared against `rawBody.length` and reported
+  to the caller as *"max 10000 characters"*. **That one is correct**: it is a picked number rather than a
+  byte budget in disguise, its name and its comparand agree, and it says "characters" to the user. Do not
+  read the paragraph above as a finding against it.
 - **There is exactly one measurement helper**, and both the module and the route must use it. Two
   independent answers to "how big is this" is how these drifted apart.
 
@@ -1132,7 +1164,8 @@ Both halves of that are load-bearing:
 
 Retry carries `aria-disabled` while a flush is in flight, mirroring #210's contract, and is ≥44×44 px
 (WCAG 2.5.5). When the strip unmounts on the last item saving, focus returns to the input only if it
-was inside the strip — the one-shot ref pattern at `inbox-view.tsx:866-880` (WCAG 2.4.3).
+was inside the strip — the one-shot ref pattern of `returnFocusToInput` and its effect in
+`src/components/inbox/inbox-view.tsx` (WCAG 2.4.3).
 
 ### Multi-device dissolves by construction
 
@@ -1332,8 +1365,11 @@ hid the hostname change and made it look like a hang.
 
 So a manifest with an absolute `start_url` on `PUBLIC_ORIGIN` **hardens against #174's cause rather
 than reopening it** — an installed app always launches on the canonical origin, which removes the entry
-path that caused it. `canonicalOriginRedirect` (`src/proxy.ts`) has landed since, closing it a second
-way.
+path that caused it. `canonicalOriginRedirect` has landed since, closing it a second way. ⚠️ **It is
+defined in `src/lib/origin.ts`, not `src/proxy.ts`** — an earlier version of this sentence cited the
+proxy, which only *calls* it. The distinction matters here rather than being pedantry: `origin.ts` is
+where `inboundHost` and `requestOrigin` live too, and the origin rule this spec argues about at length is
+a choice between those two.
 
 **The residual risk is real, narrow and testable:** `scope`. If it does not cover
 `/api/auth/gitlab/callback`, the callback opens outside the app window and the user is signed in *in a
