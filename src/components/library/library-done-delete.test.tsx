@@ -314,6 +314,57 @@ describe("LibraryDoneDelete — when the write does not land (#251)", () => {
     });
   });
 
+  it("announces the wait and refuses the press for a SECOND attempt, not only a Retry", async () => {
+    // #251 review — the announced wait was gated on `failure.retrying`, which is
+    // only raised by the Retry button. A user who has met the notice once and goes
+    // back to the 🗑 they already know takes the other route to the same state:
+    // the confirm collapses, the write runs, and the notice re-renders with a
+    // Retry reading `aria-disabled="false"` that silently eats the press, with
+    // nothing announcing that anything is happening. `focus-timer.tsx` gates the
+    // same three things on `pending` and has no such hole.
+    const user = userEvent.setup();
+    let settle: () => void = () => {};
+    vi.mocked(deleteBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((r) => {
+          settle = () => r();
+        }),
+      );
+    renderRow();
+
+    await arm(user);
+    await screen.findByRole("alert");
+
+    // Back to the 🗑, not the Retry: arm, then confirm.
+    await user.click(screen.getByRole("button", { name: /^Delete/ }));
+    await user.click(screen.getByRole("button", { name: /^Delete/ }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /try again/i }),
+      ).toHaveAttribute("aria-disabled", "true"),
+    );
+    // The wait is SAID, not just implied by a greyed button.
+    expect(screen.getByTestId("library-delete-announcer")).toHaveTextContent(
+      /trying again/i,
+    );
+    // And the description retracts to it, so a user landing on the control hears
+    // why it is refusing them.
+    const retry = screen.getByRole("button", { name: /try again/i });
+    const described = (retry.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(described).toMatch(/trying again/i);
+
+    await act(async () => {
+      settle();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
+
   it("still hands focus to the heading when the 🗑 was armed again mid-flight", async () => {
     // #251 review — the state the single-flight guard exists to serve, which the
     // hand-off could not survive.

@@ -38,7 +38,12 @@ export const LIBRARY_ACTION_TIMEOUT_MS = 10_000;
 type DeleteFailure = {
   stale: boolean;
   timedOut: boolean;
-  /** A retry is in flight for this failure — drives the announced wait. */
+  /**
+   * A retry was pressed for this failure. Raised urgently, outside the
+   * transition, so the wait paints on the press rather than at the transition's
+   * first commit — it is one of the two inputs to `waiting`, not the whole
+   * announced wait, which is the over-claim #251's review corrected.
+   */
   retrying: boolean;
 };
 
@@ -303,6 +308,26 @@ export function LibraryDoneDelete({
     ? `${t("action.delete", voice)} — already in progress for this row`
     : t("action.delete", voice);
 
+  /**
+   * Is a delete for this row in flight while the notice is on screen — #251
+   * review.
+   *
+   * This used to be `failure.retrying` alone, and that flag is only raised by the
+   * Retry button. There are TWO routes to a second attempt: the Retry, and the
+   * resting 🗑 the user already knows, which is live again the moment `confirm()`
+   * collapses the confirm. Taking the second route left a Retry reading
+   * `aria-disabled="false"` that `inFlight` silently refused, with nothing saying
+   * why. `focus-timer.tsx` gates the same three things on `pending` and has no
+   * such hole.
+   *
+   * Both flags rather than just `pending`, and they are not redundant:
+   * `setFailure({ retrying: true })` is raised OUTSIDE the transition and is
+   * therefore urgent, so the Retry path paints and announces the wait immediately
+   * instead of at the transition's first commit. `pending` is what covers the
+   * press that came through the 🗑.
+   */
+  const waiting = pending || !!failure?.retrying;
+
   return (
     <span ref={rootRef} className="flex w-full flex-col items-end gap-2">
       <button
@@ -386,9 +411,9 @@ export function LibraryDoneDelete({
                   // control that already holds focus and keeps it by design; the
                   // live region below is what covers that.
                   aria-describedby={
-                    failure.retrying ? `${failureId} ${savingId}` : failureId
+                    waiting ? `${failureId} ${savingId}` : failureId
                   }
-                  aria-disabled={failure.retrying}
+                  aria-disabled={waiting}
                   onClick={() => runDelete(true)}
                   className={cn(
                     touchTarget,
@@ -406,7 +431,7 @@ export function LibraryDoneDelete({
                   an alert is assertive AND atomic, so a visible child appearing
                   inside it mid-retry re-reads the whole notice over the polite
                   announcement. Nothing changes on screen. */}
-              {failure.retrying && (
+              {waiting && (
                 <p aria-hidden="true" className="text-muted-foreground text-xs">
                   {t("lib.error.retrying", voice)}
                 </p>
@@ -422,10 +447,19 @@ export function LibraryDoneDelete({
               already in the accessibility tree and one arriving with its first
               message is silent. `sr-only` rather than `hidden` for the same
               reason: a live region has to be rendered to be observed.
-              Kept identical to inbox-view.tsx, shopping-list.tsx and
-              focus-timer.tsx — those have drifted apart twice already, which is
-              what produced #218 and then #236, and `write-notice-hygiene` rule D
-              now watches this file for the same reason. */}
+
+              The region's SHAPE and PLACEMENT are identical to inbox-view.tsx,
+              shopping-list.tsx and focus-timer.tsx — those drifted apart twice,
+              which is what produced #218 and then #236, and
+              `write-notice-hygiene` rule D now watches this file for the same
+              reason. Its CONDITION is not identical and cannot be: this control
+              has two routes to a second attempt (the Retry, and the resting 🗑
+              that is live again the moment the confirm collapses), where the
+              others have one. `waiting` covers both. This comment claimed
+              identity outright until #251's review, and the part it was wrong
+              about was the part that mattered — the gate was `failure.retrying`
+              while `focus-timer.tsx`'s was `pending`, so the second route
+              announced nothing at all. */}
           <p
             id={savingId}
             data-testid="library-delete-announcer"
@@ -434,7 +468,7 @@ export function LibraryDoneDelete({
             aria-atomic="true"
             className="sr-only"
           >
-            {failure.retrying && t("lib.error.retrying", voice)}
+            {waiting && t("lib.error.retrying", voice)}
           </p>
         </>
       )}
