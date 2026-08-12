@@ -15,6 +15,17 @@ The promise this spec commits to, and nothing wider: **once the words are in the
 Enter, they survive the tab closing, the browser being killed, and the phone rebooting — and they
 save themselves when the network comes back, whether or not you reopen the app.**
 
+⚠️ **One bound on the durability half, stated here rather than left to be discovered.** `localStorage` is
+synchronous *to the page*, but its flush to disk is not: the browser acknowledges the write and persists it
+shortly afterwards. A **graceful** shutdown is inside the promise — the tab closing, the browser being
+killed, an ordinary reboot all give the browser its chance to flush, and Chrome's tab discard does too. A
+**battery pull or a kernel panic inside that window** can lose the last write. **No better option exists
+and that is why this is a bound rather than a bug**: IndexedDB is asynchronous, which would break the
+write-before-network guarantee this whole design rests on, and it is used here only as a mirror that is
+explicitly not the source of truth. So the promise is bounded rather than made unconditionally — this
+document's rule is that a capture is either persisted or visibly refused, and this is the one case that can
+be neither.
+
 ## Non-goals
 
 - **Triage, edit, delete and complete while offline.** Capture-only is a far smaller problem and
@@ -406,6 +417,14 @@ implementation cost has to be checked against the implementation; this one was n
   to the caller as *"max 10000 characters"*. **That one is correct**: it is a picked number rather than a
   byte budget in disguise, its name and its comparand agree, and it says "characters" to the user. Do not
   read the paragraph above as a finding against it.
+- ⚠️ **And the route's headroom must stay strict: `MAX_BODY_BYTES = 2 * CAPTURE_QUEUE_MAX_BYTES`, with both
+  ends measured by the same helper.** That factor of two is what makes `413` **unreachable from the
+  queue** — a capture the queue's own byte check accepted cannot then produce a body over the route's, even
+  carrying the JSON envelope plus `clientKey` and `workspaceId` on top of the text. **Set them equal and a
+  capture at the limit `413`s forever:** the queue accepts it, the route refuses it, and the outcome table
+  classifies `413` as retryable *on purpose*, so it retries for the life of that browser profile while the
+  strip says only *"waiting to save"*. This is a constraint on the constant, not an observation about it,
+  and it is stated because `2 *` reads like slack that a later tidy-up could reclaim.
 - **There is exactly one measurement helper**, and both the module and the route must use it. Two
   independent answers to "how big is this" is how these drifted apart.
 
@@ -420,7 +439,37 @@ byte-condition table above.
 quota.** Accounting is implementation-defined, so tying the constant to a real `QuotaExceededError`
 threshold is an implementation-time **measurement**, not something to assert here. 64 KiB is comfortably
 inside every engine's documented floor, and `QuotaExceededError` recovery is a tested path regardless —
-see the testing section.
+specified in the next section.
+
+#### When storage itself fails — the fourth refusal, which was a test with no specification
+
+⚠️ **`QuotaExceededError` recovery was listed as a test and specified nowhere**, and no row in the wording
+table covered *"this browser can no longer store anything"* — so at the one point where the mechanism this
+entire design rests on fails, the document did not say which of its two exits it takes. Review of this spec
+found the hole, and it is the worst place in the design to have one.
+
+**It is reachable, and by nothing the byte cap can prevent.** The cap bounds *this key*; the quota is
+charged per **origin** and exhausted by **device** conditions — an origin already at the browser's ceiling
+for reasons that have nothing to do with this key, a full disk, a profile where the user has restricted
+site data. `setItem` can therefore throw on a queue comfortably inside 64 KB, which is precisely why the
+cap is not the answer to this and a separate exit is needed.
+
+**The exit is the refusal, and it is the same exit every other failure here takes.** `write` catches the
+throw and reports failure, `enqueue` returns a refusal, the words stay in the field, and nothing already
+queued is touched or evicted — the design does not trade someone's older capture for this one, for the same
+reason the item cap does not. What was missing is only the sentence, and it is the one refusal whose remedy
+is not about this app at all:
+
+> *"This browser can't store anything more right now, so this one isn't safe to hold. Your words are still
+> in the box — copy them somewhere safe."*
+
+**It quotes no cap and offers no wait, deliberately.** Unlike the byte-total refusal there is nothing
+queued whose saving would free the space, so *"wait for some to save"* would be the
+remedy-the-user-cannot-act-on defect again. It also does not tell the user to change a storage setting: the
+app cannot see which condition it is in, and a wrong instruction is worse than none.
+
+⚠️ **This is a fourth cap-family refusal, which makes the cap-refusal count four rather than three** —
+another reason the a11y section now says "every refusal state" instead of counting.
 
 #### A shared browser — the queue is per-origin, and that is a privacy gap
 
@@ -1023,6 +1072,24 @@ So each expanded entry carries a **Discard** control:
   So the residual after this ordering is *"a discard may not stick if the tab dies mid-press"*, which is
   the same shape as every other exit in this design: **persisted, or refused and still visible.** There is
   no ordering that makes both deletes atomic, and pretending otherwise is what produced the gap.
+- ⚠️ **Mirror-first closed the worker path and left the foreground's own flush open, in both directions.**
+  Found in review of this spec. The ordering above is about a `sync` event firing between the two deletes;
+  this is about the tab the user is looking at already having a `POST` in flight for the very entry they
+  are confirming, which the two-step confirm makes *likelier* rather than rarer by putting a human pause
+  in the middle of it:
+
+  | The confirm resolves… | What happens as written |
+  | --- | --- |
+  | **after that entry's flush returned `201`** | The entry has already left the queue, so Discard is a **silent no-op** — over a capture that is now in the inbox, which the user will find later having been told it was thrown away |
+  | **while a `POST` for it is in flight** | Both deletes land, the request returns `201`, and the row is written. That is *"a silent save after an explicit refusal"* — the outcome the table above calls unrecoverable and a broken promise |
+
+  **So Discard is refused for an entry with a flush in flight**, and the reason is said rather than the
+  control silently disabled: the flush is bounded at `CAPTURE_TIMEOUT_MS`, so the wait is short and
+  nameable. **And when the confirm resolves against an entry that is no longer queued, the strip says it
+  saved** — *"that one saved just before you discarded it; it's in your inbox now"* — rather than doing
+  nothing. Silence there is the same defect as a silent save, one step further along: the user pressed a
+  destructive control, was shown nothing, and the words are somewhere they were told they would not be.
+
 - **The confirm is what makes the ordering affordable.** Discard already takes the app's two-step confirm,
   so there is a natural point at which to start the mirror delete and await it before touching
   `localStorage` — no user-visible latency is being added to a single press.
@@ -1050,6 +1117,7 @@ it. It says what is true, and each state gets its own sentence because each has 
 | item cap reached | *"20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to."* |
 | **one capture** over the byte bound | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
 | **queue total** at the byte bound | *"There's no room to hold more until some of these save. Your words are still in the box; copy them somewhere safe if you need to."* — no "shorten it", because the capture's own length is not the problem |
+| **storage refuses the write** (`QuotaExceededError`) | *"This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe."* — no wait offered, because nothing queued here would free the space |
 
 **Why `409` needs two sentences and not one: a purged guest sandbox makes the sign-in promise false.**
 A guest workspace is a real workspace **with a TTL**. If it is purged, signing in does not restore it —
@@ -1291,10 +1359,20 @@ Required in the same MR:
   servers as any other capture
 - `df-capture-queue` added to the storage list, with its retention (until saved, or until the user
   clears it)
+- ⚠️ **the IndexedDB mirror named too, and this list omitted it.** Found in review of this spec. The mirror
+  is not an implementation detail of the `localStorage` key — it is a **second at-rest copy of the same
+  user-typed text**, in a different store, written on a different schedule, and deleted on a different
+  trigger (mount-time reconciliation, or the worker's own success). A notice that lists one and not the
+  other is **inaccurate on the day it ships**, on the page UK GDPR Art. 13 makes load-bearing. Its
+  retention is *"until the entry saves, or until reconciliation finds it gone from the queue"*, which is
+  not the same sentence as the key's and cannot be covered by it.
 - `LEGAL_EFFECTIVE_DATE` bumped
 
 `src/lib/legal-fingerprint.test.tsx` hashes the rendered text of both legal pages, so CI reds until the
-date moves. That gate is the reason this cannot be forgotten.
+date moves. That gate is the reason this cannot be forgotten. ⚠️ **It is not a reason the sentence will be
+right.** A fingerprint greens a wrong sentence exactly as happily as a right one — it can only tell that
+the prose changed, never that it became true. The mirror bullet above is the case in point: a notice
+listing `df-capture-queue` and nothing else would have shipped green.
 
 ## Testing
 
@@ -1304,14 +1382,18 @@ TDD, failing test first, in this order:
    retention on `409`/`403`/`5xx` **with the two `blockedBy` values asserted separately** (a test that
    only checks "it was kept" would pass the collapsed-state bug this spec was reviewed for), clearing
    `blockedBy` on `5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. No React, no DOM.
-   - **All three cap refusals get separate tests** — the 20-item bound, the queue **total** reaching 64 KB,
-     and **one** capture exceeding 64 KB on its own — because a single "the capture was refused" assertion
-     passes a collapsed implementation. ⚠️ **Why they are three states and not two is argued once, in the
-     byte-condition table above; it is deliberately not restated here.** Review of this spec flagged that
-     reasoning as appearing in three places, which is a drift trap: the copy for these states has already
-     been corrected twice, and three copies of the argument is how one of them ends up describing a rule
-     the other two no longer follow. The middle one is
-     the case an earlier draft of this spec did not have a message for at all.
+   - **All four refusals in the cap family get separate tests** — the 20-item bound, the queue **total**
+     reaching 64 KB, **one** capture exceeding 64 KB on its own, and a `setItem` that **throws
+     `QuotaExceededError`** — because a single "the capture was refused" assertion passes a collapsed
+     implementation, and each of the four carries a different sentence. The storage one asserts the two
+     things it must not do as well as the refusal: **nothing already queued is evicted**, and the copy
+     offers no wait. ⚠️ **Why they are distinct states is argued once, in the byte-condition table above
+     and the storage section beneath it; it is deliberately not restated here.** Review of this spec
+     flagged that reasoning as appearing in three places, which is a drift trap: the copy for these states
+     has already been corrected twice, and three copies of the argument is how one of them ends up
+     describing a rule the other two no longer follow. ⚠️ **This item said "three", which was correct
+     until `QuotaExceededError` acquired a specification and a sentence** — it was listed as a test on the
+     line above with neither.
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
@@ -1431,6 +1513,19 @@ Behind **#251** and **#253**. All three live in `src/components/inbox/**` and tw
 The parts that do **not** touch `inbox-view.tsx` — the migration, the route, and the pure queue module
 — can land as a first MR in parallel with #251/#253. That is the recommended split: two MRs, the
 server half first.
+
+⚠️ **The two are not independent, and MR 2 carries MR 1's safety net.** Found in review of this spec. The
+last CAS attempt writes **without** the comparison (see *"Two tabs on one storage key"*), so an improbable
+clobber is accepted deliberately — and the reason it is acceptable is not "the loss is small". **The
+clobbered tab has already told its user the words are queued.** That makes it a silent loss *after a
+positive acknowledgement*, which is the one outcome this design forbids everywhere else, and the only thing
+that recovers it is the `storage`-event re-enqueue that the same section explicitly defers to MR 2.
+
+**So either they ship together, or the Goal's promise softens until MR 2 lands.** Shipping MR 1 alone
+behind the unconditional promise is the shape of claim this document has already been reviewed for twice: a
+guarantee whose recovery path is in a different merge request. The choice is cheap either way — the clobber
+needs two tabs committing inside one CPU window, and softening is a wording change to one sentence — but it
+has to be made rather than inherited.
 
 ## Considered and declined
 
