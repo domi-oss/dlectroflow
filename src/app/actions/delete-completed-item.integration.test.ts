@@ -704,4 +704,124 @@ describe("deleteBrainDumpItem — the inbox-zero award it must not re-pay (#251)
     );
     expect(rewards.maybeAwardInboxZero).toHaveBeenCalledWith(WS);
   });
+
+  // ── #251 review — the sibling leak `c7a53b7` left open ────────────────────
+  //
+  // `c7a53b7` closed this for COMPLETED rows by gating on `tookCompletion === 0`,
+  // and a row that banked `step_done` but was never `completedAt`-stamped reads 0
+  // there too. That is the partially-worked shape this issue added a reversal test
+  // for ("an item that was never completed still gives back its done steps"), and
+  // it was waved straight through to the award: a user does 1 of 3 steps, decides
+  // it isn't worth doing, deletes it, and their score goes UP.
+  //
+  // The fix is the predicate itself rather than a third boolean.
+  // `maybeAwardInboxZero` counts `status: Inbox AND completedAt: null AND not
+  // snoozed into the future`, and `tookCompletion === 0` re-tests one third of
+  // that. The comment on the gate declined to restate the rest because two copies
+  // of "what counts as untriaged" would drift — so the definition moved into
+  // `inbox-zero-queue.ts` and both sides read it, and
+  // `inbox-zero-queue.integration.test.ts` is what fails if the SQL shape and the
+  // row shape ever disagree.
+  describe("a partially-worked row that was never completed", () => {
+    /** 3 steps, `done` of them ticked, triaged, `completedAt` never stamped. */
+    const partiallyWorked = async (done: number, status = "triaged") => {
+      const task = await prisma.task.create({
+        data: { title: "1 of 3", workspaceId: WS },
+      });
+      await prisma.step.createMany({
+        data: [1, 2, 3].map((i) => ({
+          taskId: task.id,
+          text: `step ${i}`,
+          order: i,
+          total: 3,
+          estMinutes: 5,
+          done: i <= done,
+        })),
+      });
+      const item = await prisma.brainDumpItem.create({
+        data: { text: "1 of 3", workspaceId: WS, taskId: task.id, status },
+      });
+      await bank(WS, RewardType.StepDone, done);
+      return item;
+    };
+    const points = async () =>
+      (
+        await prisma.rewardEvent.aggregate({
+          where: { workspaceId: WS },
+          _sum: { points: true },
+        })
+      )._sum.points ?? 0;
+
+    it("does not pay 15 points and a free inbox_zero for deleting it", async () => {
+      // The real award, not the stub, because the measurement IS the defect:
+      // took back 10, paid out 15.
+      const rewards = await import("@/lib/rewards");
+      const real =
+        await vi.importActual<typeof import("@/lib/rewards")>("@/lib/rewards");
+      vi.mocked(rewards.maybeAwardInboxZero).mockImplementationOnce(
+        real.maybeAwardInboxZero,
+      );
+      const item = await partiallyWorked(1);
+      expect(await points()).toBe(10);
+      expect(await hasBadge(WS, BadgeKey.InboxZero)).toBe(false);
+
+      const { deleteBrainDumpItem } = await import("./braindump");
+      await deleteBrainDumpItem(item.id);
+
+      // Measured before the fix: `pts=15, inbox_zero×1, badges=[inbox_zero]`.
+      expect(await points()).toBe(0);
+      expect(await countRewards(WS, RewardType.InboxZero)).toBe(0);
+      expect(await hasBadge(WS, BadgeKey.InboxZero)).toBe(false);
+    });
+
+    it("does not run the award for a triaged row at all, worked or not", async () => {
+      // The general form, and why this is the predicate rather than "did it bank
+      // anything": a triaged row was never in the count, so removing it cannot
+      // have lowered it, whatever it had done.
+      const rewards = await import("@/lib/rewards");
+      const item = await partiallyWorked(0);
+      vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+      const { deleteBrainDumpItem } = await import("./braindump");
+      await deleteBrainDumpItem(item.id);
+
+      expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+    });
+
+    it("does not run the award for a row snoozed into the future", async () => {
+      // The third of the three terms, and the one the gate could not see at all
+      // before the predicate was shared. A snoozed row is not in the count
+      // either, so deleting it cannot empty the queue.
+      const rewards = await import("@/lib/rewards");
+      const item = await prisma.brainDumpItem.create({
+        data: {
+          text: "not until tomorrow",
+          workspaceId: WS,
+          status: "inbox",
+          snoozedUntil: new Date(Date.now() + 86_400_000),
+        },
+      });
+      vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+      const { deleteBrainDumpItem } = await import("./braindump");
+      await deleteBrainDumpItem(item.id);
+
+      expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+    });
+
+    it("still runs the award for an UNTRIAGED row that had steps worked on it", async () => {
+      // The control that keeps the fix from being "never award on a delete".
+      // ▶ Focus gives an item a Task and a Step without triaging it, so an
+      // untriaged row CAN carry a done step — and it was genuinely in the queue,
+      // so removing it genuinely can empty it. The award is correct here.
+      const rewards = await import("@/lib/rewards");
+      const item = await partiallyWorked(1, "inbox");
+      vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+      const { deleteBrainDumpItem } = await import("./braindump");
+      await deleteBrainDumpItem(item.id);
+
+      expect(rewards.maybeAwardInboxZero).toHaveBeenCalledWith(WS);
+    });
+  });
 });

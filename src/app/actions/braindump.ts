@@ -19,6 +19,7 @@ import {
   BadgeKey,
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
+import { countsTowardInboxZero } from "@/lib/inbox-zero-queue";
 import { currentWorkspaceId } from "@/lib/workspace";
 import {
   splitInlineNote,
@@ -401,9 +402,9 @@ export async function deleteBrainDumpItem(id: string) {
     // will read it, and `delete-braindump-item.test.ts` asserts the argument.
   }, TASK_WRITER_TX_BUDGET);
 
-  // #251 — award only when this call actually removed a row that could have been
-  // in the queue `maybeAwardInboxZero` measures. Two independent reasons it might
-  // not have been, and BOTH are needed:
+  // #251 — award only when this call actually removed a row that WAS in the queue
+  // `maybeAwardInboxZero` measures. Three independent facts, and all three are
+  // needed:
   //
   //  * `removedThis` — a call that deleted no row cannot have emptied anything.
   //    This is the concurrent double-delete: the loser's `deleteMany` matches
@@ -411,24 +412,33 @@ export async function deleteBrainDumpItem(id: string) {
   //    like the winner. Gating on `tookCompletion` alone let it through, because
   //    the loser claims no completion either — the winner had already cleared the
   //    flag — so it reads exactly like an untriaged delete.
-  //  * `tookCompletion === 0` — `maybeAwardInboxZero` counts rows matching
-  //    `status: Inbox` AND `completedAt: null`, so a completed row was never in
-  //    that count and removing it cannot lower it. The queue is provably the same
-  //    size on both sides of this call, so an award can only re-pay an inbox zero
-  //    the workspace was already sitting on: measured at +15 points and an
-  //    `inbox_zero` badge, on the one call whose job is to take a payout back.
+  //  * `countsTowardInboxZero(existing)` — was the row one that count could see.
+  //    This paragraph used to say the opposite, and it was wrong: it declined to
+  //    re-test `status`/`snoozedUntil` on the grounds that a second copy of the
+  //    predicate would drift, and accepted a gate narrower than the invariant it
+  //    serves. What that cost is `c7a53b7`'s leak surviving for its sibling shape.
+  //    A row that banked `step_done` but was never `completedAt`-stamped — 1 of 3
+  //    steps done, then abandoned — reads `tookCompletion === 0` and was waved
+  //    straight through: measured at 10 points taken back and 15 paid out, plus a
+  //    once-ever `inbox_zero` badge, so a user's score went UP for deleting
+  //    unfinished work. The drift worry was real and the answer was not to accept
+  //    a wrong gate: the definition now lives in `rewards.ts` next to the SQL the
+  //    award itself uses, and `inbox-zero-queue.integration.test.ts` fails if the
+  //    two ever disagree.
+  //  * `tookCompletion === 0` — kept, and not redundant. `existing` is a snapshot
+  //    read before the transaction, so a concurrent `completeItem` that landed in
+  //    between leaves it saying `completedAt: null` while the guarded `updateMany`
+  //    reports `count: 1`. The row was completed when it was deleted, and only
+  //    this term knows that.
   //
-  // An untriaged row is the case that must survive both — deleting it genuinely
-  // can empty the queue — and there is a control test for it at each level.
-  //
-  // Deliberately NOT also re-testing `status`/`snoozedUntil` from the snapshot.
-  // A triaged or future-snoozed row is not in that count either, so this gate is
-  // narrower than the invariant it serves — but the only way to close that here
-  // is to restate `maybeAwardInboxZero`'s predicate in a second place, and two
-  // copies of "what counts as untriaged" drifting apart is a worse bug than the
-  // one it would fix. Closing it properly means making the award fire on a
-  // transition rather than on a level, which is a change to every caller.
-  if (removedThis && tookCompletion === 0)
+  // An untriaged row is the case that must survive all three — deleting it
+  // genuinely can empty the queue, including one ▶ Focus has given a worked step
+  // to — and there is a control test for it at each level.
+  if (
+    removedThis &&
+    tookCompletion === 0 &&
+    countsTowardInboxZero(existing, new Date())
+  )
     await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   // #251 — the Done tab renders the same rows and the dashboard renders the

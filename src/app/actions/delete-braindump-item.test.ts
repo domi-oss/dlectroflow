@@ -220,9 +220,17 @@ describe("deleteBrainDumpItem", () => {
   });
 
   it("still awards inbox-zero + revalidates after cleanup", async () => {
+    // #251 review — the fixture now states the three columns the award's gate
+    // reads (`countsTowardInboxZero`), because the gate is the queue's own
+    // predicate rather than a proxy for one third of it. A row that names only
+    // `taskId` is not a row this action can meet, and leaving it that way would
+    // have made this control pass or fail on `undefined`.
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",
       taskId: null,
+      status: "inbox",
+      completedAt: null,
+      snoozedUntil: null,
     });
     // Explicit, not inherited from the file default: this case is an UNTRIAGED
     // row, whose removal genuinely can empty the queue `maybeAwardInboxZero`

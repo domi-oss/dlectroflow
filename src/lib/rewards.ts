@@ -4,10 +4,10 @@ import {
   RewardType,
   RewardPoints,
   BadgeKey,
-  BrainDumpStatus,
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
+import { inboxZeroQueueWhere } from "@/lib/inbox-zero-queue";
 import { getSettings, getStreak } from "@/lib/db";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -46,16 +46,16 @@ export async function logReward(
 /**
  * When the needs-triage queue just hit empty: award the once-ever Inbox-zero
  * badge (idempotent) and the once/day Inbox-zero points.
+ *
+ * The queue's definition lives in `inbox-zero-queue.ts` since #251's review, so
+ * that `deleteBrainDumpItem` can ask whether the row it removed was in it without
+ * restating the three terms — read that module's note for why there are two
+ * shapes of one predicate and what keeps them honest.
  */
 export async function maybeAwardInboxZero(workspaceId: string) {
   const now = new Date();
   const remaining = await prisma.brainDumpItem.count({
-    where: {
-      workspaceId,
-      status: BrainDumpStatus.Inbox,
-      completedAt: null,
-      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
-    },
+    where: inboxZeroQueueWhere(workspaceId, now),
   });
   if (remaining > 0) return;
   // Inbox-zero badge — once ever, awarded the first time the queue empties.
@@ -505,6 +505,12 @@ export async function revokeUnqualifiedBadges(
  * single ordered query cannot express that preference. Both are served by the
  * `(workspaceId)` and `(createdAt)` indexes on `RewardEvent`, and the second only
  * runs when the first came back empty.
+ *
+ * The two reads are written out rather than sharing a `where`-taking helper, and
+ * that is the scoping harness's rule rather than a style choice: it requires the
+ * scope to appear in the call's OWN arguments, so a helper hides exactly the term
+ * that matters. Caught by `scoping.harness.test.ts` when this was first written
+ * the tidier way.
  */
 async function reverseLatestReward(
   workspaceId: string,
@@ -512,16 +518,19 @@ async function reverseLatestReward(
   db: Prisma.TransactionClient,
   notAfter?: Date,
 ): Promise<boolean> {
-  const newest = (where: Prisma.RewardEventWhereInput) =>
-    db.rewardEvent.findFirst({
-      where,
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
   const latest =
     (notAfter
-      ? await newest({ workspaceId, type, createdAt: { lte: notAfter } })
-      : null) ?? (await newest({ workspaceId, type }));
+      ? await db.rewardEvent.findFirst({
+          where: { workspaceId, type, createdAt: { lte: notAfter } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        })
+      : null) ??
+    (await db.rewardEvent.findFirst({
+      where: { workspaceId, type },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }));
   if (!latest) return false;
   // `workspaceId` in the filter as well as the id, not because the id is in doubt
   // — it came from the workspace-scoped read directly above — but because
