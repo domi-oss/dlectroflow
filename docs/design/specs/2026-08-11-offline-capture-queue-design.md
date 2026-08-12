@@ -26,6 +26,15 @@ explicitly not the source of truth. So the promise is bounded rather than made u
 document's rule is that a capture is either persisted or visibly refused, and this is the one case that can
 be neither.
 
+⚠️ **And _"whether or not you reopen the app"_ is Chromium-only, which the Goal did not say.** Background
+Sync is the only mechanism that can flush with no tab open, and `registration.sync.register` **no-ops on
+Safari and Firefox** — a fact this document already records under _Flush triggers_ and then contradicted by
+promising the behaviour unconditionally three hundred lines earlier. On the stated primary target, Android
+Chrome, the promise holds as written. Everywhere else the words are just as durable and just as
+unlosable — they save on the **next open**, from the foreground triggers, which is the whole feature minus
+the part nobody watches. That is worth being accurate about rather than generous: a promise that silently
+does not apply to a reader's own browser is the kind this document has spent four sections removing.
+
 ## Non-goals
 
 - **Triage, edit, delete and complete while offline.** Capture-only is a far smaller problem and
@@ -67,8 +76,10 @@ blurred together. They are labelled from here on.**
 - **Sibling-branch verified** — anything describing `src/lib/capture-queue.ts`, `src/lib/capture-write.ts`
   or `POST /api/braindump` as *existing code*: `byteLength`, `COMMIT_ATTEMPTS`, `newClientKey`'s three
   tiers, `isQueuedCapture`, `MAX_BODY_BYTES`, and every measurement taken against them. **None of that is
-  on `main`.** It lives on `feat/175-capture-queue-server` — the branch of **!334 — _"the capture route
-  and the queue module"_**, still open — and MR 1 (below) merges **first**.
+  on `main`.** It lives on `feat/175-capture-queue-server` — the branch of **MR 1**, open as
+  **!334 — _"offline capture queue — server half (module, migration, route)"_** — and **this document's own
+  MR merges ahead of it**: **!332 — _"design the persisted offline brain-dump capture queue"_**. The three
+  artefacts and their order are set out in _Sequencing_ below.
 - **Not implemented anywhere yet** — ⚠️ **`blockedUnder`.** Verified at `fd768ff`, the sibling branch's
   head: the identifier appears nowhere in `src/`. `QueuedCapture` there carries `blockedBy` and nothing
   else, so every statement in this document about the `blockedUnder` comparison — the withdrawn sign-in
@@ -149,7 +160,17 @@ here — they are only additional *flush* triggers.
 
 ### Storage
 
-`localStorage`, one key, following the repo's existing `df-` convention:
+`localStorage`, one key, following the `df-` prefix three of the repo's five client-side keys already use:
+
+⚠️ **This line said "the repo's existing `df-` convention" and overstated how settled that is.** Verified
+at `cb3aeee`: `df-theme`, `df-hyper-focus` and `df-guest-banner` carry the prefix; the two day-keys are
+`dlectroflow-review-nudge-fired-<date>` and `dlectroflow-roundup-fired-<date>` and do not. `df-guest-banner`
+is also in **`sessionStorage`**, not `localStorage`, so it is a prefix sibling rather than a storage one.
+**Both load-bearing halves of the original claim survive** — every existing key is a flag or a preference,
+and none of them holds user-typed text, which is what makes `df-capture-queue` a new category for the
+privacy notice. `df-` is still the right prefix to pick; it is a majority convention rather than a
+universal one, and a reader auditing the five keys against this sentence would have found it false.
+
 
 ```
 df-capture-queue → QueuedCapture[]
@@ -159,7 +180,16 @@ df-capture-queue → QueuedCapture[]
 type QueuedCapture = {
   /** Client-generated. The idempotency key — see below. */
   clientKey: string;
-  /** Raw text as typed, inline note syntax included; the server splits it. */
+  /**
+   * The text as typed, inline note syntax included; the server splits it.
+   *
+   * ⚠️ This said "raw text as typed", which is not what happens: `enqueue`
+   * stores `capture.text.trim()`. The route deliberately does **not** trim, so
+   * the two write paths disagree by one transformation — harmless, because
+   * leading and trailing whitespace is not content anyone typed on purpose, but
+   * worth stating rather than leaving as a surprise to whoever compares a queued
+   * capture against a directly-written one.
+   */
   text: string;
   /** Workspace this was captured under. Compared, never trusted — see below. */
   workspaceId: string;
@@ -790,6 +820,14 @@ strictly more valuable to an attacker, so the same reasoning applies at least as
 about signing in, and a request the user never made has no business producing either — that is the same
 message-collapse this document has already been reviewed for twice.
 
+⚠️ **So it needs a sentence of its own, and the wording table had no row for it** — the document required
+the copy not to be reused without ever saying what to use instead, which is how a "must not reuse" ends up
+reusing. The row is in the table under _What the user sees_, and its shape follows from what the user can
+actually do about it: **nothing**. A misconfigured origin rule is an operator's problem, not theirs, and the
+`400` is classified retryable, so the honest sentence says the words are still held and will try again, and
+names neither an account nor a remedy. The **operator's** legibility comes from the distinct log reason
+above, not from this sentence.
+
 ⚠️ **The service worker's own `fetch` must still pass.** A worker's `fetch` carries the worker's own
 origin, which is the registering origin, so it does — and that means at this route's boundary it is **the
 same case as a matching-`Origin` request from a tab**, not a third thing to check. It is called out
@@ -1118,6 +1156,7 @@ it. It says what is true, and each state gets its own sentence because each has 
 | **one capture** over the byte bound | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
 | **queue total** at the byte bound | *"There's no room to hold more until some of these save. Your words are still in the box; copy them somewhere safe if you need to."* — no "shorten it", because the capture's own length is not the problem |
 | **storage refuses the write** (`QuotaExceededError`) | *"This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe."* — no wait offered, because nothing queued here would free the space |
+| **the origin check refused the request** (`400`, CSRF) | *"Something blocked this from reaching the server, so it's still waiting here. Nothing is lost — it'll try again."* — no sign-in offered and no account mentioned, because the user did nothing wrong and nothing about their account is implicated |
 
 **Why `409` needs two sentences and not one: a purged guest sandbox makes the sign-in promise false.**
 A guest workspace is a real workspace **with a TTL**. If it is purged, signing in does not restore it —
@@ -1352,7 +1391,7 @@ User-typed text in browser storage is a new category for this app, and the notic
 the opposite by omission — it names browser storage once and pins it to a theme preference that
 "never leaves your device".
 
-Required in the same MR:
+Required in **MR 2**, the MR that first writes user text to storage (see _Sequencing_):
 
 - a companion sentence in the "your data lives on servers in the UK" section, saying a capture that
   cannot reach the server is held in this browser until it saves, and that it is sent to the same
@@ -1513,6 +1552,22 @@ Behind **#251** and **#253**. All three live in `src/components/inbox/**` and tw
 The parts that do **not** touch `inbox-view.tsx` — the migration, the route, and the pure queue module
 — can land as a first MR in parallel with #251/#253. That is the recommended split: two MRs, the
 server half first.
+
+⚠️ **"MR 1" and "MR 2" are used throughout this document and were defined nowhere**, which review of this
+spec caught: this section is the one that decides the split and it did not name a single merge request,
+while the preamble asserted *"this spec's own sequencing says !332 merges first"* about an MR that appeared
+nowhere below. **Three artefacts, in this order:**
+
+| Order | Name | What it is |
+| --- | --- | --- |
+| 1 | **This document** — !332 — _"design the persisted offline brain-dump capture queue"_ | Docs only. First, because three files on !334 cite it, and a citation to an unmerged path is the dangling reference the order exists to prevent |
+| 2 | **MR 1 — the server half** — !334 — _"offline capture queue — server half (module, migration, route)"_ | The migration, `POST /api/braindump`, and the pure queue module. Touches no `inbox-view.tsx`, so it lands in parallel with #251/#253 |
+| 3 | **MR 2 — the strip** — not yet opened | The strip and its live regions, Discard, the flush triggers, the service worker and the IndexedDB mirror, the `storage`-event re-enqueue, and the privacy-notice edit. Behind #251/#253, because it is all in `inbox-view.tsx` |
+
+**The privacy notice belongs to MR 2 rather than MR 1, and that follows from the notice's own subject
+matter:** nothing puts user-typed text into browser storage until the strip calls `enqueue` from
+`submit()`. MR 1 ships the module that *could*, with no caller. A notice describing storage that is not
+yet written to would be the mirror image of the omission it exists to fix.
 
 ⚠️ **The two are not independent, and MR 2 carries MR 1's safety net.** Found in review of this spec. The
 last CAS attempt writes **without** the comparison (see *"Two tabs on one storage key"*), so an improbable
