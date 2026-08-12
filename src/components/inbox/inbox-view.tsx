@@ -2183,7 +2183,12 @@ export function InboxView({
         >
           {t("action.delete", voice)}
         </button>
-        <span className="text-muted-foreground">·</span>
+        {/* Decorative punctuation — hidden for the reason `library-rows.tsx` and
+            `library-done-delete.tsx` hide theirs, which this factory was missed
+            for (#251 review). */}
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
         <button
           className={cn(
             touchTarget,
@@ -4231,16 +4236,37 @@ function ItemRow({
   ) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
+        {/* #251 review — the FOURTH copy of the armed confirm, and the last one
+            still at 24px. #251 sized the other three and diagnosed why the guard
+            could not see any of them (`expectFullTargets` measures every control
+            in `[data-row-actions]` but never opens a confirm), then added
+            confirm-opening tests for two — leaving this one, which is rendered
+            for every untriaged inbox row and is therefore the busiest surface in
+            the app. The pair REPLACES the 44px 🗑 that opened it, so a small pair
+            shrinks the action line under the pointer at exactly the moment a
+            mis-tap deletes something (WCAG 2.5.5). */}
         <button
           onClick={onConfirmDelete}
-          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          className={cn(
+            touchTarget,
+            "text-destructive rounded-md px-2.5 py-1 font-medium",
+          )}
         >
           {t("action.delete", voice)}
         </button>
-        <span className="text-muted-foreground">·</span>
+        {/* Punctuation between two buttons, so it is hidden rather than read as
+            content — the treatment both library factories got in #251 and
+            neither inbox one, which had the same confirm reading "Delete ·
+            Cancel" here and "Delete Cancel" there. */}
+        <span aria-hidden="true" className="text-muted-foreground">
+          ·
+        </span>
         <button
           onClick={onCancelDelete}
-          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          className={cn(
+            touchTarget,
+            "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1",
+          )}
         >
           {t("action.cancel", voice)}
         </button>

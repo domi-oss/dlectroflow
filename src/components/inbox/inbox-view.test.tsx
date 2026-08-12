@@ -4186,6 +4186,100 @@ describe("InboxView — row action group target size (#184)", () => {
     ).toBeInTheDocument();
     expectFullTargets(container);
   });
+
+  it("sizes the ARMED delete confirm, in both factories that render one", async () => {
+    // #251 review — the blind spot this guard has, closed rather than only
+    // diagnosed. `expectFullTargets` measures every control in every
+    // `[data-row-actions]` group and never opens a confirm, so the armed
+    // "Delete · Cancel" pair was unmeasured in all four copies of it. #251 sized
+    // three and added confirm-opening tests for two, which left `ItemRow`'s own
+    // factory — the one rendered for every untriaged row, the app's busiest
+    // surface — at 24px on exactly the press where a mis-tap deletes something
+    // (WCAG 2.5.5).
+    //
+    // `confirmDeleteId` is list-wide, so arming one row disarms the other: the
+    // rows are armed and measured one at a time rather than together.
+    const user = userEvent.setup();
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          // `ItemRow`'s own `deleteControl` — the untriaged review row.
+          makeItem({ id: "t251f4a", text: "review row" }),
+          // `InboxView`'s `deleteControl`, via the Done bucket's action line.
+          makeItem({
+            id: "t251f4b",
+            text: "finished thing",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+    for (const text of ["review row", "finished thing"]) {
+      const row = screen.getByText(text).closest("li")!;
+      await user.click(within(row).getByRole("button", { name: "Delete" }));
+      // Really armed, so a pass cannot come from having measured the resting
+      // state twice.
+      expect(
+        within(row).getByRole("button", { name: "Cancel" }),
+      ).toBeInTheDocument();
+      expectFullTargets(container);
+    }
+  });
+
+  it("hides the confirm's decorative separator from assistive technology", async () => {
+    // #251 hid this `·` in both Library factories and neither inbox one, so the
+    // same armed confirm reads as "Delete · Cancel" here and "Delete Cancel"
+    // there. It is punctuation between two buttons and carries no meaning.
+    //
+    // The confirm has to be OPENED to see it — the first version of this spec
+    // asserted over the resting markup and passed against the unfixed code,
+    // because the separator only exists in the armed branch and the `·` it found
+    // in `container.innerHTML` belonged to an unrelated, already-hidden row meta.
+    // A vacuous pass on a guard for an invisible element is the whole reason this
+    // fold exists, so it is worth naming here.
+    const user = userEvent.setup();
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "t251f4c", text: "review row" }),
+          makeItem({
+            id: "t251f4d",
+            text: "finished thing",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    for (const text of ["review row", "finished thing"]) {
+      const row = screen.getByText(text).closest("li")!;
+      await user.click(within(row).getByRole("button", { name: "Delete" }));
+      const pair = within(row)
+        .getByRole("button", { name: "Cancel" })
+        .closest("span")!;
+      const separators = Array.from(
+        pair.querySelectorAll<HTMLElement>("span"),
+      ).filter((s) => s.textContent === "·");
+      // The non-zero control, per row: the separator is really in this pair, so
+      // the loop below cannot be checking an empty list.
+      expect(
+        separators,
+        `no separator in the armed pair for "${text}"`,
+      ).toEqual([expect.anything()]);
+      expect(separators[0]).toHaveAttribute("aria-hidden", "true");
+    }
+    expect(container).toBeTruthy();
+  });
 });
 // ── #186 — the "add note" affordance on both brain-dump fields ──────────────
 //
