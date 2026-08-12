@@ -387,28 +387,68 @@ an omission rather than a decision.
 protect: unsaved words, belonging to someone who has not necessarily finished with them. A capture queue
 that empties itself on sign-out is a capture queue that loses words on the most ordinary event there is.
 
-**So the rule is: scope the VIEW, keep the DATA.**
+**So the rule is: scope the TEXT, account for the REST.** Owner decision, 2026-08-12.
 
-- **The strip renders only entries whose `workspaceId` matches the live session's resolved workspace.** B
-  never sees A's text. A's entries are inert for B — not displayed, not flushed, not retried.
-- **Nothing is deleted on sign-out.** A's entries survive and flush when A signs back in, which is the
-  behaviour the whole design promises.
-- **The two caps split, and the split follows the purposes this document already gave them.** The
-  **item cap counts per workspace**, because its stated job is keeping the strip legible and the wait
-  comprehensible — both properties of what *this* user can see. The **byte cap counts every entry in the
-  key**, because its job is preventing `QuotaExceededError` and the quota is charged per origin. Splitting
-  them the other way round would either let the strip fill with rows the user cannot act on, or let two
-  workspaces jointly exhaust the quota with neither seeing why.
+⚠️ **An earlier version of this section said only "scope the view, keep the data", and that was not enough
+— it broke the feature.** Three independent reviews of this document converged on the same defect, and it
+is recorded because the fix is not obvious from the broken version:
 
-⚠️ **Residual, named rather than left to be found:** B can still be refused by the byte cap because of A's
-entries, and the refusal copy — *"no room to hold more until some of these save"* — will name captures B
-cannot see. That is a **metadata** disclosure (that *something* is queued), never content. It is accepted
-because the alternative is either deleting A's words or letting the origin's quota be exhausted, and both
-are worse. The copy stays as it is: it is about room, and it remains true.
+**With a bare match-or-hide filter, every state this section exists to serve becomes unreachable.** #220
+deletes the owner cookie in the same response that answers `403`, so the next boot resolves a **fresh guest
+sandbox**. The owner's entries then match nothing, which means:
+
+- the `403` copy can never render — dead by the filter, not by #220's behaviour;
+- the *"Your session expired. Sign in and these will save"* sentence is hidden **exactly when it is the one
+  thing the user needs**, leaving a silent empty strip over stranded words;
+- `blockedUnder` becomes dead code — for any *visible* entry it equals the live workspace by construction,
+  so the row that fires when they differ never fires;
+- **Discard cannot reach the stranded entries at all**, because it lives on an expanded row in the filtered
+  list. The release valve disappears precisely for the entries that need it.
+
+And two paths produce entries that can **never** match again: a **guest sandbox purged** by
+`prisma/scheduled-purge.ts` past its TTL, and an **account deleted** (`Workspace.userId` is
+`onDelete: Cascade`). Those are neither persisted nor visible — the one outcome this document forbids —
+while still consuming the origin-wide byte cap forever.
+
+**The rule, therefore:**
+
+- **Entries matching the live workspace render in full**, as before.
+- **Entries that do not match are represented, never revealed** — one collapsed row: *"N captures from an
+  earlier sign-in are still held in this browser."* No text, no author, no workspace. **B never reads A's
+  words**, and A is told something recoverable exists rather than meeting an empty strip.
+- **That row carries a discard-without-revealing control.** It is the release valve, and it is the only
+  reason the byte cap cannot become a permanent denial of capture (below). ⚠️ **It cannot use the ordinary
+  two-step confirm**, which exists so the confirm is made against words the user can read — here they may
+  not. It confirms against the **count and the origin** instead, and says plainly that the text cannot be
+  shown.
+- **Nothing is deleted on sign-out.** Matching entries survive and flush when their owner returns.
+- **Orphans expire.** A stored entry whose workspace has been unresolvable for longer than the guest TTL is
+  removed, because the privacy notice's retention promise — *"until saved, or until the user clears it"* —
+  is **false** for an entry where neither trigger can ever fire. Storage limitation is not optional.
+
+**The two caps split, and the split follows the purposes this document already gave them.** The **item cap
+counts per workspace**, because its stated job is keeping the strip legible and the wait comprehensible —
+properties of what *this* user can see. The **byte cap counts every entry in the key**, because its job is
+preventing `QuotaExceededError` and the quota is charged per origin.
+
+⚠️ **The byte cap's residual is a denial of capture, not merely a disclosure, and the earlier version of
+this paragraph missed that.** A can leave a long capture stranded and B's first offline capture is refused
+with *"no room to hold more until some of these save"* — an event that **cannot occur** while A is signed
+out. Without the discard control above, B has permanently lost offline capture on that browser and is told
+to wait for something impossible. **The control is what makes the residual survivable**, which is why it is
+part of this rule and not a nicety.
+
+The disclosure that remains is **size, not just presence**: B can measure the stranded volume to the byte
+by probing with captures of known length. Accepted — it is B's own storage quota being consumed, and B has
+a control to reclaim it.
+
+**One honest bound on the privacy property:** it is scoped to a **workspace**, not to a person. Two people
+sharing the browser as guests resolve the *same* guest workspace, so B does see A's queued text. That is
+not a new disclosure — B already sees A's *saved* inbox in that case.
 
 **This is not the same problem as the `409` path** and must not be collapsed into it. A `409` is the
-*server* refusing a capture whose declared workspace no longer matches. This is the *client* showing text
-to the wrong person, and it happens before any request is made.
+*server* refusing a capture whose declared workspace no longer matches. This is the *client* deciding what
+to put on screen, and it happens before any request is made.
 
 ### Idempotency — a separate column, not a client-chosen primary key
 
@@ -471,7 +511,32 @@ body: { clientKey, text, workspaceId }
 | Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` — unless already `account-revoked`, which wins |
 | Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
 | **No resolvable workspace at all** — `MissingWorkspaceError`, and not its `RevokedAccountError` subclass | **`401`** | keep, treat as **retryable**, clear `blockedBy` — **but not `account-revoked`** |
-| Anything else | `5xx` / network failure | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
+| **Origin not allowed** (the rule above), or a body this route cannot parse or accept | **`400`** | keep, **retryable** |
+| **Body over the size backstop** | **`413`** | keep, **retryable** |
+| Anything else — including any status not listed here | `5xx`, network failure, **anything unrecognised** | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
+
+⚠️ **`400` and `413` were missing and the table claimed to be exhaustive in the same breath** — review of
+this spec caught it, and the sentence below asserting that the queue *"must classify every status the route
+can return"* was written one paragraph away from a table that did not. The route returns `400` on five
+conditions and `413` on one.
+
+**The default arm is `keep` and `retry`, never `drop`, and that is the load-bearing part.** An unlisted
+status must not be able to discard words, so the last row is written to catch *anything* rather than to
+describe `5xx`. `400` and `413` are classified retryable knowing they will not clear on their own — a
+misconfigured origin rule or a body genuinely over the cap retries forever — because the alternative is a
+client that deletes a capture on a status the server may be returning for a reason the client cannot see.
+**A wasted retry is recoverable; a dropped capture is not.**
+
+⚠️ **A terminal mark is taken from the parsed body, never from the status line.** The route answers
+`{ "status": "account-revoked" }` alongside its `403`, and the mark is set only when the body carries a
+recognised `FlushOutcome`. This matters because a `403` the app did not send — an auth proxy in front of a
+self-host, an ingress rule, a corporate filter — would otherwise permanently mark a perfectly good capture
+*"This account can no longer save"*, whose only exit is deliberately destroying the words.
+
+⚠️ **And the CSRF refusal is `400`, not `403`, deliberately.** `403` already means `account-revoked` in this
+vocabulary, so reusing it would collapse two states with different remedies — the same defect this document
+has been reviewed for twice. The implementation made that call; it is recorded here because this document
+merges first and tells a reader to copy `logout/route.ts`, which returns `403`.
 
 ⚠️ **`401` was missing from this table and is added here** — it was referenced as retryable in the
 Background Sync section while never being defined as an outcome, so the document named a status its own
@@ -561,7 +626,8 @@ for it?" does.
 
 The route therefore carries the house pattern, which the repo already has and documents:
 
-- `requestOrigin(req)` from `@/lib/origin` gives the allowed origin;
+- the allowed origin is **the origin the request arrived on** — see the ⚠️ below, which is the whole
+  content of this bullet and the thing an implementation must not get wrong;
 - **reject when `Origin` is present and does not match**;
 - **allow a missing `Origin`**, deliberately, for non-browser clients — POST-only plus `SameSite=lax`
   still bound it.
@@ -569,6 +635,47 @@ The route therefore carries the house pattern, which the repo already has and do
 Copied from `src/app/api/auth/logout/route.ts`, which carries the same three rules under a CWE-352
 comment, and cited there so the two cannot drift apart the way `focus-timer.tsx` and the inbox notice
 already did once.
+
+#### ⚠️ The allowed origin is NOT `PUBLIC_ORIGIN` — production serves more than one host on purpose
+
+**An earlier version of this section said `requestOrigin(req)` gives the allowed origin. That would break
+capture completely on one of the two hostnames production serves, online and offline alike, and `!334`
+implemented it.** Found by an independent review of this document and then measured rather than argued:
+
+| Check | Result |
+| --- | --- |
+| `curl https://dlectroflow.dev/` | **`200`, no redirect** |
+| `curl https://work.dlectroflow.dev/` | `200`, no redirect |
+| `PUBLIC_ORIGIN` on the production deployment | **`https://work.dlectroflow.dev`** |
+| Ingress hosts | `work.dlectroflow.dev`, `dlectroflow.dev`, `dlectroflow.dlectronique.dev` |
+
+**And the apex is served without a redirect deliberately.** `.gitlab-ci.yml` records it as
+`legacyHosts[1]`, *"served WITHOUT a redirect … That is deliberate"*, and `src/lib/auth/gate.ts` states
+that `/` must keep answering `200` on every hostname the ingress serves. `/api/braindump` is **not** in
+`CANONICAL_ORIGIN_PREFIXES`, so nothing moves the request onto the canonical host first.
+
+`requestOrigin` pins `PUBLIC_ORIGIN` in production, so a capture typed on `https://dlectroflow.dev` sends
+`Origin: https://dlectroflow.dev`, which does not match, and **every capture is refused** — the foreground
+write too, since this design routes it through the same handler. The queue then fills to its cap with words
+that can never leave it.
+
+**So the comparand is the origin the request arrived on** — `inboundHost(req.headers)` — or an explicit
+allowlist of the hosts the ingress serves. **That still blocks cross-site**, which is the whole job: a
+forged POST carries the attacker's `Origin` against the victim's `Host`, and ingress-nginx overwrites
+`x-forwarded-host`, so the header cannot be spoofed past it. `inboundHost`'s own docblock forbids
+*echoing* it into a served URL; a comparison is not that. `requestOrigin`'s `PUBLIC_ORIGIN` pinning exists
+for OAuth **redirect URIs**, which is a different job with a different failure mode.
+
+⚠️ **This was a regression rather than a pre-existing hole, and the mechanism is worth keeping.** Capture
+works on the apex today because the write is a **server action**, and Next's action guard compares `Origin`
+against the request's own `Host`/`x-forwarded-host`. Moving the write to a route handler changed the
+comparand from *"the host the browser used"* to *"the one canonical host"*. **Any future route handler that
+replaces a server action inherits this trap.**
+
+**And a misconfiguration here must be legible.** A wrong allowed-origin refuses every capture with a `400`
+that the queue maps to a retry, so it presents to the user as *"waiting to save"* forever and to an
+operator as nothing at all. The `400` therefore carries a **distinct** reason from the body-shaped `400`s —
+not for the caller, who learns nothing, but so the log line names the origin rule rather than the queue.
 
 **Why it is worth doing when `SameSite=lax` already blocks a cross-site POST:** `logout/route.ts`'s own
 comment is explicit that **lax does not block a *same-site* POST**, and the repo chose defence-in-depth
@@ -684,6 +791,17 @@ discarded or already saved.
 **Precedence still decides the merge**, so this cannot downgrade anything: an `account-revoked` mark in the
 mirror wins over an absent one, and a `session-expired` mark in the mirror loses to an `account-revoked`
 already in `localStorage`.
+
+⚠️ **The worker may only write `account-revoked`, and never `session-expired`.** Review of this spec found
+the gap: a `session-expired` mark is only useful alongside `blockedUnder`, which is *"the workspace the
+CLIENT was running under"* — and the worker has no session to resolve, so it cannot compute that value. A
+worker writing the mark without it would produce an entry the strip must reason about with half its inputs
+missing, and the natural repair (persisting a workspace the worker guessed) is worse than the gap.
+
+**So a `409` the worker observes is left unmarked and simply retried.** It costs one wasted background
+attempt per pass and it is self-correcting: the next foreground flush records the mark properly, with
+`blockedUnder`, from a session it actually has. `account-revoked` needs no such context — it is terminal on
+the status alone — which is exactly why it is the one mark the worker can be trusted with.
 
 **Which means the mirrored entry has to carry `blockedBy`, not just the capture.** Stated here because the
 mirror is described above as "a cache of the real thing" and a reader could reasonably mirror only the
