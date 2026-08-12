@@ -7,16 +7,40 @@
  *  - rewardStepDone routes the completion path through the same engagement fn.
  *  - maybeAwardInboxZero awards the once-ever Inbox-zero badge.
  *
- * ⚠️ The interactive-tx row lock in `touchStreakOnCompletion` is NOT proven
- * against a real DB anywhere — corrected #251, and this docblock previously
- * claimed it was, citing `rewards.integration.test.ts`, a file that does not
- * exist. `touchStreakOnCompletion` is mocked in every test that names it, so the
- * `SELECT … FOR UPDATE` at `rewards.ts:596` is implemented but unexercised. The
- * gap is tracked on #233, whose severity table rested on the same false
- * citation. Here the tx is mocked to exercise the pure once/day decision +
- * badge fan-out, which is all this file ever covered.
+ * Here the tx is mocked to exercise the pure once/day decision + badge fan-out,
+ * which is all this file ever covered. The interactive-tx row lock itself is
+ * proven against a real database in `rewards.integration.test.ts`, and the guard
+ * at the foot of this file is what keeps that citation honest.
+ *
+ * ## ⚠️ Two corrections, and the second withdraws the first (#233)
+ *
+ * This docblock said the lock was proven in `rewards.integration.test.ts`.
+ * `d07857b` replaced that with "NOT proven against a real DB anywhere … citing
+ * `rewards.integration.test.ts`, a file that does not exist". **The original
+ * sentence was right and the correction was wrong.** The file existed and did
+ * exactly what was claimed; `783a6bf` (`!330`, #251) had deleted all 113 lines
+ * of it hours earlier without its commit body mentioning the deletion, and the
+ * check that concluded "no such file" ran inside that branch's worktree. A tree
+ * is only evidence about the commit you are standing on.
+ *
+ * The lasting lesson is not about this file. `inbox-view.tsx` uses the same
+ * sentence to argue the residual two-tab race is already defended, listing three
+ * defences as equivalent, and #233's severity table uses it to argue `logReward`
+ * is the only unguarded reward call. A named proof file reads as stronger
+ * evidence than a described mechanism, which is exactly why nobody follows the
+ * reference — so the citation went unchecked while it was true, and then went
+ * unchecked while it was false, and both times it was load-bearing.
+ *
+ * So the citation is no longer prose alone. The `it` at the foot of this file
+ * fails if the proof file is deleted, stops importing the real module, or stops
+ * measuring the overlap its own assertions rest on. It lives HERE, in the file
+ * that makes the claim, rather than in a hygiene module of its own: the failure
+ * being guarded is a sentence drifting from its evidence, and a check kept
+ * anywhere else is a second thing that can be deleted separately.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(
   () => {
@@ -230,5 +254,42 @@ describe("maybeAwardInboxZero — Inbox-zero badge", () => {
     prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" });
     await maybeAwardInboxZero("ws");
     expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("the row lock's real-DB proof, as a check rather than a citation (#233)", () => {
+  it("still exists, still runs unmocked, and still measures its own overlap", () => {
+    // Deliberately ONE test and no parser module. `#234` spent a module plus two
+    // adversarial review rounds on a guard that, by its own measurement, never
+    // blocked a merge; the cheap half of this is four string assertions, and the
+    // cheap half is what is taken.
+    const lock = readFileSync(path.join("src", "lib", "rewards.ts"), "utf8");
+
+    // Self-scoping, and the reason this can be a plain string match. It looks
+    // for `FOR UPDATE` on a `$queryRaw` line, not anywhere in the file — the two
+    // prose mentions in `touchStreakOnEngagement`'s comments would otherwise
+    // satisfy it, and this repo has twice shipped a tool that read a comment as
+    // code. If the lock is ever removed on purpose the premise goes with it and
+    // this retires itself, instead of demanding proof of something gone.
+    if (!/\$queryRaw[^\n]*FOR UPDATE/.test(lock)) return;
+
+    const proof = path.join("src", "lib", "rewards.integration.test.ts");
+    // The deletion this guard exists for. `783a6bf` removed 113 lines of
+    // real-Postgres concurrency coverage and nothing in a suite full of hygiene
+    // tests noticed, because every one of them looks at source files rather than
+    // at whether a proof is still there.
+    expect(existsSync(proof)).toBe(true);
+
+    const source = readFileSync(proof, "utf8");
+    // The real module, not a stub of it. Four `*.integration.test.ts` files name
+    // `touchStreakOnCompletion` and `vi.fn()` it, which is why "an integration
+    // test mentions it" is not evidence that anything ran.
+    expect(source).toMatch(/from "\.\/rewards"/);
+    expect(source).not.toMatch(/touchStreak\w*: vi\.fn/);
+    // And that it still measures the overlap its assertions rest on. A proof
+    // whose two callers stop racing goes on passing, silently — which is what
+    // the restored file did on a cold pool before #233 arranged the
+    // interleaving. Deleting the proof is not the only way to lose it.
+    expect(source).toMatch(/maxLiveTx/);
   });
 });
