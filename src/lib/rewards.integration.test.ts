@@ -10,11 +10,16 @@ import {
 import { prisma } from "@/lib/db";
 import { touchStreakOnCompletion } from "./rewards";
 
-// Real-DB proof for issue #21 P5.3: the read-decide-write in
-// touchStreakOnCompletion must be serialised so concurrent
-// first-completions-of-the-day can't double-file a StreakRecord or
+// Real-DB proof for issue #21 P5.3: the read-decide-write inside
+// `touchStreakOnEngagement`'s interactive transaction must be serialised so
+// concurrent first-completions-of-the-day can't double-file a StreakRecord or
 // double-count the increment. Mocks can't demonstrate the interactive-tx
 // row lock, so this fires genuinely concurrent calls against Postgres.
+//
+// The calls below go through `touchStreakOnCompletion`, which since Decision 1
+// (#8 Phase 7) is a deprecated one-line alias for `touchStreakOnEngagement` —
+// kept as the entry point here because it is what the completion call sites this
+// races actually use.
 //
 // ── #233 — deleted, restored, and then found to be half a proof ─────────────
 //
@@ -27,9 +32,10 @@ import { touchStreakOnCompletion } from "./rewards";
 // holds the one assertion that makes a second silent deletion red the suite.
 //
 // The restore was verified the way this repo verifies a guard — by deleting the
-// guard. Removing `FOR UPDATE` from the raw locking read at `rewards.ts:596`
-// **must** red this file. Measured on the restored file as it stood, it only
-// half did, and the reason is the whole design of the barrier below.
+// guard. Removing `FOR UPDATE` from the `tx.$queryRaw` that opens
+// `touchStreakOnEngagement`'s transaction in `rewards.ts` **must** red this
+// file. Measured on the restored file as it stood, it only half did, and the
+// reason is the whole design of the barrier below.
 //
 //  1. The reset test red 3 runs out of 3. Two unserialised callers each file a
 //     `StreakRecord`, and 2 ≠ 1.
@@ -58,6 +64,15 @@ import { touchStreakOnCompletion } from "./rewards";
 // (`maxLiveTx`). Without it a future change in pool behaviour would quietly
 // return this file to passing vacuously, and the second time would be harder to
 // notice than the first.
+//
+// One editorial note, because it is the same failure in miniature. The paragraph
+// above cited `rewards.ts:596` until #233's review. That line was still correct
+// when it was replaced — so this is not a stale number being fixed, it is a
+// number removed before it could become one. A line reference in a comment goes
+// on reading authoritatively after it stops being true, which is exactly the
+// property that let the deleted-proof citation stay load-bearing while wrong.
+// `CLAUDE.md` records the repo losing a written model count the same way. Naming
+// the function costs a reader one grep and cannot rot while the function exists.
 
 const WS = vi.hoisted(() => "test-ws-streak-race");
 
