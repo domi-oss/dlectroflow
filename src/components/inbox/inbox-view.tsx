@@ -2120,13 +2120,26 @@ export function InboxView({
       // #251 — where focus goes once the control it was pressed in is gone.
       //
       // A confirmed delete withdraws TWO things: the confirming button unmounts
-      // with the state change above (React re-uses the slot for the resting 🗑),
-      // and the row itself goes with the refresh. Either is enough for the
-      // browser to drop focus on `<body>`, which is the WCAG 2.4.3 fault the
-      // write notice's own hand-off exists to avoid — it was simply never wired
-      // for the success path, because until this issue every delete was of a row
-      // the user could re-create by typing it again. A completed to-do is the
-      // one they cannot.
+      // with the state change above, and the row itself goes with the refresh.
+      // Either is enough for the browser to drop focus on `<body>`, which is the
+      // WCAG 2.4.3 fault the write notice's own hand-off exists to avoid — it was
+      // simply never wired for the success path, because until this issue every
+      // delete was of a row the user could re-create by typing it again. A
+      // completed to-do is the one they cannot.
+      //
+      // This used to add "(React re-uses the slot for the resting 🗑)" and that is
+      // true of the LIBRARY's copy, not this one — the two transitions are
+      // structurally opposite and the sentence cannot describe both (#251 review).
+      // `library-done-delete.tsx` reconciles `<span>` against `<span>`, so the
+      // node is reused and focus survives the collapse, which is why its
+      // `focusIsOursToMove` has to be a containment test rather than a `<body>`
+      // check. Here the resting control is a `<button>` and the armed pair is a
+      // `<span>`, so React unmounts and remounts: measured, focus is already on
+      // `<body>` at the ARM press, one press earlier than the sentence implied,
+      // and the resting node is gone from the document. The conclusion below is
+      // unaffected — `activeElement === document.body` at `onLanded` either way,
+      // so the capture field gets focus — but a comment two files now share must
+      // not assert the same mechanism about opposite shapes.
       //
       // In `onLanded` rather than beside the press, for two reasons. It replaces
       // the default `router.refresh()` (see `attemptWrite`) and so has to make
