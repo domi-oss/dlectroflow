@@ -59,7 +59,7 @@ two of whose line references had already rotted:
 | Client-side persistence today is five keys, **all flags and preferences** — no user-typed text is stored client-side anywhere | `df-theme`, `df-hyper-focus`, two day-keys, a guest-banner flag |
 | The privacy notice names browser storage **once**, pinned to one key: *"your light/dark theme choice … never leaves your device"* | `src/app/privacy/page.tsx:1080` |
 | Any prose edit to a legal page **reds CI** until `LEGAL_EFFECTIVE_DATE` is bumped | `src/lib/legal.ts:153`, `src/lib/legal-fingerprint.test.tsx` |
-| A **frozen** account can no longer write — `currentWorkspaceId` reads `User.status` and throws `RevokedAccountError` | `src/lib/workspace.ts:559-572` (#220, closed 10 Aug) |
+| A **frozen** account can no longer write — `currentWorkspaceId` reads `User.status`, calls `clearOwnerSession` and throws `RevokedAccountError` | the `WorkspaceKind.User` arm of `currentWorkspaceId`, `src/lib/workspace.ts` (#220, closed 10 Aug) |
 | An **expired** owner cookie still falls through to the guest arm, skipping that status check, and the dump lands in an invisible sandbox purged within ~24h | `resolveWorkspace`, `src/lib/workspace.ts:129-141` |
 
 ### The residual #210 handed over
@@ -115,7 +115,14 @@ type QueuedCapture = {
   text: string;
   /** Workspace this was captured under. Compared, never trusted — see below. */
   workspaceId: string;
-  /** ms epoch, for ordering and for the age shown in the strip. */
+  /**
+   * ms epoch, for the **age** shown beside an entry in the strip — and for
+   * nothing else. **It does not order the queue**; see "Display order" below.
+   *
+   * An earlier draft of this comment said it drove ordering, which contradicted
+   * that section outright. Caught in review of this spec, and it was the one
+   * sentence here two readers could reasonably read two different ways.
+   */
   capturedAt: number;
   /**
    * Why the server last refused this capture, if it did. Persisted with the
@@ -164,6 +171,28 @@ different refusals into that one mark. Both were caught in review of this spec a
 are corrected here; the second is the more serious, because the two refusals need
 **different words and a different remedy**.
 
+#### Display order — the stored array's own order, and nothing else
+
+**The single source of truth for display order is the position an entry holds in the stored array.**
+The strip renders `readQueue`'s result in index order, oldest first. Nothing sorts, at any point, on
+any path. Two consequences, each stated because each is a question an earlier draft left open:
+
+- **`capturedAt` never orders anything.** It is rendered — the age beside an entry — and is otherwise
+  inert. It cannot be the ordering key: two devices' clocks are skewed independently, so sorting by it
+  could move a capture the user is already looking at, and this is a feature about words not moving.
+- **"Write order" means the order `setItem` committed, which is the array's order.** That phrase is
+  used below and was never defined, which is the gap this section closes. `enqueue` appends, so a
+  tab's entry goes last in whatever array that tab's write committed; under the reconciliation below a
+  re-applied delta appends to the *fresh* read. So the winner of a race is simply whichever `setItem`
+  landed second, and the loser's re-run places its own entry after the other tab's. **There is no tie
+  to break — an array has no ties**, which is why the rule needs no comparator at all.
+
+**A restored queue is not a special case, and that is the other half of the question.** `JSON.parse`
+preserves array order, so what survives a reload is the order the last `setItem` wrote — the same
+rule, not a second one. Because no timestamp is consulted anywhere, a queue restored on a device
+whose clock has since moved, or whose entries came from two devices with skewed clocks, comes back in
+the order the user last saw it.
+
 #### Two tabs on one storage key — a lost update, and what actually fixes it
 
 `localStorage` is shared across every tab of the origin, and one key holds the whole queue, so a
@@ -204,8 +233,9 @@ answer:**
 to exceed the bound. If the merge would breach a cap, the **incoming** capture is the one refused, with the
 words kept in the field.
 
-**Ties break by write order, not `capturedAt`** — two devices' clocks are skewed independently, and
-re-sorting would move a capture the user is already watching in the strip.
+**The merged queue keeps the array's own order** — see "Display order" above. The re-applied delta
+appends to the fresh read, so the merge neither sorts nor consults `capturedAt`, and no comparator is
+needed to describe the result.
 
 ⚠️ **The residual is real and belongs to MR 2, named here so it is not read as an oversight.** `getItem`
 carries **no ordering guarantee** against another tab's `setItem`, so a read can be stale the instant it
@@ -311,23 +341,36 @@ body: { clientKey, text, workspaceId }
 |---|---|---|
 | Written | `201` | remove |
 | `clientKey` already present for this workspace | `200` | remove — already saved |
-| Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` |
+| Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` — unless already `account-revoked`, which wins |
 | Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
-| Anything else | `5xx` / network failure | keep, clear `blockedBy`, retry later |
+| Anything else | `5xx` / network failure | keep, clear `blockedBy` — **but not `account-revoked`** — retry later |
+
+**The mark is a precedence, not an assignment: `account-revoked` > `session-expired` > unmarked, and
+only a successful outcome clears it** (by removing the entry). Why that is needed, and why the obvious
+"latest refusal wins" is wrong here, is worked through under *"The `403` copy is reachable"* in **What
+the user sees** below — the short version is that #220 deletes the owner cookie in the same response
+that answered `403`, so the *next* attempt is made as a guest and necessarily `409`s.
 
 **`409` and `403` must not share a state.** They look alike — both keep the capture
 and neither is retryable — but the remedy differs and so does the truth:
 
 - **`409`** means the session moved on. Signing in again **fixes it**, and the queued
   words then save.
-- **`403`** means the account was revoked. Signing in again **cannot fix it**, and
-  #220 has already cleared the session and bounced the user to `/login` with an
-  explanation. Telling this person to "sign in to save these" sends them into a loop
-  and misstates what happened.
+- **`403`** means the account was revoked. Signing in again **cannot fix it**, and #220 has already
+  cleared the session — so telling this person to "sign in to save these" misstates what happened and
+  sends them at a remedy that cannot work.
 
-`5xx` clears `blockedBy` rather than leaving it: reaching a retryable failure proves
-the guard is no longer what is stopping the capture, and a stale mark would keep
-asking for a sign-in that already happened.
+⚠️ **An earlier draft of that second bullet also said #220 "bounced the user to `/login`". It does
+not**, and the error mattered: review of this spec reasonably concluded from it that the `403` copy
+could never be seen. #220 clears the cookie and the app carries on as a signed-out visitor — the
+`/login` bounce is the acknowledged *missing* half of it, tracked as **#231 — "A frozen account now
+meets Next default error screen, not a real page"**. Corrected here and verified against
+`src/lib/workspace.ts` and `src/proxy.ts` rather than restated.
+
+`5xx` clears a `session-expired` mark rather than leaving it: reaching a retryable failure proves the
+guard is no longer what is stopping the capture, and a stale mark would keep asking for a sign-in that
+already happened. It does **not** clear `account-revoked` — a `5xx` is no evidence an account was
+un-frozen.
 
 The foreground path uses this same route rather than the server action, so there is one write path and
 one set of semantics to test. `createBrainDumpItem` stays for non-queued callers and is refactored to
@@ -556,6 +599,50 @@ which is why it is a comparison rather than something the server could ever hand
 alone cannot encode it. `blockedUnder` is persisted for the same reason `blockedBy` is: otherwise the
 comparison dies on the reload a discarded tab forces.
 
+#### The `403` copy is reachable — #220 does not bounce a frozen account anywhere, but it *does* sign them out
+
+**Review of this spec asked whether the `403` copy is dead**, on the reading that #220 already clears the
+session and redirects a revoked account to `/login`, so nobody would ever be looking at the strip when it
+appeared. **Checked in the tree rather than reasoned about, and the premise does not hold** — but the
+check turned up a different problem, in the flush table rather than the copy.
+
+**#220 clears the session; it redirects nothing.** `clearOwnerSession` (`src/lib/workspace.ts`) deletes
+the owner cookie and says outright what happens next: *"The next request carries no owner cookie,
+`src/proxy.ts` mints a guest sandbox, and the app works normally for a signed-out visitor."* The only
+`/login` redirects in `src/proxy.ts` are the two gate checks, and they fire on `OWNER_ONLY_PREFIXES` —
+**currently empty** — and `AUTHENTICATED_PREFIXES`, which is `/api/account/` and `/api/google/oauth/`.
+The inbox is in neither, so it renders. Bouncing a frozen person to `/login` with an explanation is the
+**missing** half of #220, recorded in that function's own comment as needing a gate that can read a
+status, and tracked as **#231 — "A frozen account now meets Next default error screen, not a real page"**.
+So the `403` sentence is on screen, in front of a user who is still on the page. It is not dead copy.
+
+⚠️ **What the check did find: the clear happens inside the same Route Handler that answered `403`, and
+that turns the next refusal into a `409`.** `clearOwnerSession` is best-effort only during a Server
+Component render, where Next seals the cookie jar; in a **Route Handler the delete lands**, and
+`POST /api/braindump` is a Route Handler. So the sequence is:
+
+1. flush → `403` → the entry is marked `account-revoked`, and the owner cookie is deleted in that same
+   response;
+2. next flush → no owner cookie → a fresh guest sandbox, which cannot resolve the capture's declared
+   `workspaceId` → **`409`**;
+3. the entry's mark is overwritten with `session-expired`, and the strip goes back to *"Your session
+   expired. Sign in and these will save."*
+
+**That is the forever-promise defect again**, arriving by a route neither the `403`/`409` split nor
+`blockedUnder` covers: `blockedUnder` compares two `409`s, and here the first refusal was a `403`.
+
+**So `account-revoked` is terminal, and the flush table's mark rule is a precedence rather than an
+assignment:** `account-revoked` > `session-expired` > unmarked. A `409` over `account-revoked` leaves it
+alone; a `403` over `session-expired` upgrades; and a `retry` — which clears a `session-expired` mark,
+because reaching a retryable failure proves the guard is no longer what is stopping the capture — does
+**not** clear `account-revoked`, since a `5xx` is no evidence an account was un-frozen.
+
+**Stickiness is not a trap, and the reason belongs next to the rule.** The mark is not what blocks the
+flush; the server is. If an owner un-freezes the account and the user signs in again, the flush answers
+`201`/`200`, and **a successful outcome removes the entry outright regardless of its mark** — so the only
+thing terminality costs is a wrong sentence, which is exactly what it buys back. Discard remains the
+user's release valve either way.
+
 **a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
 `role="status"` announces the waiting count (a background count is not an interruption); an assertive
 `role="alert"` announces **every refusal state** — the two `blockedBy` values, the `409`-after-sign-in
@@ -625,6 +712,19 @@ TDD, failing test first, in this order:
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
+   - **The precedence is asserted in both directions, and `account-revoked`'s stickiness is asserted
+     against all three of the outcomes that could erase it.** `403` then `409`, `403` then `5xx`, and
+     `403` then `403` all leave `account-revoked` in place; `403` then `201`/`200` **removes the entry**,
+     which is the test that proves stickiness is not a permanent trap. The unchanged direction needs its
+     own tests or a "never overwrite anything" implementation passes: `409` then `403` must **upgrade**,
+     and `409` then `5xx` must still **clear**. The sequence that makes this non-optional is #220's —
+     the owner cookie is deleted in the same response that answered `403`, so the very next attempt is a
+     guest and `409`s, and a plain last-write-wins therefore re-offers a sign-in to a revoked account on
+     the *second* flush, every time.
+   - **`isQueuedCapture` validates `blockedBy`, with a passing control.** A stored entry carrying a value
+     outside the union is rejected; entries carrying **each** valid value, and entries carrying none, are
+     kept. The kept cases are the point — a guard that rejected everything would satisfy a test that only
+     asserted rejection, and this is the field that selects the user-facing sentence.
    - **`blockedUnder` is asserted as a comparison, not a flag:** a `409` sets
      `blockedBy: "session-expired"` plus `blockedUnder` = the live session's workspace, and offers a
      sign-in; a later `409` arriving while the live session resolves to a *different* workspace
