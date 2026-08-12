@@ -117,6 +117,7 @@ import {
   maybeAwardTenStepsDay,
   maybeAwardInboxZero,
 } from "@/lib/rewards";
+import { TASK_WRITER_TX_BUDGET } from "@/lib/constants";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -575,6 +576,27 @@ describe("reopenItem", () => {
       data: { done: false },
       select: STEP_SELECT,
     });
+  });
+
+  it("gives its transaction the shared writer budget rather than Prisma's 5s default", async () => {
+    // #251 review — the same gap `deleteBrainDumpItem` had, on the transaction
+    // beside it. Both take the `BrainDumpItem` row lock that `keepAsTask` and
+    // `ensureFocusStep` take, and both are documented as answering a second
+    // caller with `count: 0` rather than an error; at Prisma's 5s default a
+    // loser that waits longer than that for the lock is killed with `P2028
+    // Transaction already closed` and rolled back instead, which converts the
+    // promised no-op into an error raised at somebody who pressed Reopen twice.
+    // One defect class, so one fix — this is not a second issue.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      task: null,
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      TASK_WRITER_TX_BUDGET,
+    );
   });
 
   it("guards ≥1 not-done: a subset covering nothing also resets the last step", async () => {

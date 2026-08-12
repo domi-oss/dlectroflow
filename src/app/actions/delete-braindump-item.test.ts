@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { TASK_WRITER_TX_BUDGET } from "@/lib/constants";
 
 const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
   () => {
@@ -169,6 +170,35 @@ describe("deleteBrainDumpItem", () => {
 
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     expect(prismaMock.$transaction.mock.calls[0][0]).toBeInstanceOf(Function);
+  });
+
+  it("gives that transaction the shared writer budget rather than Prisma's 5s default", async () => {
+    // #251 review — the default is what makes this necessary. This transaction
+    // takes the same `BrainDumpItem` row lock as `keepAsTask` and
+    // `ensureFocusStep`, both of which are given `TASK_WRITER_TX_BUDGET` (15s)
+    // precisely so a loser WAITS instead of dying: measured on real Postgres,
+    // a lock held past `timeout` kills the waiter with `P2028 Transaction
+    // already closed` and rolls it back, so the user gets "Couldn't delete that
+    // just now" and a Retry that will do the same thing — instead of the no-op
+    // the guarded writes are documented as giving. Its own work is 14-36ms, so
+    // the budget is spent waiting and never working, and nothing slow ever shows
+    // up in testing.
+    //
+    // Asserted here and not by `braindump-to-task-hygiene`: that gate only
+    // enrols a transaction containing a conversion-routed `task.create`, and a
+    // delete creates no Task, so it is structurally blind to this call.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: null,
+    });
+    const { deleteBrainDumpItem } = await import("./braindump");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      TASK_WRITER_TX_BUDGET,
+    );
   });
 
   it("does not throw and skips Task cleanup when the item was already deleted concurrently (race between the read and the transaction)", async () => {

@@ -355,7 +355,32 @@ export async function deleteBrainDumpItem(id: string) {
     // is the early-out.
     if (reversed.stepDone > 0 || reversed.taskComplete)
       await revokeUnqualifiedBadges(workspaceId, reversed, tx);
-  });
+    // #251 review — the budget, on a transaction the repo's own gate cannot see.
+    //
+    // Every sibling writer that takes this same `BrainDumpItem` row lock is given
+    // `TASK_WRITER_TX_BUDGET` deliberately (`keepAsTask`, `ensureFocusStep`,
+    // `confirmBreakdown`, `scheduleSingleTask`), and `src/lib/constants.ts` has
+    // the whole argument: at Prisma's 5s default a loser that waits longer than
+    // that for the lock is killed with `P2028 Transaction already closed` and
+    // rolled back, which turns the no-op this function's own docblock promises
+    // into an error raised at somebody who pressed a button twice. Re-measured
+    // for #251 on this exact call shape: a lock held 7s produced `P2028` after
+    // 6.7s with the row still present, and the same hold at the shared budget
+    // resolved after 6.7s with the row gone. The transaction's own work is tens
+    // of milliseconds, so the budget is spent WAITING and never working —
+    // nothing slow will ever show up in testing.
+    //
+    // Reachable from the two presses this MR made ordinary: tapping 🗑 twice on a
+    // Done row, and the notice's **Retry**, which fires a second delete at 10s
+    // (`LIBRARY_ACTION_TIMEOUT_MS`) while the first may still be running.
+    //
+    // `braindump-to-task-hygiene` exists to catch exactly this and cannot here:
+    // `findUnbudgetedBrainDumpTaskWrites` only enrols a transaction containing a
+    // conversion-routed `task.create`, and a delete creates no Task, so the gate
+    // is structurally blind to this call. Extending it is out of scope — the
+    // reason is written here instead, where the next person editing this line
+    // will read it, and `delete-braindump-item.test.ts` asserts the argument.
+  }, TASK_WRITER_TX_BUDGET);
 
   // #251 — award only when this call actually removed a row that could have been
   // in the queue `maybeAwardInboxZero` measures. Two independent reasons it might
@@ -962,7 +987,16 @@ export async function reopenItem(id: string, stepIds?: string[]) {
       tx,
     );
     return { uncompleted, reopened };
-  });
+    // #251 review — the same budget, for the same reason, on the transaction
+    // beside the delete's. See the note at `deleteBrainDumpItem`'s: this one
+    // takes the identical `BrainDumpItem` row lock, is documented three
+    // paragraphs up as answering a losing concurrent caller with `count: 0`
+    // rather than an error, and calls the same `reverseItemCompletionRewards` —
+    // so at Prisma's 5s default a double-tapped Reopen is the P2028 that promise
+    // rules out. One defect class, one fix, rather than a second issue for the
+    // sibling. `braindump-to-task-hygiene` is blind to this one too, and for the
+    // same structural reason: no `task.create` here either.
+  }, TASK_WRITER_TX_BUDGET);
 
   // After the transaction and outside it — see (2) above. Best-effort per patch,
   // so one unreachable step does not abandon the others or the reopen.
