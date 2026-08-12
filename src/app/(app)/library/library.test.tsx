@@ -218,7 +218,7 @@ describe("LibraryPage — Done graduation", () => {
 //
 // `LibraryRow` was a read-only server component with no controls at all, so a
 // completed to-do could not be removed from the hub. What went in is one client
-// island, not `<LibraryRows>`: that renders ▶ Start focusing, ✓ Complete, an
+// island, not `<LibraryRows>`: that renders ▶ Start focusing, Complete, an
 // estimate editor, an editable note and select mode, and none of those mean
 // anything on a closed row. These assert the affordance is there, that the row
 // did NOT gain the rest of them, and that the hand-off target the island focuses

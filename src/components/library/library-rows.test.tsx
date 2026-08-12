@@ -108,7 +108,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
 
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("plated-1"));
     expect(refresh).toHaveBeenCalled();
@@ -179,7 +179,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     expect(
       screen.getByRole("button", { name: "Start focusing" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("pantry-1"));
   });
 
@@ -288,7 +288,10 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
 
     fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /todo a/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^✓ complete$/i }));
+    // The bulk bar is the ONE surface that calls `t("action.complete")` without
+    // going through `CompleteButton` (select-action-bar.tsx), which is why #253
+    // treated the detick as a strings change with consumers.
+    fireEvent.click(screen.getByRole("button", { name: /^complete$/i }));
 
     await waitFor(() =>
       expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"),
@@ -399,7 +402,7 @@ describe("LibraryRows — the note trigger sits in the action group (#44)", () =
 
   it("puts the trigger in the SAME action group as Complete", () => {
     renderRow();
-    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const complete = screen.getByRole("button", { name: "Complete" });
     const trigger = screen.getByRole("button", {
       name: "Note for Prep the deck",
     });
@@ -420,7 +423,7 @@ describe("LibraryRows — the note trigger sits in the action group (#44)", () =
     const box = screen.getByRole("textbox");
     expect(box.closest("[data-row-actions]")).toBeNull();
     expect(box.closest("li")).toBe(
-      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+      screen.getByRole("button", { name: "Complete" }).closest("li"),
     );
   });
 

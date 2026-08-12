@@ -1643,7 +1643,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("do it").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("n1");
   });
 
@@ -1662,7 +1662,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("st1");
   });
 
@@ -1679,7 +1679,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("m1");
   });
 
@@ -2195,7 +2195,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
       within(row).getByRole("button", { name: "▶ Start Focus" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "✓ Complete" }),
+      within(row).getByRole("button", { name: "Complete" }),
     ).toBeInTheDocument();
     await user.click(
       within(row).getByRole("button", { name: "▶ Start Focus" }),
@@ -2737,7 +2737,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       within(row).getByRole("button", { name: "Add to-do" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "✓ Complete" }),
+      within(row).getByRole("button", { name: "Complete" }),
     ).toBeInTheDocument();
     expect(
       within(row).getByRole("button", { name: "Delete" }),
@@ -2775,7 +2775,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       /Break into steps/,
       "Add to-do",
       "Save",
-      "✓ Complete",
+      "Complete",
       "Move to",
       "Delete",
     ]) {
@@ -3687,7 +3687,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       within(row).getByRole("button", { name: "Save" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "✓ Complete" }),
+      within(row).getByRole("button", { name: "Complete" }),
     ).toBeInTheDocument();
     // The full "Save for later" is the dropdown mirror, not an inline button.
     expect(

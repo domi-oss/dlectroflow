@@ -109,9 +109,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   it("each not-done row renders Complete + Start Focus + the 🔽 dropdown trigger", () => {
     render(<TaskSteps taskId="t1" steps={steps()} />);
     // Shared CompleteButton (plain voice → "Complete") on each row.
-    expect(screen.getAllByRole("button", { name: "✓ Complete" })).toHaveLength(
-      2,
-    );
+    expect(screen.getAllByRole("button", { name: "Complete" })).toHaveLength(2);
     // Inline Start Focus CTA on each row.
     expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
@@ -169,7 +167,7 @@ describe("TaskSteps — done steps", () => {
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -223,7 +221,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       screen.getByRole("button", { name: /mark not done/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -367,7 +365,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
 
     const undo = screen.getByRole("button", {
       name: /mark not done: second/i,
@@ -384,7 +382,7 @@ describe("TaskSteps — complete step", () => {
   it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
-    await user.click(screen.getAllByRole("button", { name: "✓ Complete" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Complete" })[0]);
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 
@@ -522,7 +520,7 @@ describe("TaskSteps — inline editors", () => {
 describe("TaskSteps — the note trigger sits in the step's action group (#44)", () => {
   it("puts the trigger in the SAME action group as that step's Complete", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const complete = screen.getByRole("button", { name: "Complete" });
     const trigger = screen.getByRole("button", {
       name: "Note for step 1 of 2: First",
     });
@@ -554,7 +552,7 @@ describe("TaskSteps — the note trigger sits in the step's action group (#44)",
     });
     expect(box.closest("[data-row-actions]")).toBeNull();
     expect(box.closest("li")).toBe(
-      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+      screen.getByRole("button", { name: "Complete" }).closest("li"),
     );
   });
 });
@@ -850,9 +848,7 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     // NOT the Complete button: the user has just un-completed this step, so
     // landing focus on the one control that would re-complete it turns a stray
     // Enter into an undo of their undo.
-    expect(
-      screen.getByRole("button", { name: "✓ Complete" }),
-    ).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Complete" })).not.toHaveFocus();
   });
 
   it("hands off to BOTH rows when two undos are in flight at once", async () => {

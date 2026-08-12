@@ -38,11 +38,26 @@ export const STRINGS = {
   "action.stillNeeded": { plain: "Still need it", playful: "Still want it" },
   "action.delete": { plain: "Delete", playful: "Delete" },
   "action.cancel": { plain: "Cancel", playful: "Cancel" },
-  // Single canonical "✓ complete" label — deliberately IDENTICAL across voices
+  // Single canonical "complete" label — deliberately IDENTICAL across voices
   // (like "focus.timer.completeStep" below) so the inbox row, task-step, and
   // focus-lane Complete affordances render as the exact same button everywhere
   // instead of drifting between a bare word and a bare glyph (owner report).
-  "action.complete": { plain: "✓ Complete", playful: "✓ Complete" },
+  //
+  // #253 dropped the leading "✓ ". This key is the label of a PERMANENTLY
+  // VISIBLE row control on every bucket of the Inbox, both in-flight Library
+  // tabs, the task-step rows and both focus lanes, so its width is paid on
+  // every row of every list — and at 360px the row action line was wrapping to
+  // three bands. The glyph was decoration on an already-unambiguous verb: it
+  // named no state (the button is only rendered on a row that is NOT complete)
+  // and it carried no information the word did not. A tick as transient
+  // acceptance feedback after the press is a separate, optional idea and is
+  // deliberately not built here.
+  //
+  // ⚠️ Nine surfaces read this, and one of them is not `CompleteButton`:
+  // `library/select-action-bar.tsx` calls `t("action.complete")` directly for
+  // its bulk-complete button. Any future edit to this line is a strings change
+  // with consumers, not a component tweak.
+  "action.complete": { plain: "Complete", playful: "Complete" },
   "action.reopen": { plain: "Reopen", playful: "Reopen" },
   "action.reopenSelected": {
     plain: "Reopen selected",
@@ -533,11 +548,19 @@ export const STRINGS = {
   },
 
   // ── Focus timer redesign (MR ②) — timer page, hint, settings group ──────────
-  // ✓ / ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
+  // ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
   // at the top). Numbers are composed in JSX around these static units.
+  //
+  // #253 detick'd this alongside `action.complete`. It is that key's sibling —
+  // the same act, one grain down — and the two are reachable one tap apart (a
+  // step row's inline Complete, then the focus timer that step opens), so a
+  // tick on one and not the other reads as two different controls. Removing
+  // both also lands `focus.timer.completeStep` and `step.complete` on the same
+  // plain-voice string, which is what "the same button everywhere" was always
+  // meant to mean.
   "focus.timer.completeStep": {
-    plain: "✓ Complete step",
-    playful: "✓ Complete step",
+    plain: "Complete step",
+    playful: "Complete step",
   },
   "focus.timer.of": { plain: "of", playful: "of" },
   "focus.timer.steps": { plain: "steps", playful: "steps" },

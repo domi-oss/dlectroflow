@@ -49,8 +49,10 @@ describe("t() function", () => {
     ["stat.stepsToday", "playful", "Bites today"],
     ["action.breakdown", "plain", "Break into steps"],
     ["action.breakdown", "playful", "🍿 Snack-size it"],
-    ["action.complete", "plain", "✓ Complete"],
-    ["action.complete", "playful", "✓ Complete"],
+    // #253 — no leading tick. The glyph cost a permanently-visible row control
+    // width it did not earn at 360px, and it said nothing the word did not.
+    ["action.complete", "plain", "Complete"],
+    ["action.complete", "playful", "Complete"],
     ["action.reopen", "plain", "Reopen"],
     ["nav.everything", "plain", "Library"],
     ["nav.everything", "playful", "🍱 Larder"],
