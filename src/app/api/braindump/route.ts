@@ -5,6 +5,7 @@ import {
   RevokedAccountError,
 } from "@/lib/workspace";
 import { writeCapture } from "@/lib/capture-write";
+import { requestOrigin } from "@/lib/origin";
 import {
   CAPTURE_QUEUE_MAX_BYTES,
   type FlushOutcome,
@@ -25,6 +26,48 @@ import {
  * point — one write path, one set of semantics to test. `createBrainDumpItem`
  * keeps its non-queued callers and shares this route's core (`writeCapture`)
  * rather than duplicating it.
+ *
+ * ## CSRF (CWE-352), and why a route handler needs it when the action did not
+ *
+ * Next protects server actions against CSRF for us. A plain route handler gets
+ * none of that — and the only reason this route exists is that a service worker
+ * cannot replay a server action, so the protection was lost in that trade and
+ * nothing replaced it. The guard is `src/app/api/auth/logout/route.ts`'s, copied
+ * rather than reinvented: reject an `Origin` that is PRESENT and does not match,
+ * allow a MISSING one for non-browser clients.
+ *
+ * ⚠️ **Read this before "simplifying" either control, because each one looks
+ * redundant while the other is standing.** They are independent and both load-
+ * bearing, and the exposure they cover is not the same:
+ *
+ *  * The `workspaceId` comparison below already stops a forged POST from creating
+ *    a row, because the body has to carry the victim's own workspace id and that
+ *    is an unguessable value no cross-origin page can read. So it acts as a CSRF
+ *    token — **entirely by accident.** It was written to close the expired-cookie
+ *    hole, nothing records it as a CSRF control, and a perfectly reasonable future
+ *    change (deriving the workspace instead of declaring it, say) would remove the
+ *    protection with no test going red.
+ *  * This Origin check stops the part the comparison does not: a forged request
+ *    still resolved the session, which for a signed-in account is two queries
+ *    including the owner-status re-read (#220). That is unauthenticated work an
+ *    attacker can cause from any page, and refusing on a header before the body is
+ *    even read removes it.
+ *
+ * `SameSite=lax` on both session cookies makes a cross-SITE POST unable to carry
+ * them at all. What lax does not block is a **same-site** POST, so a page on a
+ * subdomain of the deployed host is the residual case — the same reasoning
+ * `logout/route.ts` records, applied to a route that creates rows in somebody's
+ * inbox rather than one that ends a session.
+ *
+ * ⚠️ **The status is 400 and that is a decision, not a default.** 403 would be the
+ * conventional answer and is unusable here: `capture-queue.ts` maps outcomes by
+ * STATUS, where `403` already means `account-revoked` and `409` means
+ * `session-expired`, and both carry copy about signing in. A CSRF rejection
+ * inheriting either would tell somebody their account had been revoked because a
+ * subdomain page forged a request — the same collapse the spec has been reviewed
+ * for twice. 400 falls into the client's "anything else → retry" arm, which KEEPS
+ * the words, and the body is an `error` rather than a `status` so it is not in the
+ * `FlushOutcome` vocabulary at all.
  *
  * ## The security invariant: `workspaceId` in the body is NEVER trusted
  *
@@ -162,6 +205,27 @@ function outcome(status: number, flush: FlushOutcome): Response {
 }
 
 export async function POST(req: Request): Promise<Response> {
+  // ── CSRF (CWE-352), decided before the body is even read ──────────────────
+  //
+  // First, because it is the cheapest refusal there is — a header comparison, no
+  // body, no session — and because being first is half its value: see the file
+  // comment for what a forged request could still cost if it got as far as
+  // resolving a session. The house pattern is `logout/route.ts`'s; 400 rather than
+  // 403 is deliberate and is explained there too.
+  const allowedOrigin = requestOrigin(req);
+  const declaredOrigin = req.headers.get("origin");
+  if (declaredOrigin && declaredOrigin !== allowedOrigin) {
+    // Names the REASON but never the origin we accept. The caller already knows
+    // the Origin it sent, so saying it was rejected leaks nothing; the expected
+    // value is what a refusal must not hand over, the same way the 409 below does
+    // not name the resolved workspace.
+    //
+    // Distinct from the body-shaped 400s on purpose, and not for the caller's
+    // benefit: a misconfigured PUBLIC_ORIGIN would refuse EVERY capture here, and
+    // an operator reading "Invalid capture" would go looking at the queue.
+    return json(400, { error: "Request origin not allowed" });
+  }
+
   // ── The request, refused as cheaply as it can be ──────────────────────────
   //
   // Everything that can be decided from the body alone is decided before the

@@ -4,7 +4,7 @@
  * The write itself is `writeCapture`'s and is tested in
  * `src/lib/capture-write.test.ts`; the unique index is Postgres's and is proved
  * in `src/lib/braindump-client-key-unique.integration.test.ts`. What is asserted
- * here is only what the ROUTE decides, and the two most important of those are
+ * here is only what the ROUTE decides, and the most important of those are
  * security properties rather than status codes:
  *
  *  1. **The body's `workspaceId` is never trusted for authorization.** The
@@ -16,6 +16,10 @@
  *     and signing in again cannot. `RevokedAccountError` is a SUBCLASS of
  *     `MissingWorkspaceError`, so the order of the two `instanceof` branches is
  *     load-bearing and is pinned below.
+ *  3. **A cross-origin POST is refused, and refused as a 400.** A route handler
+ *     gets none of the CSRF protection Next gives a server action. The status
+ *     matters as much as the refusal: 403 and 409 are already spoken for in the
+ *     client's outcome map, so a CSRF rejection must not borrow either.
  *
  * The error classes are the REAL ones, not stubs: the route narrows on
  * `instanceof`, and a fake would make both refusal branches pass for the wrong
@@ -42,10 +46,19 @@ vi.mock("@/lib/workspace", async (importOriginal) => {
 });
 vi.mock("@/lib/capture-write", () => ({ writeCapture: writeCaptureMock }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
+// Stubbed rather than left real, as `logout/route.test.ts` does: `requestOrigin`
+// reads PUBLIC_ORIGIN, which `config/vitest.config.ts` deliberately does not
+// forward, so a real one would answer differently depending on the shell the
+// suite was launched from.
+vi.mock("@/lib/origin");
 
 import { MissingWorkspaceError, RevokedAccountError } from "@/lib/workspace";
 import { CAPTURE_QUEUE_MAX_BYTES } from "@/lib/capture-queue";
+import { requestOrigin } from "@/lib/origin";
 import { POST } from "./route";
+
+/** The origin this app is served from, as `requestOrigin` reports it. */
+const APP_ORIGIN = "https://dlectroflow.dev";
 
 /** The workspace the COOKIE resolves to. Never anything a request supplied. */
 const SESSION_WS = "ws-session";
@@ -60,17 +73,18 @@ const validBody = (over: Body = {}): Body => ({
   ...over,
 });
 
-const post = (body: Body | string) =>
+const post = (body: Body | string, headers: Record<string, string> = {}) =>
   POST(
     new Request("http://localhost/api/braindump", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
   );
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(requestOrigin).mockReturnValue(APP_ORIGIN);
   currentWorkspaceIdMock.mockResolvedValue(SESSION_WS);
   writeCaptureMock.mockResolvedValue("created");
 });
@@ -117,6 +131,98 @@ describe("POST /api/braindump — the happy paths", () => {
     const res = await post(validBody());
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(res.headers.get("Content-Type")).toContain("application/json");
+  });
+});
+
+// Next protects server actions against CSRF automatically; a plain route handler
+// gets none of that, and the only reason this route exists is that a service
+// worker cannot replay a server action. So the protection was lost in that trade
+// and something has to replace it.
+//
+// The pattern is `src/app/api/auth/logout/route.ts`'s, copied rather than
+// reinvented so the two cannot drift the way `focus-timer.tsx` and the inbox
+// notice already did once: reject a PRESENT Origin that does not match, and allow
+// a MISSING one for non-browser clients, which POST-only plus SameSite=lax still
+// bound.
+describe("POST /api/braindump — CSRF (CWE-352)", () => {
+  it("refuses a cross-origin POST and writes nothing", async () => {
+    const res = await post(validBody(), { origin: "https://evil.example.com" });
+
+    expect(res.status).toBe(400);
+    expect(writeCaptureMock).not.toHaveBeenCalled();
+    // Before the session, so a forged request cannot make the app do the two
+    // queries `currentWorkspaceId()` costs — which is the one thing a cross-site
+    // POST could actually achieve here even before this guard existed.
+    expect(currentWorkspaceIdMock).not.toHaveBeenCalled();
+  });
+
+  // ⚠️ The status is load-bearing, not cosmetic. `capture-queue.ts` maps outcomes
+  // by STATUS — 403 → `account-revoked`, 409 → `session-expired` — and both of
+  // those carry copy about signing in. A CSRF rejection answering either would
+  // tell somebody their account had been revoked because a subdomain page forged a
+  // request, which is the exact collapse this feature's spec has been reviewed for
+  // twice. 400 lands in the client's "anything else → retry" arm, which keeps the
+  // words: the right direction for a guard that should never fire on a real client.
+  it("does NOT answer 403 or 409, which the queue reads as something else entirely", async () => {
+    const res = await post(validBody(), { origin: "https://evil.example.com" });
+
+    expect(res.status).not.toBe(403);
+    expect(res.status).not.toBe(409);
+    // And it is not in the FlushOutcome vocabulary at all.
+    const body = await res.json();
+    expect(body).not.toHaveProperty("status");
+    // Says why, so a misconfigured PUBLIC_ORIGIN refusing every capture is
+    // diagnosable — but never names the origin it would have accepted.
+    expect(body.error).toBe("Request origin not allowed");
+    expect(JSON.stringify(body)).not.toContain(APP_ORIGIN);
+  });
+
+  it("allows a POST whose Origin is this app", async () => {
+    const res = await post(validBody(), { origin: APP_ORIGIN });
+    expect(res.status).toBe(201);
+  });
+
+  // Deliberate, and the same call `logout/route.ts` made: a missing Origin is a
+  // non-browser client, and refusing it would buy nothing a browser attacker
+  // cannot already do while breaking curl, and every existing test above.
+  it("allows a POST with no Origin header at all", async () => {
+    const res = await post(validBody());
+    expect(res.status).toBe(201);
+  });
+
+  // The one caller it would be catastrophic to break. The spec's background flush
+  // runs in `public/sw.js` — the only path that works while the app is closed, so
+  // a silent failure there is invisible rather than reported.
+  //
+  // That `sync` handler is NOT written yet (`public/sw.js` today hosts
+  // notifications only), so what is pinned here is the property it will depend on:
+  // a worker registered for this app has this app's origin, and `fetch` attaches
+  // `Origin` on a POST — so it arrives on the matching arm. Asserted both ways
+  // because whether a same-origin POST carries the header at all is the browser's
+  // choice, not ours, and the worker must pass either way.
+  it.each([
+    ["Origin attached by fetch", { origin: APP_ORIGIN }],
+    ["Origin omitted", {}],
+  ])(
+    "lets the service worker's own flush through — %s",
+    async (_label, hdrs) => {
+      const res = await post(validBody(), hdrs);
+      expect(res.status).toBe(201);
+      expect(writeCaptureMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  // A near-miss is the case a substring or `startsWith` check waves through, and
+  // it is the realistic shape of an attack: register a lookalike host.
+  it.each([
+    "https://dlectroflow.dev.evil.example",
+    "http://dlectroflow.dev",
+    "https://evil.dlectroflow.dev",
+    "null",
+  ])("refuses the near-miss origin %s", async (origin) => {
+    const res = await post(validBody(), { origin });
+    expect(res.status).toBe(400);
+    expect(writeCaptureMock).not.toHaveBeenCalled();
   });
 });
 
