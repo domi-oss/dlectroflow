@@ -362,6 +362,29 @@ export async function deleteBrainDumpItem(id: string) {
     // that was never stamped (the `isFullyDone` route) passes `undefined` and gets
     // the unbounded behaviour, which is correct — there is no completion instant
     // to bound by, and its steps were banked whenever they were ticked.
+    //
+    // ⚠️ ACCEPTED, NOT FIXED (#251 review round 5). The snapshot is taken before
+    // the transaction opens, so there is a window: a `completeItem` that commits
+    // between that read and the `updateMany` above leaves `existing.completedAt`
+    // null while `tookCompletion` reports 1, and the bound silently falls back to
+    // unbounded for the `step_done` reversal.
+    //
+    // Not fixed, on two grounds, and recorded here so it is not rediscovered as a
+    // defect. **It degrades to the behaviour shipped before this MR**, so the
+    // worst case is the imprecision #251 set out to reduce, not a new one — and
+    // never corrupt state, because every write in here is still guarded on its own
+    // `WHERE`. And **reaching it needs two router instances issuing two DIFFERENT
+    // actions on one row inside the same millisecond** — Complete in one tab,
+    // Delete in another. That is not the double-tap this MR's `TASK_WRITER_TX_BUDGET`
+    // fix addresses (same action twice, seconds apart, ordinary); it is the
+    // speculative-concurrency shape this project deliberately does not build for on
+    // a single-owner app.
+    //
+    // Closing it properly means reading `completedAt` under the row lock — a
+    // `SELECT … FOR UPDATE` as the transaction's first statement, the pattern
+    // `rewards.ts` already uses for the streak. That is the right fix if this ever
+    // becomes reachable, and it is written down here so the next person does not
+    // have to re-derive it. It is not worth a raw locking read today.
     const reversed = await reverseItemCompletionRewards(
       workspaceId,
       {
