@@ -22,10 +22,16 @@
  * never interfere with the `@/lib/db` singleton the route uses, and ids unique to
  * this file, wiped either side.
  *
- * Needs the real Postgres (CI wires up a service DB and runs
- * `prisma migrate deploy` first; locally it uses your DATABASE_URL schema —
- * vitest does NOT read .env):
- *   set -a; . ./.env; set +a; npm test
+ * Needs the real Postgres. CI wires up a service DB and runs
+ * `prisma migrate deploy` first; locally a bare `npm test` is enough, because
+ * `config/vitest.config.ts` reads DATABASE_URL out of `.env` for exactly this
+ * (#84) and forwards ONLY that one variable, so no test can reach a secret it
+ * was not given.
+ *
+ * ⚠️ So do NOT run `set -a; . ./.env; set +a; npm test`. It was in this docblock,
+ * it is unnecessary, and it hands the whole env file — API keys and
+ * TOKEN_ENC_KEY included — to every test in the run, which is the one thing that
+ * config went out of its way to prevent.
  */
 
 import {
