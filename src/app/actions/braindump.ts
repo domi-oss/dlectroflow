@@ -956,8 +956,11 @@ export async function completeItem(id: string) {
     });
     // Not gated on anything: this call owns the completion, and setting a task
     // Done is the state the completion means. Inside the transaction so a to-do
-    // can never be left completed with its task still Active — three
-    // independent autocommitted writes could, and did.
+    // can never be left completed with its task still Active, which the three
+    // independent autocommitted writes this replaced permitted between any two of
+    // them. Stated as reachable, not as observed — no such row has been looked
+    // for in production, and the atomicity here comes free with the guard rather
+    // than being the thing it was added for.
     await tx.task.update({
       where: { id: task.id },
       data: { status: TaskStatus.Done },
