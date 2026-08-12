@@ -220,8 +220,8 @@ export function FocusPlaylistPanel({
           id={panelId}
           ref={panelRef}
           // A focus target, not a tab stop. The UA outline is deliberately left
-          // alone (a11y-class-hygiene Rule D / WCAG 2.4.11): a visible ring
-          // around what just appeared is correct.
+          // alone (a11y-class-hygiene Rule D / WCAG 2.4.7 Focus Visible): a
+          // visible ring around what just appeared is correct.
           tabIndex={-1}
           role="group"
           aria-label={t("focus.sound.panel", voice)}

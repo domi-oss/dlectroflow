@@ -725,10 +725,13 @@ export function ShoppingList({
     voice,
   )} ${t("shopping.stillToBuy", voice)}`;
 
-  // 44px minimum touch target (WCAG 2.5.5), and the focus indicator is a RING
-  // rather than a background swap: WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2
-  // and axe does not implement it, so a hover-coloured background alone would ship
-  // green and fail (#117). --ring is the same token app-menu.tsx measured.
+  // A 44x44 touch target — the app's own floor, which is 2.5.5 Target Size
+  // (Enhanced, AAA); the AA one is 2.5.8 (Minimum) at 24x24. And the focus
+  // indicator is a RING rather than a background swap: a hover-coloured
+  // background alone leaves nothing visible (2.4.7 Focus Visible, AA) and the
+  // ring is what clears 2.4.13 Focus Appearance (AAA) too. axe implements no rule
+  // for any of them, so the broken version would ship green (#117, #258). --ring
+  // is the same token app-menu.tsx measured.
   const ICON_BUTTON =
     "text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md px-2 text-xs outline-none focus-visible:ring-2";
 
@@ -967,7 +970,8 @@ export function ShoppingList({
           both themes and the one inbox-view.tsx and focus-timer.tsx already use
           — not a raw palette shade, which is what dropped a confirmation below
           4.5:1 in #40. Neither control sets `outline-none`, so the UA focus ring
-          draws and WCAG 2.4.11 is satisfied without a bespoke indicator. */}
+          draws and WCAG 2.4.7 Focus Visible is satisfied without a bespoke
+          indicator. */}
       {failure && (
         <>
           <div

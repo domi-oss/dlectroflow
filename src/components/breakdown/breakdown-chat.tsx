@@ -1235,7 +1235,7 @@ export function BreakdownChat({
           over its own tint in both themes by #109, and never re-spelled here
           (see that module's "do not re-hardcode a banner tone"). Neither
           control sets `outline-none`, so the UA focus ring draws and WCAG
-          2.4.11 is satisfied without a bespoke indicator. */}
+          2.4.7 Focus Visible is satisfied without a bespoke indicator. */}
       {ejectNotice && (
         <div
           role={ejectNotice.outcome === "edited" ? "status" : "alert"}

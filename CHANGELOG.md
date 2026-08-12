@@ -951,10 +951,13 @@ operators upgrading a self-hosted instance don't get surprised.
   - **Focus indicators.** Every popup menu entry in the header used a background
     swap as its only focus indicator, with the outline explicitly removed. That
     is 1.07:1 (light) and 1.17:1 (dark) between focused and unfocused, where WCAG
-    2.4.11 Focus Appearance — AA in WCAG 2.2 — needs 3:1. Both menus now draw an
-    inset ring at 4.65–8.83:1 against both adjacent colours, in both themes, and
-    keep the background swap as the hover affordance. Nothing had caught this
-    because **axe does not implement 2.4.11 at all.**
+    2.4.13 Focus Appearance — AAA — needs 3:1, and it leaves no indicator a user
+    can actually see, which is 2.4.7 Focus Visible and **is** AA. Both menus now
+    draw an inset ring at 4.65–8.83:1 against both adjacent colours, in both
+    themes, and keep the background swap as the hover affordance. Nothing had
+    caught this because **axe implements no rule for any of WCAG 2.2's focus
+    criteria** — including 2.4.11 Focus Not Obscured (Minimum), which is AA and
+    which nothing in this repo checks (#258).
   - **Two more found by the new gate, in neither issue's inventory**: a bare
     `text-emerald-600` on the task-schedule label, and the scheduling banner,
     whose in-code comment asserted its colours were AA on its own tint. They are
