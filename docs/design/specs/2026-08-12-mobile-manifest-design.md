@@ -188,7 +188,18 @@ because its transparency is the point.
 | `public/icon-192-maskable.png` | 192×192 | 32,749 |
 | `public/icon-512.png` (`any`) | 512×512 | 95,284 |
 | `public/icon-512-maskable.png` | 512×512 | 247,036 |
-| `public/apple-icon.png` | 180×180 | generated; Safari ignores the manifest and uses its own convention |
+| `public/apple-icon.png` | 180×180 | generated **from the opaque source**, same as maskable — see below. Safari ignores the manifest and uses its own convention |
+
+⚠️ **`apple-icon.png` comes from the OPAQUE source, and leaving that unstated was a real gap.** iOS renders a
+transparent home-screen icon against a **black backdrop** — the same *"dark square"* failure mode described
+above for using the opaque source as `purpose: "any"`, just inverted. Since the mark sits on a near-black
+gradient already, a transparent Apple icon would look *almost* right on a dark background and wrong
+everywhere else, which is the worst kind of bug to leave for an actual iPhone to find.
+
+Using the opaque source directly is also simpler than flattening the transparent one onto
+`background_color`: same pixels, one fewer step, and nothing to get wrong. **So of the five generated
+files, four come from the opaque source and only the two `purpose: "any"` icons come from the transparent
+one.**
 
 **The four manifest icons total 393,839 bytes (385 KiB), measured; the Apple icon adds a little more.**
 The two SVG sources are deliberately **NOT** committed. Between them they are
