@@ -41,7 +41,17 @@ is the same phone vertical space #253 is currently fighting for, so the two comp
 
 ### `app/manifest.ts`, not a static `manifest.json`
 
-Next 16 supports both (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/01-metadata/manifest.md`).
+Next 16 supports both. **Verified against `next@16.2.11`** — the version pinned in `package.json` and
+installed at the time — in the docs that ship with the dependency, at
+`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/01-metadata/manifest.md`.
+
+⚠️ **That path is deliberately cited and deliberately version-pinned.** `AGENTS.md` makes the shipped docs
+the source of truth for this project rather than recalled API shapes, so the citation is to the surface the
+repo actually mandates — but `node_modules` is not version-controlled and the path can move on upgrade, so
+the **version** is what makes the claim checkable later. The public equivalent is the Next.js `manifest`
+file-convention reference. If a future reader cannot find the file, the question to ask is whether
+`16.2.11`'s behaviour still applies, not whether the path is a typo.
+
 The generated form is chosen for two reasons:
 
 1. It returns `MetadataRoute.Manifest`, so a malformed manifest fails `tsc` rather than failing silently
@@ -111,16 +121,36 @@ A maskable icon is cropped to a circle covering the centre 80%. **An edge-margin
 test** and would have passed this asset for the wrong reason: margins are 13.3% clear, but the mark's
 bounding-box half-diagonal is 608px against a safe radius of 502px, so corners *could* have been clipped.
 
-The correct test is the furthest opaque pixel from centre:
+The correct test is the furthest **drawn** pixel from centre. ⚠️ **"Drawn" cannot mean "opaque" for this
+source, and the distinction is the whole reason this paragraph exists.** The maskable bitmap has **no alpha
+channel at all** — every pixel is opaque, including the background — so an alpha test cannot separate the
+mark from the square it sits on. It would report the corner of the canvas as the furthest pixel and fail
+the asset.
 
-| Measurement | Value |
+**So the two sources need two different methods, and the doc has to say which:**
+
+| Source | What counts as "drawn" | Threshold |
+| --- | --- | --- |
+| `brand-mark.svg` (maskable, no alpha) | **luminance** above the near-black background | `0.2126·R + 0.7152·G + 0.0722·B > 60`, on 0–255 |
+| `brand-mark-transparent.svg` (`any`, real alpha) | **alpha** above a small floor, to ignore anti-aliased fringe | `alpha > 32`, on 0–255 |
+
+The luminance threshold of 60 is comfortably clear of the background, which measures `#0a0510`–`#0c0519`
+(luminance ≈ 6–8) at the corners and centre. Stated so the measurement is reproducible from this document
+alone rather than only from the session that took it.
+
+| Measurement (maskable source, 1254×1254) | Value |
 | --- | --- |
 | Safe circle radius (0.4 × 1254) | **501.6px** |
-| Furthest bright pixel from centre | **460.2px** |
-| Bright pixels outside the safe circle | **0 (0.00%)** |
+| Furthest drawn pixel from centre | **460.2px** |
+| Drawn pixels outside the safe circle | **0 (0.00%)** |
+| Drawn pixels total | 264,830 (**16.8%** of the canvas) |
 
 **No padding, no downscaling, no redraw.** Generated as-is. The mark is centred horizontally and 1.8% high
 vertically, which is not visible.
+
+The `any` raster was checked the same way for completeness — furthest drawn pixel **188.3px** against a
+**204.8px** safe radius at 512 — so it would also survive masking. It stays `purpose: "any"` regardless,
+because its transparency is the point.
 
 #### Sizes, weights and why the sources are not committed
 
