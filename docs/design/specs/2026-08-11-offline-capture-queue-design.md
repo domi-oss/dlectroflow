@@ -328,10 +328,34 @@ share the route's core.
 
 **Next gives server actions automatic CSRF protection. A plain route handler gets none.** That matters
 here more than anywhere, because the *entire reason* this route exists is that a service worker cannot
-replay a server action — so the guard was given up deliberately, and nothing replaced it. This was
-missing from an earlier draft of this spec **and from the first implementation of the route**, which is
-exactly the shape of gap that reaches production: the trade was reasoned about carefully and its
-consequence was not enumerated.
+replay a server action — so the guard was given up deliberately, and **nothing recorded replaced it.**
+This was missing from an earlier draft of this spec **and from the first implementation of the route**,
+which is exactly the shape of gap that reaches production: the trade was reasoned about carefully and its
+consequence was never enumerated.
+
+⚠️ **"Nothing recorded" is doing real work in that sentence, and the first framing of this got it wrong.
+A forged POST could not have created a row even before the guard existed.** The body must declare the
+victim's own `workspaceId`, which is unguessable and unreadable cross-origin, so a forgery takes the
+`409`. Both cookies are `SameSite=lax` and host-only, so cross-site the cookie is not sent at all and the
+request resolves to a fresh guest sandbox, which also will not match.
+
+**So the workspace comparison has been acting as a CSRF token by accident** — and that relocates the
+finding rather than dissolving it, into a form worth more than the original:
+
+- **The live exposure was unauthenticated database work.** A forged request still resolved the session:
+  two queries, including #220's owner-status re-read. Any page on the internet could cause that. Putting
+  the `Origin` check **first** removes it.
+- **The two controls are independent, both load-bearing, and each looks redundant while the other
+  stands.** That is a drift trap, and the dangerous direction is concrete: the comparison exists to close
+  the expired-cookie hole, nothing recorded it as a CSRF control, and a reasonable future change —
+  *deriving* the workspace instead of declaring it — would remove the protection with **no test going
+  red**.
+
+Both directions are therefore stated at the call site with a *"read this before simplifying either"*
+warning. **This is why "we forgot CSRF" is the wrong lesson.** The guard's absence was survivable; what
+was actually missing was any record that a second thing depended on the comparison, and no amount of
+re-reading the trade surfaces that — only asking "what did we give up, and what is quietly standing in
+for it?" does.
 
 The route therefore carries the house pattern, which the repo already has and documents:
 
