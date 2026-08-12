@@ -88,6 +88,34 @@ change, which is why it presented as a hang. #174's description used *the absenc
 eliminating fact for a trap that was never the cause — so the manifest was being avoided for a reason that
 did not exist.
 
+### Unauthenticated reachability — it works, and the reason is an accident worth pinning
+
+**Review of this spec asked whether the manifest and its icons are reachable without authentication, which
+is exactly when a browser evaluates installability.** The concern is right and the mechanism it assumed is
+not, so both are recorded.
+
+**They are reachable, and not because anything classifies them as public.** `src/proxy.ts`'s matcher is:
+
+```
+matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.\\w+$).*)"]
+```
+
+`.*\.\w+$` excludes **any path carrying a file extension**. `app/manifest.ts` is served at
+`/manifest.webmanifest`; the icons are `/icon-192.png`, `/icon-512.png`, `/apple-icon.png`. **All of them
+have extensions, so none of them ever reaches the gate** — no `PUBLIC_PREFIXES` classification is
+consulted, no redirect is possible, and no guest workspace is minted.
+
+⚠️ **That is an incidental property of a regex, not a stated guarantee, and that is the actual finding.**
+`gate.ts` says nothing about the manifest. It works today additionally because `OWNER_ONLY_PREFIXES` is
+**empty** and `AUTHENTICATED_PREFIXES` is only `/api/account/` and `/api/google/oauth/` — but if either the
+matcher's extension exclusion or those lists change, **install breaks silently on first visit**, which is
+the same "green build, broken install" class this document already rules out for `start_url`.
+
+**So it gets a test rather than a sentence** (see Testing). Had the mechanism been the one review assumed —
+a signed-out fetch redirected to `/login` — the fix would have been a `PUBLIC_PREFIXES` entry. It is not,
+so adding one would be dead configuration that reads as load-bearing. **Pin the behaviour, not a
+workaround for a failure that does not occur.**
+
 ### `scope: "/"` is the one line that carries real risk
 
 If `scope` does not cover `/api/auth/gitlab/callback`, the OAuth callback opens **outside** the installed
@@ -208,6 +236,13 @@ TDD, failing test first, in this order:
 3. **Both icon purposes are declared, at both sizes**, and every declared `src` exists on disk. A manifest
    naming an absent icon is valid JSON and a broken install.
 4. **`display: "standalone"`** and the `shortcuts` entry's `url` is within `scope`.
+5. **The manifest and every icon path are unreachable by the auth gate.** Assert each path against
+   `src/proxy.ts`'s exported `config.matcher` — the manifest, all three icons — and **assert a control that
+   IS matched** (`/`, or any extensionless app path), so a test that passes because the regex was misread
+   cannot go green. This converts the extension-exclusion accident into a checked property: if someone
+   later removes that exclusion or gates `/`, this reds instead of install silently failing on first visit.
+   ⚠️ Import the matcher from `proxy.ts`; do **not** copy the pattern into the test, or the test stops
+   describing the deployed gate the moment the real one changes.
 
 ### ⚠️ One thing cannot be automated, and pretending otherwise is the risk
 
