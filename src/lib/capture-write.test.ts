@@ -19,7 +19,7 @@
  * `src/app/api/braindump/route.integration.test.ts`.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { prismaMock, touchStreakOnEngagementMock } = vi.hoisted(() => ({
   prismaMock: {
@@ -178,6 +178,91 @@ describe("writeCapture", () => {
 
   it("does NOT advance the streak for an empty capture", async () => {
     await writeCapture({ workspaceId: "ws-1", text: "  " });
+    expect(touchStreakOnEngagementMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Duo review round 4 on `!334`: the streak touch is a SECOND statement, and it can
+ * fail on its own once the insert has committed. Making the write idempotent is
+ * what gave that its teeth — a retry now takes the `duplicate` arm above and never
+ * reaches the streak, so nothing downstream can recover the credit.
+ *
+ * The reasoning, and the two alternatives that were rejected, are in
+ * `capture-write.ts` under "The streak touch is BEST-EFFORT". What is pinned here
+ * is the behaviour: a committed row is reported as committed, the failure is
+ * greppable, and the swallow covers the streak touch and nothing else.
+ */
+describe("writeCapture — a streak touch that fails AFTER the row landed", () => {
+  // `Once`, never a sticky `mockRejectedValue`: the outer `beforeEach` calls
+  // `vi.clearAllMocks()`, which clears recorded calls but NOT implementations, so
+  // a sticky rejection would leak into every test declared after this block.
+  const BOOM = "streak store went away";
+  let errorLog: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errorLog.mockRestore());
+
+  // THE interaction, stated as bluntly as it can be, and the same sentence
+  // `shopping.test.ts` pins for `settleShopping`: the row is in the database, so
+  // the caller is told the row is in the database.
+  it("still reports the capture created, because the row is committed", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(
+      writeCapture({
+        workspaceId: "ws-1",
+        text: "buy milk",
+        clientKey: "key-1",
+      }),
+    ).resolves.toBe("created");
+    // Also proves the queued rejection was CONSUMED. An unconsumed `Once` shifts
+    // every later test in this file by one, which presents as unrelated failures.
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith("ws-1");
+  });
+
+  it("does not write the row a second time trying to recover the credit", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await writeCapture({
+      workspaceId: "ws-1",
+      text: "buy milk",
+      clientKey: "key-1",
+    });
+    expect(prismaMock.brainDumpItem.createManyAndReturn).toHaveBeenCalledTimes(
+      1,
+    );
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+    await writeCapture({
+      workspaceId: "ws-1",
+      text: "buy milk",
+      clientKey: "key-1",
+    });
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(errorLog.mock.calls[0][0])) as {
+      tag: string;
+      workspaceId: string;
+      message: string;
+    };
+    expect(line.tag).toBe("capture_streak_touch_failed");
+    expect(line.workspaceId).toBe("ws-1");
+    expect(line.message).toContain(BOOM);
+  });
+
+  // The other direction, and the reason the `try` wraps ONE statement: the
+  // swallow covers the streak touch, not the write. An insert that failed has
+  // saved nothing, so the caller must hear about it — that is what keeps the
+  // capture queued and the words recoverable.
+  it("an insert that fails still rejects — those words are NOT saved", async () => {
+    prismaMock.brainDumpItem.createManyAndReturn.mockRejectedValueOnce(
+      new Error("connection refused"),
+    );
+    await expect(
+      writeCapture({ workspaceId: "ws-1", text: "buy milk" }),
+    ).rejects.toThrow("connection refused");
     expect(touchStreakOnEngagementMock).not.toHaveBeenCalled();
   });
 });

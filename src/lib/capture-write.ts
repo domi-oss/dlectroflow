@@ -45,6 +45,39 @@ import { touchStreakOnEngagement } from "@/lib/rewards";
  */
 export type CaptureOutcome = "created" | "duplicate" | "empty";
 
+/**
+ * One greppable line for a streak touch that failed after the row was committed
+ * (#175). Same shape and same reason as `logShoppingBookkeepingFailure` in
+ * `src/app/actions/shopping.ts`, and `recordLLMFailure` before it: a structured
+ * `tag` is what makes "the streak touch is failing for everybody" a thing
+ * somebody can find out, rather than a number quietly drifting.
+ *
+ * `error` level rather than `warn`: unlike the handled outcomes #158 is about,
+ * this is an unhandled fault in a second statement, and the only reason it is not
+ * a 500 is that the user's words are already safe.
+ */
+function logCaptureBookkeepingFailure(
+  workspaceId: string,
+  error: unknown,
+): void {
+  try {
+    const e = error as { message?: unknown } | undefined;
+    console.error(
+      JSON.stringify({
+        tag: "capture_streak_touch_failed",
+        workspaceId,
+        message: typeof e?.message === "string" ? e.message : String(error),
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    // Observability must never take the request down with it — the guard
+    // `recordLLMFailure` and `recordAuthFailure` carry, and it matters more here
+    // because the catch block calling this exists precisely to keep a committed
+    // write from being reported as failed.
+  }
+}
+
 export type CaptureInput = {
   /** The workspace the SESSION resolved. Never a value a request supplied. */
   workspaceId: string;
@@ -92,10 +125,81 @@ export type CaptureInput = {
  * ## The streak is only advanced by a capture that was actually written
  *
  * A duplicate is a capture the user already made, and the engagement was banked
- * when the first copy landed. `touchStreakOnEngagement` advances at most once per
- * working day so a second call would usually be a no-op, but "usually" is not the
- * reason to make one — the same argument `ensureFocusStep` makes for gating its
- * revalidation on whether it wrote.
+ * when the first copy landed. `touchStreakOnEngagement` early-returns on
+ * `lastActiveWorkday === today`, so a second call on the SAME working day is a
+ * true no-op rather than a near one — but a duplicate flushed on a LATER working
+ * day is not, which is why this arm returns before the touch rather than leaning
+ * on the idempotency. The same argument `ensureFocusStep` makes for gating its
+ * revalidation on whether it wrote, and the rejected alternative below is where
+ * the cross-day half of it bites.
+ *
+ * ## The streak touch is BEST-EFFORT, and that is a data-integrity decision
+ *
+ * Duo review round 4, `!334`. The insert and the streak touch are two statements
+ * with nothing atomic between them, so the touch can fail on its own with the row
+ * already committed — and `skipDuplicates` is what gave that teeth: a retry now
+ * takes the `duplicate` arm above, which never reaches the streak, so **nothing
+ * downstream can recover the credit**. Letting the failure propagate therefore
+ * preserves nothing at all, and costs a lie.
+ *
+ * **What the person sees, in one sentence:** the capture bar shows
+ * `capture.error.failed` — "Couldn't save that just now — your words are still
+ * here:" — over words that ARE saved, and its Retry (#210) writes a second row,
+ * because `createBrainDumpItem` sends no `clientKey` and the unique index treats
+ * nulls as distinct; that is a duplicate item in the inbox, and it needs the
+ * person to notice and delete it.
+ *
+ * `strings.ts` has already ruled on that claim from the other side: it declines to
+ * say "couldn't save that" on a TIMEOUT because it would be "a claim the client
+ * cannot support". A streak-touch rejection makes the definite wording exactly
+ * that unsupportable claim, with the client given no way to know.
+ *
+ * So this is `settleShopping`'s call for `!295` ("a duplicated item is not
+ * recoverable"), and `awardFirstSchedule`'s for scheduling, applied to the write
+ * both of them were describing. It is also the rule `inbox-view.tsx` reached from
+ * the other end in its Duo round 8 comment — *"the `try` governs the WRITE;
+ * anything after it is a consequence of success and cannot un-write the row"* —
+ * pushed one layer down, because the streak touch is a consequence of success and
+ * `writeCapture` is where it now lives.
+ *
+ * **The residual, stated rather than implied:** this capture does not bank a
+ * streak credit for the day. It is not banked *at all* only when the person makes
+ * no other qualifying engagement that working day — `Streak.lastActiveWorkday`
+ * makes the streak a per-day boolean, so any completion, breakdown-confirm or
+ * later capture credits the same day in full and nothing is left half-advanced.
+ * **Swallowed is not invisible:** the failure gets one greppable line, so "the
+ * streak touch is failing for everybody" is something somebody can find out.
+ *
+ * ### Rejected: touch the streak on the `duplicate` arm as well
+ *
+ * The tempting one, because it recovers the credit rather than accepting the loss,
+ * and `touchStreakOnEngagement` genuinely is per-day idempotent so it cannot
+ * double-count today. It is **not** idempotent across days, and that sinks it. A
+ * duplicate is flushed whenever a response was lost after the insert committed;
+ * `capture-queue.ts` records a discarded Android Chrome tab as the NORMAL case for
+ * that. A flush on the next working day would then advance the streak — and mint
+ * `Streak5` or `BeatBestStreak` — for a day whose only engagement was reopening
+ * the app. That sequence needs no failure at all, so it is strictly more ordinary
+ * than the one it repairs: it would trade a credit the day can earn back for one
+ * the person never earned. It is also dead code once the touch above is
+ * best-effort, since the request that produced the retry no longer fails.
+ *
+ * ### Rejected: wrap the two statements in one transaction
+ *
+ * `touchStreakOnEngagement` opens its OWN interactive `prisma.$transaction` on the
+ * module-level client and takes no `Prisma.TransactionClient`, so making it join an
+ * outer transaction means changing its signature in `src/lib/rewards.ts`. Nested as
+ * it stands it buys no atomicity whatever — the inner transaction runs on a second
+ * pooled connection and commits independently of the outer — while holding an
+ * uncommitted insert open across a `SELECT … FOR UPDATE`, a settings read and up to
+ * three badge writes, which is a connection-pool deadlock waiting for a second
+ * caller.
+ *
+ * Reversing the order instead — streak first, then insert — needs no change to
+ * `rewards.ts` and is worse: it puts that lock, that read and those badge writes
+ * IN FRONT of the insert, widening the window in which the request dies with the
+ * words still unsaved. That is the one thing #175 exists to prevent, so the
+ * ordering is not negotiable even though the atomicity would be nice to have.
  */
 export async function writeCapture({
   workspaceId,
@@ -118,6 +222,15 @@ export async function writeCapture({
 
   // A capture is a qualifying engagement (Decision 1, #8 Phase 7) — advances the
   // streak at most once per working day.
-  await touchStreakOnEngagement(workspaceId);
+  //
+  // Best-effort, and the `try` covers this ONE statement: the row above is
+  // committed, so no fault after it may report the capture as failed (#175). The
+  // reasoning, the residual and the two alternatives are in this function's
+  // docblock under "The streak touch is BEST-EFFORT".
+  try {
+    await touchStreakOnEngagement(workspaceId);
+  } catch (error) {
+    logCaptureBookkeepingFailure(workspaceId, error);
+  }
   return "created";
 }
