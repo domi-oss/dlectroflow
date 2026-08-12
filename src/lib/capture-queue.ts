@@ -148,30 +148,72 @@ export function readQueue(
   store: QueueStore | null | undefined,
 ): QueuedCapture[] {
   if (!store) return [];
-  let raw: string | null;
+  return readStored(store).queue;
+}
+
+/**
+ * The stored string as well as the queue it parses to.
+ *
+ * The raw string is what a write compares against to find out whether another
+ * tab committed while it was working — `localStorage` has no compare-and-swap,
+ * so the value it read is the only version marker available.
+ */
+type StoredQueue = { raw: string | null; queue: QueuedCapture[] };
+
+/** `null` for absent AND for a `getItem` that throws — same contract as `readQueue`. */
+function readRaw(store: QueueStore): string | null {
   try {
-    raw = store.getItem(CAPTURE_QUEUE_STORAGE_KEY);
+    return store.getItem(CAPTURE_QUEUE_STORAGE_KEY);
   } catch {
-    return [];
-  }
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isQueuedCapture);
-  } catch {
-    return [];
+    return null;
   }
 }
 
-function write(store: QueueStore, queue: QueuedCapture[]): boolean {
+function readStored(store: QueueStore): StoredQueue {
+  const raw = readRaw(store);
+  if (!raw) return { raw, queue: [] };
   try {
-    if (queue.length === 0) {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return { raw, queue: [] };
+    return { raw, queue: parsed.filter(isQueuedCapture) };
+  } catch {
+    return { raw, queue: [] };
+  }
+}
+
+/**
+ * How many times a write recomputes against a store that moved under it.
+ *
+ * Two covers what this exists for — one other tab committing once while we check
+ * the caps and serialise — and the third is a stop so a store being written in a
+ * tight loop cannot spin us. **On the last attempt the write goes ahead without
+ * the check**, deliberately: refusing would be a certain loss of the capture in
+ * hand, and an improbable clobber is the better of those two.
+ */
+const COMMIT_ATTEMPTS = 3;
+
+/**
+ * A queue already turned into the two things a write needs, and nothing else.
+ *
+ * Serialised ahead of the write rather than inside it, so that on a 64 KB queue —
+ * where `JSON.stringify` is the expensive part of the whole operation — the only
+ * thing left between the final read and the `setItem` is the `setItem`. Carrying
+ * the string and the emptiness together is what stops them disagreeing.
+ */
+type QueuePayload = { serialised: string; empty: boolean };
+
+function serialise(queue: QueuedCapture[]): QueuePayload {
+  return { serialised: JSON.stringify(queue), empty: queue.length === 0 };
+}
+
+function write(store: QueueStore, payload: QueuePayload): boolean {
+  try {
+    if (payload.empty) {
       // Leave no empty array behind: the key's presence is a signal the strip
       // reads, and "[]" would keep it looking like there is something pending.
       store.removeItem(CAPTURE_QUEUE_STORAGE_KEY);
     } else {
-      store.setItem(CAPTURE_QUEUE_STORAGE_KEY, JSON.stringify(queue));
+      store.setItem(CAPTURE_QUEUE_STORAGE_KEY, payload.serialised);
     }
     return true;
   } catch {
@@ -189,7 +231,9 @@ function write(store: QueueStore, queue: QueuedCapture[]): boolean {
  *
  * Re-enqueueing a `clientKey` already present succeeds without duplicating, and
  * **the first entry's text wins**. Reachable by double-tapping Retry, and the
- * words already promised to the user are the ones worth keeping.
+ * words already promised to the user are the ones worth keeping. "Present" means
+ * present in the STORE, not in any queue the caller is holding — see the two-tabs
+ * note at the top of this file.
  */
 export function enqueue(
   store: QueueStore | null | undefined,
@@ -201,30 +245,50 @@ export function enqueue(
   if (!text) return { ok: false, reason: "empty" };
 
   const entry: QueuedCapture = { ...capture, text };
-  const existing = readQueue(store);
 
-  if (existing.some((c) => c.clientKey === entry.clientKey)) {
-    return { ok: true, queue: existing };
-  }
-
-  // Checked before the item cap so a single oversized paste is named as a size
-  // problem even on an empty queue, which is the only place it can happen.
+  // Before the store is read at all, and before the item cap: a paste that cannot
+  // fit on its own is a size problem whatever any other tab has done, so naming
+  // it here both keeps the message right on an empty queue and keeps the
+  // serialisation of a 64 KB text out of the read/write window below.
   if (byteLength(JSON.stringify([entry])) > CAPTURE_QUEUE_MAX_BYTES) {
     return { ok: false, reason: "max-bytes" };
   }
-  if (existing.length >= CAPTURE_QUEUE_MAX_ITEMS) {
-    return { ok: false, reason: "max-items" };
-  }
 
-  const next = [...existing, entry];
-  if (byteLength(JSON.stringify(next)) > CAPTURE_QUEUE_MAX_BYTES) {
-    return { ok: false, reason: "max-bytes" };
-  }
+  for (let attempt = 1; ; attempt++) {
+    const { raw, queue: latest } = readStored(store);
 
-  if (!write(store, next)) {
-    return { ok: false, reason: "storage-unavailable" };
+    // Judged against the STORE, not against a snapshot, so a key another tab has
+    // already queued is not queued a second time.
+    if (latest.some((c) => c.clientKey === entry.clientKey)) {
+      return { ok: true, queue: latest };
+    }
+
+    // Both caps are measured against the MERGED queue, so the merge cannot become
+    // a way past 20 items or 64 KB. Over either, the INCOMING capture is the one
+    // refused and nothing already queued is touched — the same contract as the
+    // cap itself, which is why these paths write nothing at all.
+    if (latest.length >= CAPTURE_QUEUE_MAX_ITEMS) {
+      return { ok: false, reason: "max-items" };
+    }
+    const next = [...latest, entry];
+    // One serialisation, measured against the cap and then committed — so the
+    // 64 KB `JSON.stringify` is on this side of the final read, not inside it.
+    const payload = serialise(next);
+    if (byteLength(payload.serialised) > CAPTURE_QUEUE_MAX_BYTES) {
+      return { ok: false, reason: "max-bytes" };
+    }
+
+    // Everything above is work done against a value we have only read. If it moved
+    // while we were doing it, `next` is built on a queue that no longer exists and
+    // writing it would drop whatever the other tab added — so recompute against
+    // what is there now instead.
+    if (attempt < COMMIT_ATTEMPTS && readRaw(store) !== raw) continue;
+
+    if (!write(store, payload)) {
+      return { ok: false, reason: "storage-unavailable" };
+    }
+    return { ok: true, queue: next };
   }
-  return { ok: true, queue: next };
 }
 
 /**
@@ -238,6 +302,9 @@ export function enqueue(
  *
  * `session-expired`, `account-revoked` and `retry` all KEEP the capture. Nothing in
  * this module ever drops words the server has not accounted for.
+ *
+ * The removal or the mark is applied to the queue as it is in the store, not to
+ * the one this tab last saw — `applyOutcome` below is where that matters and why.
  */
 export function applyFlushOutcome(
   store: QueueStore | null | undefined,
@@ -245,27 +312,57 @@ export function applyFlushOutcome(
   outcome: FlushOutcome,
 ): QueuedCapture[] {
   if (!store) return [];
-  const existing = readQueue(store);
 
-  let next: QueuedCapture[];
-  if (outcome === "saved" || outcome === "duplicate") {
-    next = existing.filter((c) => c.clientKey !== clientKey);
-  } else {
-    next = existing.map((c) => {
-      if (c.clientKey !== clientKey) return c;
-      if (outcome === "session-expired" || outcome === "account-revoked") {
-        return { ...c, blockedBy: outcome };
-      }
-      // `retry` — reaching a retryable failure proves the guard is no longer what
-      // is stopping this capture, so the mark must go. Left in place, the strip
-      // would keep asking for a sign-in that has already happened.
-      const { blockedBy: _cleared, ...rest } = c;
-      return rest;
-    });
+  for (let attempt = 1; ; attempt++) {
+    const { raw, queue: latest } = readStored(store);
+    const next = applyOutcome(latest, clientKey, outcome);
+    const payload = serialise(next);
+
+    // Same reasoning as `enqueue`: recompute rather than write a queue built on a
+    // value another tab has already replaced.
+    if (attempt < COMMIT_ATTEMPTS && readRaw(store) !== raw) continue;
+
+    write(store, payload);
+    return next;
   }
+}
 
-  write(store, next);
-  return next;
+/**
+ * This tab's one change, applied to whatever the queue turned out to be.
+ *
+ * ⚠️ **A delta applied to the fresh read, never a union of two queues.** Unioning
+ * "the queue I computed" with "the queue I now find" is the obvious way to write
+ * the merge and it is worse than the bug it fixes: the removal above produces a
+ * queue *without* the key that just saved, the store still holds that key because
+ * nothing has been written yet, and a union puts it straight back — permanently,
+ * after the user has been told it saved. Marking has the same shape and reads
+ * worse still, offering a sign-in for work that is already done.
+ *
+ * Because the only entry this module ever ADDS is the one `enqueue` was handed, a
+ * tombstone and a per-entry version are both unnecessary: nothing ever has to
+ * tell "deliberately removed" apart from "not yet known to me". A capture another
+ * tab flushed is simply absent from `queue`, so the filter and the map below are
+ * each a no-op on it, which is exactly right.
+ */
+function applyOutcome(
+  queue: QueuedCapture[],
+  clientKey: string,
+  outcome: FlushOutcome,
+): QueuedCapture[] {
+  if (outcome === "saved" || outcome === "duplicate") {
+    return queue.filter((c) => c.clientKey !== clientKey);
+  }
+  return queue.map((c) => {
+    if (c.clientKey !== clientKey) return c;
+    if (outcome === "session-expired" || outcome === "account-revoked") {
+      return { ...c, blockedBy: outcome };
+    }
+    // `retry` — reaching a retryable failure proves the guard is no longer what
+    // is stopping this capture, so the mark must go. Left in place, the strip
+    // would keep asking for a sign-in that has already happened.
+    const { blockedBy: _cleared, ...rest } = c;
+    return rest;
+  });
 }
 
 /**

@@ -48,6 +48,49 @@ function seeded(items: QueuedCapture[]): QueueStore {
   return memoryStore({ [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify(items) });
 }
 
+/**
+ * One origin, two tabs. `otherTabWrites` commits **once**, immediately after
+ * this tab's first read has returned its value.
+ *
+ * That is a faithful model of the only window a synchronous read-modify-write
+ * leaves open, and of what makes it a race rather than a wide one: this tab's
+ * `getItem` hands back a snapshot, the other tab commits, and this tab is still
+ * busy checking the caps and serialising as much as 64 KB before its own
+ * `setItem` lands. `localStorage` has no compare-and-swap, so nothing in the
+ * platform stops the second write from dropping the first.
+ *
+ * The read deliberately returns the value from BEFORE the other tab's write —
+ * the point of the fixture is that this tab is holding something already stale.
+ * The other tab is handed the plain store so its own writes are ordinary ones.
+ */
+function contendedStore(
+  seed: QueuedCapture[],
+  otherTabWrites: (store: QueueStore) => void,
+): QueueStore {
+  const map = new Map<string, string>();
+  if (seed.length > 0) {
+    map.set(CAPTURE_QUEUE_STORAGE_KEY, JSON.stringify(seed));
+  }
+  const committed: QueueStore = {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, v),
+    removeItem: (k) => void map.delete(k),
+  };
+  let fired = false;
+  return {
+    getItem: (k) => {
+      const asOfThisRead = committed.getItem(k);
+      if (!fired) {
+        fired = true;
+        otherTabWrites(committed);
+      }
+      return asOfThisRead;
+    },
+    setItem: (k, v) => committed.setItem(k, v),
+    removeItem: (k) => committed.removeItem(k),
+  };
+}
+
 describe("capture queue — reading (#175)", () => {
   it("is empty when nothing has been stored", () => {
     expect(readQueue(memoryStore())).toEqual([]);
@@ -316,6 +359,196 @@ describe("capture queue — flush outcomes (#175)", () => {
 
   it("never throws without storage", () => {
     expect(() => applyFlushOutcome(null, "a", "saved")).not.toThrow();
+  });
+});
+
+// #233 established that the only concurrency this app genuinely has needs two
+// router instances — two tabs, or a tab and a phone — and that no in-memory guard
+// can span them. The inbox open in two tabs is ordinary, and the target is
+// Android Chrome, which discards a backgrounded tab and reopens it, so
+// overlapping lifetimes are the normal case rather than the exception.
+//
+// Every test here fails if a writer reconciles against the snapshot it read
+// instead of against the store, which is the loss this module exists to prevent
+// wearing a costume the caps and the throw-safety tests do not catch.
+describe("capture queue — two tabs against one origin (#175)", () => {
+  it("keeps the capture another tab queued while this one was checking the caps", () => {
+    const store = contendedStore(
+      [capture({ clientKey: "a", capturedAt: 1 })],
+      (other) => {
+        enqueue(other, capture({ clientKey: "other-tab", capturedAt: 2 }));
+      },
+    );
+
+    const result = enqueue(
+      store,
+      capture({ clientKey: "mine", capturedAt: 3 }),
+    );
+
+    expect(result.ok).toBe(true);
+    // Write order, not `capturedAt`: what is already stored keeps the order it
+    // has and the incoming capture goes on the end. See the module's Ordering
+    // note for why nothing re-sorts by a clock two devices do not share.
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual([
+      "a",
+      "other-tab",
+      "mine",
+    ]);
+    // The reported queue is the one that was written, not the snapshot it began
+    // from — the caller renders this without re-reading.
+    if (result.ok) expect(result.queue).toEqual(readQueue(store));
+  });
+
+  it("refuses the incoming capture when the other tab's write filled the item cap", () => {
+    const nineteen = Array.from(
+      { length: CAPTURE_QUEUE_MAX_ITEMS - 1 },
+      (_, i) => capture({ clientKey: `k${i}` }),
+    );
+    const store = contendedStore(nineteen, (other) => {
+      enqueue(other, capture({ clientKey: "other-tab" }));
+    });
+
+    const result = enqueue(store, capture({ clientKey: "mine" }));
+
+    // The cap is measured against the MERGED queue, so the merge cannot become a
+    // way past 20. Over it, the INCOMING capture is the one refused — same
+    // contract as the plain cap, and the words stay in the field.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("max-items");
+    const keys = readQueue(store).map((c) => c.clientKey);
+    expect(keys).toHaveLength(CAPTURE_QUEUE_MAX_ITEMS);
+    expect(keys).toContain("other-tab");
+    expect(keys).not.toContain("mine");
+  });
+
+  it("refuses the incoming capture when the merged queue would breach the byte cap", () => {
+    const big = "z".repeat(Math.floor(CAPTURE_QUEUE_MAX_BYTES / 2) - 200);
+
+    // Control: the two big captures do fit together, so the refusal below is the
+    // incoming capture being turned away and not the pair being impossible.
+    const control = memoryStore();
+    expect(enqueue(control, capture({ clientKey: "a", text: big })).ok).toBe(
+      true,
+    );
+    expect(
+      enqueue(control, capture({ clientKey: "other-tab", text: big })).ok,
+    ).toBe(true);
+
+    const store = contendedStore(
+      [capture({ clientKey: "a", text: big })],
+      (other) => {
+        enqueue(other, capture({ clientKey: "other-tab", text: big }));
+      },
+    );
+
+    const result = enqueue(
+      store,
+      capture({ clientKey: "mine", text: "z".repeat(1_000) }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("max-bytes");
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual([
+      "a",
+      "other-tab",
+    ]);
+  });
+
+  // The case where the merge ALONE is over a cap, before anything incoming is
+  // considered. Refuse, and leave every one of the other tab's captures exactly
+  // where they are: truncating to fit would be the silent eviction of the oldest
+  // that this module refuses to do, arrived at from a new direction.
+  it("refuses without truncating when what the other tab left is already over the item cap", () => {
+    const twentyTwo = Array.from(
+      { length: CAPTURE_QUEUE_MAX_ITEMS + 2 },
+      (_, i) => capture({ clientKey: `k${i}` }),
+    );
+    const store = contendedStore([capture({ clientKey: "a" })], (other) => {
+      // Reachable without a hand-edited store: a tab left open across a deploy
+      // is running the previous build, and the first draft of this design capped
+      // at 200 (spec, 2026-08-11). Its queue is legitimately larger than ours.
+      other.setItem(CAPTURE_QUEUE_STORAGE_KEY, JSON.stringify(twentyTwo));
+    });
+
+    const result = enqueue(store, capture({ clientKey: "mine" }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("max-items");
+    expect(readQueue(store)).toEqual(twentyTwo);
+  });
+
+  // Not a user story — two tabs cannot mint the same `clientKey`. It is the
+  // contract MR 2's hook will lean on when it holds the queue in React state:
+  // idempotency is judged against the store, never against a snapshot.
+  it("judges idempotency against the store, so a key only the other tab wrote is not duplicated", () => {
+    const store = contendedStore([], (other) => {
+      enqueue(
+        other,
+        capture({ clientKey: "same", text: "the other tab's words" }),
+      );
+    });
+
+    const result = enqueue(store, capture({ clientKey: "same", text: "mine" }));
+
+    expect(result.ok).toBe(true);
+    const q = readQueue(store);
+    expect(q).toHaveLength(1);
+    expect(q[0].text).toBe("the other tab's words");
+  });
+
+  it("keeps a capture the other tab queued while this one was recording a flush", () => {
+    const store = contendedStore(
+      [capture({ clientKey: "a" }), capture({ clientKey: "b" })],
+      (other) => {
+        enqueue(other, capture({ clientKey: "other-tab" }));
+      },
+    );
+
+    const returned = applyFlushOutcome(store, "a", "saved");
+
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual([
+      "b",
+      "other-tab",
+    ]);
+    expect(returned).toEqual(readQueue(store));
+  });
+
+  // ⚠️ The assertion that stops the merge being written as a set union of the two
+  // queues, which is the obvious implementation and is WORSE than the bug it
+  // fixes. This tab computes a queue without the key it just saved; the store
+  // still holds that key because nothing has been written yet; a union puts it
+  // straight back — permanently, and after the user has been told it saved.
+  //
+  // Only ever applying this tab's own delta to the fresh read is what makes a
+  // tombstone and a per-entry version unnecessary: "deliberately removed" never
+  // has to be told apart from "not yet known to me", because the tab doing the
+  // removing removes it from a read it took itself.
+  it("never resurrects a capture the other tab flushed successfully", () => {
+    const store = contendedStore(
+      [capture({ clientKey: "a" }), capture({ clientKey: "b" })],
+      (other) => {
+        applyFlushOutcome(other, "b", "saved");
+      },
+    );
+
+    applyFlushOutcome(store, "a", "saved");
+
+    expect(readQueue(store)).toEqual([]);
+    expect(store.getItem(CAPTURE_QUEUE_STORAGE_KEY)).toBeNull();
+  });
+
+  // Reachable, and the worst-reading version of the same bug: two tabs flush the
+  // same capture at once, one gets 201 and the other 409. Marking a capture the
+  // other tab has already saved would bring the words back AND offer a sign-in
+  // for work that is already done.
+  it("does not resurrect a flushed capture in order to mark it refused", () => {
+    const store = contendedStore([capture({ clientKey: "a" })], (other) => {
+      applyFlushOutcome(other, "a", "saved");
+    });
+
+    applyFlushOutcome(store, "a", "session-expired");
+
+    expect(readQueue(store)).toEqual([]);
   });
 });
 
