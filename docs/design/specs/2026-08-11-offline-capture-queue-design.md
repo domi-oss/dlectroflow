@@ -149,7 +149,12 @@ type QueuedCapture = {
    * cannot work.
    *
    * `undefined` means "not yet refused, or refused for a reason that has since
-   * cleared". Cleared as soon as an attempt gets past the guard.
+   * cleared", and a `session-expired` mark is cleared by **any retryable
+   * outcome**. ⚠️ An earlier version of this line said "cleared as soon as an
+   * attempt gets past the guard", which is false for the `401` arm: a `401` means
+   * `currentWorkspaceId()` threw, so the declared-`workspaceId` comparison was
+   * never reached — and it clears the mark anyway. `account-revoked` is cleared by
+   * nothing short of success; see the precedence rule under the outcome table.
    */
   blockedBy?: "session-expired" | "account-revoked";
   /**
@@ -217,8 +222,11 @@ read-modify-write can lose another tab's capture. Two tabs of the inbox is ordin
 Chrome target a discarded-and-reopened tab makes overlapping lifetimes normal rather than exceptional. A
 lost capture is the exact failure this feature exists to prevent, so this is not deferrable in full.
 
-**Three things were established by measurement rather than argument, and each contradicts the obvious
-answer:**
+**Three things are worth stating because each contradicts the obvious answer — and exactly one of them
+was settled by measurement rather than argument.** ⚠️ **An earlier version of this sentence claimed all
+three were**, which review of this spec was right to call out: (3) says outright that it *follows from*
+(2), and (1)'s *"three `JSON.stringify` passes"* is a count of the code's passes, not a timing. Only
+(2) carries a measurement, and it is labelled below as the sibling-branch evidence it is.
 
 1. **"Re-read immediately before writing" is a no-op here.** Both `enqueue` and `applyFlushOutcome`
    *already* read immediately before writing, in one synchronous block. What was actually open was the CPU
@@ -238,9 +246,14 @@ answer:**
    discarded because another tab happened to write first. What actually happens is that the whole
    read-compute-write is **re-run against the new stored value**, because the delta being applied is
    still valid — it was never about *which* queue it was applied to. Three attempts (above), and
-   **on exhaustion the caller gets the same refusal a failed `write` produces**, which keeps the words in
-   the field and tells the user. There is no path on which the words are silently gone: every exit is
-   either "persisted" or "refused, and you can still see it".
+   ⚠️ **there is no exhaustion branch, so an earlier version of this line described one that cannot
+   exist.** It said *"on exhaustion the caller gets the same refusal a failed `write` produces"*, which
+   contradicts the paragraph immediately above: the last attempt writes **without** the comparison, so
+   the loop cannot exit by running out of attempts. The refusal it was reaching for is real and has a
+   different trigger — **a `setItem` that throws produces it** — and it keeps the words in the field and
+   tells the user. The code and the test list already agree on this: the test below asserts the third
+   attempt **writes** rather than refuses. There is no path on which the words are silently gone: every
+   exit is either "persisted" or "refused, and you can still see it".
 2. **Union by `clientKey` is the wrong primitive for `applyFlushOutcome`, and introduces a worse bug than
    it fixes.** Unioning "the queue I computed" with "the queue I now find" **resurrects the capture that
    just saved** — the computed queue lacks the key, the store still holds it because nothing has been
@@ -278,10 +291,13 @@ synchronous-localStorage pattern with a `useSyncExternalStore` subscription (`sr
 and an async store would make the write-before-network guarantee harder to hold. Chrome Android
 applies no 7-day script-writable-storage eviction, so durability is measured in weeks.
 
-**Cap: 20 items, or 64 KB total, whichever binds first** — "64 KB" throughout this document means **64 Ki
-UTF-8 bytes**, defined once under *"What '64 KB' is measured in"* below (owner decision 2026-08-11 — an earlier draft
-said 200). At the cap a new capture is **refused with a visible message** and the words stay in the
-field. It does not silently evict the oldest — losing the newest *with the user watching* is honest;
+**Cap: 20 items per workspace, or 64 KB across the whole origin, whichever binds first** — "64 KB"
+throughout this document means **64 Ki UTF-8 bytes**, defined once under *"What '64 KB' is measured in"*
+below (owner decision 2026-08-11 — an earlier draft said 200). ⚠️ **This headline read "20 items, or
+64 KB total" and was never updated when the two caps split**, which review of this spec caught: the
+split is set out under *"A shared browser"* below, and it is what makes the item cap a property of what
+*this* user can see and the byte cap a property of the origin's quota. At the cap a new capture is
+**refused with a visible message** and the words stay in the field. It does not silently evict the oldest — losing the newest *with the user watching* is honest;
 losing the oldest quietly is the bug this issue exists to fix, in a new costume.
 
 **20 makes the cap a limit the user can actually meet, and that changes what it is.** At 200 it is a
@@ -312,11 +328,29 @@ they have different remedies, and the wording table below carries a separate sen
 | **One capture exceeds 64 KB on its own** | Nothing that is already queued is relevant; this capture cannot ever fit | Shorten *this* one, or copy it elsewhere |
 | **The queue total is at 64 KB and a further capture, however short, does not fit** | This capture is fine; the queue is full | Wait for some to save — **shortening will not help** |
 
+**So the three refusals do not share a message, and this is the one place that argument is made.**
+Collapsing any two of them repeats round 1's defect in a new place: telling someone whose two-word
+capture was refused to *"shorten it"* is advice that cannot work, and telling someone who pasted one
+essay that *"20 captures are already waiting"* quotes a number that may well be zero. **A refusal
+message whose remedy the user cannot act on is the same defect as a refusal message with the wrong
+number in it.** The item cap can quote a figure the user recognises (20); neither byte condition can,
+because a byte total is not something anyone can count in their own queue — so the byte copy says what
+to do without quoting a figure. Three separate sentences, in the wording table below.
+
+⚠️ **That argument appeared four times in seventy lines and is now made only here** — review of this
+spec counted them, and two were near-verbatim seventeen lines apart. Worse, one copy sat *under* the
+heading below while reading as a continuation of the text above it: it opened *"Collapsing them"* with
+no antecedent in its own subsection. Three copies of an argument is how one of them ends up describing
+a rule the other two no longer follow, which is precisely the drift the copy for these states has
+already been corrected for twice.
+
 #### What "64 KB" is measured in — UTF-8 bytes, and this section had it wrong
 
 **Review of this spec asked whether the bound is UTF-8 bytes or UTF-16 code units, and it was right to:
-the document said "64 KB" eight times without ever saying, and the two differ by up to 2× on the
-non-ASCII text this app's users type.** Unspecified, an implementer picks one and nobody finds out which.
+the document said "64 KB" eight times without ever saying, and the two differ by up to 3× on the
+non-ASCII text this app's users type.** ⚠️ **This sentence said "2×" and that was wrong** — a BMP CJK
+character is **3** UTF-8 bytes to **1** UTF-16 code unit, which is the ratio this document already
+quotes twice below. Unspecified, an implementer picks one and nobody finds out which.
 
 ⚠️ **CORRECTED. An earlier version of this section answered "UTF-16 code units", and that was wrong — it
 contradicted the code it was describing.** `src/lib/capture-queue.ts` measures **UTF-8 bytes**, via a
@@ -347,32 +381,14 @@ implementation cost has to be checked against the implementation; this one was n
 reaches the bound after fewer visible characters than an ASCII one — CJK costs 3 bytes per character
 against ASCII's 1. That is acceptable; the bound exists to stop one pasted essay exhausting the quota, not
 to promise a character budget. **The user-facing copy names no unit at all** — *"too long to hold
-safely"*, *"no room to hold more"* — and must keep not doing so, for the same reason the byte-total
-sentence quotes no number while the item cap quotes 20: a byte total is not something anyone can count in
-their own queue.
+safely"*, *"no room to hold more"* — and must keep not doing so, for the reason given with the
+byte-condition table above.
 
 ⚠️ **What this spec deliberately does not claim: how a given browser charges `localStorage` against its
 quota.** Accounting is implementation-defined, so tying the constant to a real `QuotaExceededError`
 threshold is an implementation-time **measurement**, not something to assert here. 64 KiB is comfortably
 inside every engine's documented floor, and `QuotaExceededError` recovery is a tested path regardless —
 see the testing section.
-
-Collapsing them repeats round 1's defect in a new place: telling someone whose two-word capture was
-refused to *"shorten it"* is advice that cannot work, in exactly the way telling someone who pasted one
-essay that *"20 captures are already waiting"* was a number that may well be zero. **A refusal message
-whose remedy the user cannot act on is the same defect as a refusal message with the wrong number in
-it.**
-
-Note the item cap and the total-byte cap are *not* the same state either, even though both mean "the
-queue is full": the item cap can state a number the user recognises (20), and the byte cap cannot,
-because a byte total is not something anyone can count in their own queue. So the byte-total copy says
-what to do without quoting a figure.
-
-**The two caps do not share a message.** An earlier draft said an over-large single
-capture was "refused on the same message", which would tell someone who pasted one
-long essay that *"20 captures are already waiting"* — a number that may well be zero.
-The item cap is about how many are queued; the byte cap is about how big one of them
-is. Separate sentences, in the wording table above.
 
 #### A shared browser — the queue is per-origin, and that is a privacy gap
 
@@ -561,13 +577,20 @@ Terminal would strand a perfectly saveable capture. It must still not clear an `
 the same reason `5xx` must not: a missing session is no evidence an account was un-frozen.
 
 **The mark is a precedence, not an assignment: `account-revoked` > `session-expired` > unmarked, and
-only a successful outcome clears it** (by removing the entry). Why that is needed, and why the obvious
+only a successful outcome clears `account-revoked`** (by removing the entry). ⚠️ **That last clause read
+"only a successful outcome clears *it*"**, which contradicted four other statements in this document and
+two rows of the table directly above: a `401` and a `5xx` both clear a `session-expired` mark. It is
+`account-revoked`, and only that, which nothing but success clears. Why that is needed, and why the obvious
 "latest refusal wins" is wrong here, is worked through under *"The `403` copy is reachable"* in **What
 the user sees** below — the short version is that #220 deletes the owner cookie in the same response
 that answered `403`, so the *next* attempt is made as a guest and necessarily `409`s.
 
-**`409` and `403` must not share a state.** They look alike — both keep the capture
-and neither is retryable — but the remedy differs and so does the truth:
+**`409` and `403` must not share a state.** They look alike — both keep the capture and **neither is
+fixed by retrying as-is** — but the remedy differs and so does the truth. ⚠️ **That clause said
+"neither is retryable", which is flush vocabulary being used to make a remedy claim**, and it
+contradicted the worker contract above, where every `409` *is* retryable. Retryability is about whether
+another attempt is worth making; this bullet pair is about whether *the same attempt* can ever succeed
+without something changing first:
 
 - **`409`** means the session moved on. Signing in again **fixes it**, and the queued
   words then save.
@@ -686,10 +709,11 @@ strictly more valuable to an attacker, so the same reasoning applies at least as
 about signing in, and a request the user never made has no business producing either — that is the same
 message-collapse this document has already been reviewed for twice.
 
-⚠️ **The service worker's own `fetch` must still pass**, and that is asserted rather than reasoned about.
-A worker's `fetch` carries the worker's own origin, which is the registering origin, so it does — but it
-is the one caller whose breakage would be catastrophic and invisible, since it is the only path that works
-while no tab is open.
+⚠️ **The service worker's own `fetch` must still pass.** A worker's `fetch` carries the worker's own
+origin, which is the registering origin, so it does — and that means at this route's boundary it is **the
+same case as a matching-`Origin` request from a tab**, not a third thing to check. It is called out
+because it is the one caller whose breakage would be catastrophic and invisible, being the only path that
+works while no tab is open; why a route-level test cannot add anything here is in the testing section.
 
 ⚠️ **An earlier draft of that sentence said "from the installed app", and installation is an explicit
 non-goal of this spec** — caught in review, and it mattered as more than a wording slip. A service worker
@@ -730,9 +754,16 @@ sufficient description of the handler — it needs a rule, and the rule is not "
 | After a drain pass | `waitUntil` | Why |
 |---|---|---|
 | Mirror empty | **resolve** | Done. Nothing to come back for |
-| Anything left for a **retryable** reason (`5xx`, network, `401`) | **reject** | The only way to get another attempt while no tab is open |
+| Anything left for a **retryable** reason (`5xx`, network, `401`, **`409`**) | **reject** | The only way to get another attempt while no tab is open |
 | Everything left is marked **`account-revoked`** | **resolve** | ⚠️ **Rejecting here is the bug.** Those entries can never flush, so the platform would retry on its own schedule forever, burn battery, and eventually give up anyway — while the *user-facing* remedy is Discard, which only a foreground tab can offer |
 | Mixed retryable and permanently blocked | **reject** | The retryable ones justify another attempt; the blocked ones are simply skipped on each pass |
+
+⚠️ **`409` was missing from that retryable enumeration, and the document then stated its retryability
+three different ways** — review of this spec found all three. The enumeration read *"(`5xx`, network,
+`401`)"*, a bullet below says *"every `409` is retryable as far as the worker is concerned"*, and the
+`409`/`403` split further down said *"neither is retryable"*. **The bullet below is the right answer**:
+nothing the worker can read distinguishes a first `409` from a hundredth, so the worker retries it, and
+a pass with a `409` left in it therefore has retryable work remaining. The other two are corrected.
 
 **So the handler's exit condition is "no retryable work remains", not "the mirror is empty".** That
 distinction is the whole content of this section, and it is the reason the terminal-mark precedence
@@ -777,16 +808,26 @@ Left there, the worker retries a permanently-refused capture on every sync forev
 eventually shows it as merely *"waiting"* with no explanation, because nothing ever persisted the reason.
 
 **The worker records the mark in the mirror, which it CAN write, and reconciliation propagates it.** That
-requires one narrow, explicit exception to the rule above:
+needs one narrow, explicit carve-out from the reconciliation rule set out **below**, under *"Reconciliation
+on mount runs in both directions"*:
 
-> `localStorage` wins in every disagreement — **except `blockedBy`, where a mark present in the mirror and
-> absent in `localStorage` is copied INTO `localStorage`.**
+> `localStorage` wins on **membership** — which captures exist. **`blockedBy` is not membership, so it
+> falls outside that rule rather than contradicting it:** a mark present in the mirror and absent in
+> `localStorage` is copied **into** `localStorage`.
 
-**The exception is safe in exactly one direction and must not be generalised.** The worker is the only
-writer that can learn a refusal while no tab is open, so for this one field the mirror can legitimately be
-newer. Nothing else may flow that way: a mirror entry with no `localStorage` counterpart is still
-**deleted**, never resurrected, because that rule is what stops the mirror putting back a capture the user
-discarded or already saved.
+⚠️ **This blockquote reproduced the un-narrowed rule it exists to qualify, and pointed the wrong way.** It
+read *"`localStorage` wins in every disagreement"* — the form the reconciliation section has since narrowed
+to membership — and the sentence introducing it said *"the rule above"* while that rule sits some fifty
+lines **below** it. Both are corrected, and the consequence is worth stating rather than leaving as a
+wording fix: **under the narrowed rule `blockedBy` was never in the rule's scope at all**, so calling it an
+"exception" overstated what is being carved out and invited exactly the generalisation the next paragraph
+forbids.
+
+**It is safe in exactly one direction and must not be generalised.** The worker is the only writer that can
+learn a refusal while no tab is open, so for this one field the mirror can legitimately be newer. Nothing
+else may flow that way: a mirror entry with no `localStorage` counterpart is still **deleted**, never
+resurrected, because that rule is what stops the mirror putting back a capture the user discarded or
+already saved.
 
 **Precedence still decides the merge**, so this cannot downgrade anything: an `account-revoked` mark in the
 mirror wins over an absent one, and a `session-expired` mark in the mirror loses to an `account-revoked`
@@ -847,19 +888,20 @@ wins on **membership** — which captures exist — and "wins" resolves to two d
 - a `localStorage` entry **missing** from IndexedDB is **re-mirrored**, and `sync` is re-registered
   for it.
 
-⚠️ **`blockedBy` is the one field where the mirror may be newer, and it is a deliberate exception to the
-line above** — see *"the worker must be able to WRITE a mark"* in the flush-triggers section. The worker is
-the only writer that can learn a refusal while no tab is open, and it cannot write `localStorage`, so a
-mark present only in the mirror is **copied in**. Membership is unaffected: this exception moves a *field*
-onto an entry that already exists on both sides, and never adds or revives an entry.
+⚠️ **`blockedBy` is the one field where the mirror may be newer, and it sits outside the line above rather
+than contradicting it** — see *"the worker must be able to WRITE a mark"* in the flush-triggers section. The
+worker is the only writer that can learn a refusal while no tab is open, and it cannot write
+`localStorage`, so a mark present only in the mirror is **copied in**. Membership is unaffected: the
+carve-out moves a *field* onto an entry that already exists on both sides, and never adds or revives an
+entry.
 
 Only the first direction is obvious, and stopping there would have left a real hole. The paragraph
 above concedes that the IndexedDB write settles *after* the synchronous `localStorage` write, so a tab
 discarded between the two — the exact thing Chrome Android does, and the whole reason this design is
 not in-memory — leaves a capture that is durable but **invisible to the worker forever**, because
 nothing else ever writes the mirror. That capture is not lost: the foreground flush still finds it on
-next open. But it would silently fall out of Background Sync, so the *only* path that works while the
-app is closed would cover an arbitrary subset of the queue, and no test asserting "the item survived"
+next open. But it would silently fall out of Background Sync, so the *only* path that works while no tab
+is open would cover an arbitrary subset of the queue, and no test asserting "the item survived"
 could see it. Re-mirroring is what makes the mirror eventually complete rather than best-effort.
 
 Both directions are asserted, and separately — the delete direction passes on its own against a
@@ -896,13 +938,32 @@ that is the shape of the lie #210 was filed for.
 **An earlier draft of this document assumed a way to clear a queued capture and never designed one, and
 that is not a missing nicety, it is a dead end.** Two of the refusal states are **permanent**: an
 `account-revoked` `403`, and a `session-expired` `409` whose `blockedUnder` comparison has already shown
-a sign-in will not help. Those entries can never flush. With no way to remove them they sit in the queue
-forever, and **twenty of them exhaust the 20-item cap permanently — the user can never capture again.**
-The app would be bricked by its own safety mechanism.
+a sign-in will not help. Those entries can never flush, and with no way to remove them they sit in the
+queue forever.
 
-It is also the missing half of copy this document already commits to. Three of the refusal messages say
-*"copy them somewhere safe"*. **Advice to copy something out, with no way to then put it down, is not
-advice.** The user does the copying and is left with the queue exactly as full as before.
+⚠️ **The reason this paragraph gave was wrong, and the real one is worse.** It said *"twenty of them
+exhaust the 20-item cap permanently — the user can never capture again"*, which the cap split under *"A
+shared browser"* contradicts: **the item cap counts per workspace**, and a permanently-blocked entry
+belongs to a workspace the live session no longer resolves to, so it is not counted against the capture
+being attempted now. Two other properties strand the user instead, and Discard is still the only exit:
+
+- **The byte cap counts every entry in the key, origin-wide.** A stranded long capture consumes it
+  forever, so the next offline capture that does not fit is refused with *"no room to hold more until some
+  of these save"* — a wait for something that can never happen. That is a **denial of capture**, and it is
+  the residual the shared-browser section names. Orphan expiry bounds it only for a workspace that has
+  become *unresolvable*; a **frozen** account's workspace still resolves perfectly well, so an
+  `account-revoked` entry is never collected by it.
+- **They are stranded *and* invisible.** An entry whose workspace can never resolve again is neither
+  saved nor shown as text — the one outcome this document forbids — while still being held.
+
+The app would still be bricked by its own safety mechanism. The mechanism doing the bricking is the byte
+cap, not the item cap.
+
+It is also the missing half of copy this document already commits to. **The refusal messages tell the user
+to copy their words out.** ⚠️ **This sentence said "three of the refusal messages"** — four of the rows in
+the wording table below carry that exact phrase and a fifth offers the same advice in different words, so
+the count was stale the moment a row was added. It is not a number this argument needs. **Advice to copy
+something out, with no way to then put it down, is not advice.** The user does the copying and is left with the queue exactly as full as before.
 
 So each expanded entry carries a **Discard** control:
 
@@ -1045,11 +1106,13 @@ user's release valve either way.
 
 **a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
 `role="status"` announces the waiting count (a background count is not an interruption); an assertive
-`role="alert"` announces **every refusal state** — the two `blockedBy` values, the `409`-after-sign-in
-transition, and all three cap-reached states. Each element's `role` is **fixed for the lifetime of the
+`role="alert"` announces **every refusal state**. Each element's `role` is **fixed for the lifetime of the
 strip**, and each is **mounted empty from the strip's first paint** and then filled. (Stated as "every
 refusal" rather than by counting them, because the count has now changed twice under review and a
-sentence that enumerates states goes stale the moment one is added.)
+sentence that enumerates states goes stale the moment one is added. ⚠️ **This parenthesis was followed by
+an enumeration of the states** — the two `blockedBy` values, the `409`-after-sign-in transition and "all
+three cap-reached states" — which is the thing it says it is avoiding, and it was already stale: there is
+now a fourth cap-family refusal, the storage one below.)
 
 Both halves of that are load-bearing:
 
@@ -1117,8 +1180,12 @@ TDD, failing test first, in this order:
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
    - **The precedence is asserted in both directions, and `account-revoked`'s stickiness is asserted
-     against all three of the outcomes that could erase it.** `403` then `409`, `403` then `5xx`, and
-     `403` then `403` all leave `account-revoked` in place; `403` then `201`/`200` **removes the entry**,
+     against all three of the outcomes that could erase it.** ⚠️ **This list named the wrong three** —
+     review of this spec caught it. It said *"`403` then `409`, `403` then `5xx`, and `403` then `403`"*,
+     but a second `403` re-asserts the same mark and so can erase nothing, and **`401` was missing** even
+     though it is one of the two outcomes that clear a `session-expired` mark. The three that could erase
+     `account-revoked` are the three that clear its weaker sibling: `403` then `409`, `403` then `5xx`,
+     and `403` then `401` all leave `account-revoked` in place; `403` then `201`/`200` **removes the entry**,
      which is the test that proves stickiness is not a permanent trap. The unchanged direction needs its
      own tests or a "never overwrite anything" implementation passes: `409` then `403` must **upgrade**,
      and `409` then `5xx` must still **clear**. The sequence that makes this non-optional is #220's —
@@ -1135,9 +1202,9 @@ TDD, failing test first, in this order:
      by removing `crypto` from the global, asserting the `clk-` prefix, the padded widths, and — the one
      that matters — that **two calls in the same millisecond differ**. A collision silently makes a distinct
      capture look like a replay and loses it, so the counter is the assertion, not the format.
-   - **The mirror's `blockedBy` exception, in both directions.** A mark present in the mirror and absent in
+   - **The mirror's `blockedBy` carve-out, in both directions.** A mark present in the mirror and absent in
      `localStorage` is **copied in**; a mirror entry with no `localStorage` counterpart is still **deleted,
-     not resurrected**. The second is the control: an implementation that generalised the exception into
+     not resurrected**. The second is the control: an implementation that generalised the carve-out into
      "the mirror can be newer" would pass the first test and fail this one.
    - **The CAS bound is three.** A store that changes under every read must produce a write on the third
      attempt rather than a refusal — the deliberate last-attempt behaviour, and the thing a reader is most
@@ -1156,12 +1223,18 @@ TDD, failing test first, in this order:
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
-   - **CSRF, all three arms**: a mismatched `Origin` is refused **and writes no row**; a **missing**
-     `Origin` is allowed, because that arm is a deliberate decision and a test is what stops someone
-     "tightening" it later and breaking non-browser callers; and the **service worker's own request
-     passes**. That last one is asserted rather than reasoned about — it is the only caller whose
-     breakage is both catastrophic and invisible, since it is the sole path that runs while the app is
-     closed.
+   - **CSRF, both arms**: a mismatched `Origin` is refused **and writes no row**; a **missing** `Origin`
+     is allowed, because that arm is a deliberate decision and a test is what stops someone "tightening"
+     it later and breaking non-browser callers.
+   - ⚠️ **There is no third arm, and asking for one was a request for coverage the test could not
+     have.** This item said *"all three arms"* and named *"the service worker's own request passes"* as
+     the third. In the `node` test environment a worker's `fetch` is byte-identical to a same-origin
+     `fetch` from a tab: it carries the registering origin in `Origin`, so the request under test **is**
+     the matching-origin case the first arm already covers. A third test would assert the same thing
+     twice while reading as though it had exercised the worker — the shape of false coverage this repo's
+     hygiene tests exist to catch. The worker path is a claim about which `Origin` a worker sends, which
+     is a platform guarantee, not a branch in this route; it is asserted in the worker tests (5) where
+     there is a worker to assert about.
    - The CSRF refusal **does not** carry the `409` or `403` user-facing copy. Asserted, because those
      sentences tell the user to sign in, and a request they never made must not.
 3. **Migration** — the `@@unique([workspaceId, clientKey])` index exists, the same `clientKey` in two
@@ -1172,8 +1245,15 @@ TDD, failing test first, in this order:
    constraints and the enum, array-containment, numeric-range and text-length registries. A unique
    *index* is not a CHECK and is invisible to it, so adding a line to its registry would have asserted
    nothing while reading as covered.
-4. **`inbox-view.tsx`** — the strip renders only when the queue is non-empty, and the flush triggers
-   fire. **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches
+4. **`inbox-view.tsx`** — the strip's **content** renders only when the queue is non-empty, and the
+   flush triggers fire. ⚠️ **This item said "the strip renders only when the queue is non-empty", and
+   that contradicted the a11y contract in the same breath as asserting it.** If the live regions arrive
+   with the strip then the strip's first paint *is* their first message, which is exactly the
+   silent-region failure the a11y section cites. The correct reading is the one *What the user sees*
+   already gives — *"it costs zero height when the queue is empty"*: **the region pair mounts
+   unconditionally at zero height**, and only the count, the entries and the controls are conditional.
+   Assert both halves, because an implementation that gates the whole strip passes a test that only
+   checks the empty case is invisible. **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches
    no network, and — the assertion that matters — **a queue of 20 permanently-blocked entries can be
    emptied back to a usable state**, which is the dead-end this control exists to prevent. Its a11y contract is asserted as **two sibling live regions with fixed roles**, both present
    and empty before the first message: that the polite region carries the count and the assertive one
