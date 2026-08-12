@@ -179,6 +179,15 @@ answer:**
    time between read and `setItem` — dominated by **three** `JSON.stringify` passes over as much as 64 KB.
    So the fix is: do all the expensive work **first**, then re-read, and abandon the write if the stored
    string moved. Only `setItem` stays inside the window.
+
+   ⚠️ **"Abandon" means recompute and retry, never drop — and an earlier draft of this line did not say
+   so.** Read literally it describes exactly the failure this design exists to prevent: a capture
+   discarded because another tab happened to write first. What actually happens is that the whole
+   read-compute-write is **re-run against the new stored value**, because the delta being applied is
+   still valid — it was never about *which* queue it was applied to. A bounded number of attempts, and
+   **on exhaustion the caller gets the same refusal a failed `write` produces**, which keeps the words in
+   the field and tells the user. There is no path on which the words are silently gone: every exit is
+   either "persisted" or "refused, and you can still see it".
 2. **Union by `clientKey` is the wrong primitive for `applyFlushOutcome`, and introduces a worse bug than
    it fixes.** Unioning "the queue I computed" with "the queue I now find" **resurrects the capture that
    just saved** — the computed queue lacks the key, the store still holds it because nothing has been
@@ -458,6 +467,37 @@ Expanded, it lists the queued text so the words are always readable and copyable
 appears in the inbox list itself: a dimmed row still reads as *"in my inbox"* to someone scanning, and
 that is the shape of the lie #210 was filed for.
 
+#### Each expanded entry has a Discard control — without it the feature dead-ends
+
+**An earlier draft of this document assumed a way to clear a queued capture and never designed one, and
+that is not a missing nicety, it is a dead end.** Two of the refusal states are **permanent**: an
+`account-revoked` `403`, and a `session-expired` `409` whose `blockedUnder` comparison has already shown
+a sign-in will not help. Those entries can never flush. With no way to remove them they sit in the queue
+forever, and **twenty of them exhaust the 20-item cap permanently — the user can never capture again.**
+The app would be bricked by its own safety mechanism.
+
+It is also the missing half of copy this document already commits to. Three of the refusal messages say
+*"copy them somewhere safe"*. **Advice to copy something out, with no way to then put it down, is not
+advice.** The user does the copying and is left with the queue exactly as full as before.
+
+So each expanded entry carries a **Discard** control:
+
+- It is **destructive and irreversible**, so it takes the app's two-step confirm — the same pattern every
+  other delete uses, and it is the reason the entry's text is displayed rather than truncated: the
+  confirm has to be made against words the user can actually read.
+- It removes **one** entry. There is no "clear all": the cap is 20, the states that strand entries strand
+  them individually, and a single control that discards twenty captures at one press is the wrong thing
+  to put next to a queue whose entire purpose is not losing words.
+- **It is not a flush and does not reach the network.** A discarded capture was never saved and is not
+  being deleted from the server — the copy must not imply either.
+- The polite live region announces the new count; the entry's removal is not itself an alert, because the
+  user asked for it. (See the a11y section: an assertive region is for things that happen *to* the user.)
+
+⚠️ **The cap deliberately still counts blocked entries.** Exempting them would let the queue grow without
+bound, which reintroduces the `QuotaExceededError` the byte cap exists to prevent. Discard is the release
+valve, and it is the user's to pull — the design does not silently evict on their behalf, which is the
+rule the item cap is built on.
+
 Accepted cost of docking it here: if a flush happens while the user is scrolled deep in the list, the
 strip is off-screen. That is the trade for spending no fixed-position height on a viewport #253 just
 decluttered, and it is recorded here so it is not rediscovered as a defect.
@@ -612,7 +652,9 @@ TDD, failing test first, in this order:
    *index* is not a CHECK and is invisible to it, so adding a line to its registry would have asserted
    nothing while reading as covered.
 4. **`inbox-view.tsx`** — the strip renders only when the queue is non-empty, and the flush triggers
-   fire. Its a11y contract is asserted as **two sibling live regions with fixed roles**, both present
+   fire. **Discard is its own test**: it removes exactly one entry, takes the two-step confirm, reaches
+   no network, and — the assertion that matters — **a queue of 20 permanently-blocked entries can be
+   emptied back to a usable state**, which is the dead-end this control exists to prevent. Its a11y contract is asserted as **two sibling live regions with fixed roles**, both present
    and empty before the first message: that the polite region carries the count and the assertive one
    carries the refusals, that neither is nested in the other (`write-notice-hygiene` rule D also blocks
    that mechanically), and that **no element's `role` changes between renders** — the assertion that
