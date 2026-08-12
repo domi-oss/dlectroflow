@@ -173,8 +173,8 @@ alone rather than only from the session that took it.
 | Drawn pixels outside the safe circle | **0 (0.00%)** |
 | Drawn pixels total | 264,830 (**16.8%** of the canvas) |
 
-**No padding, no downscaling, no redraw.** Generated as-is. The mark is centred horizontally and 1.8% high
-vertically, which is not visible.
+**No padding, no downscaling, no redraw.** Generated as-is. The mark is centred horizontally and sits
+**offset 1.8% of the canvas above vertical centre** — a position, not a size — which is not visible.
 
 The `any` raster was checked the same way for completeness — furthest drawn pixel **188.3px** against a
 **204.8px** safe radius at 512 — so it would also survive masking. It stays `purpose: "any"` regardless,
@@ -270,7 +270,7 @@ verification cannot be parallelised or mocked.
 | Absolute `start_url` on `PUBLIC_ORIGIN` | Proposed by #254 and the #175 spec. **Ships broken** — the manifest route is build-cached and the variable is runtime-only. See above |
 | Static `app/manifest.json` | No type checking, and cannot carry the reasoning for `scope` — the one line that fails invisibly |
 | `next-pwa` / `serwist` | An entire PWA framework to emit one JSON document. Nothing here needs a service-worker build step; `sw.js` already exists |
-| Generating icons at build time | Adds image processing to the Kaniko build for assets that change approximately never, and makes the build non-deterministic in a way committed PNGs are not |
+| Generating icons at build time | Adds image processing to the Kaniko build, and a `sharp` dependency to the build stage, for assets that change approximately never. ⚠️ **An earlier version of this row also called it "non-deterministic", which was wrong** — resizing a fixed source with a pinned `sharp` is reproducible given identical inputs, and review of this spec was right to challenge it. Dropped rather than substantiated: the cost and dependency-surface arguments carry the decision on their own, and leaving an unsupported claim in a declined-options table invites a future reader to take it as a general fact about image generation |
 | Committing the SVG sources | 1.8 MB of base64-wrapped bitmap, not editable in-repo. Would be right for a genuine vector |
 | Upscaling `brand-mark.png` (256) | Unnecessary — the supplied source is 1254px. Recorded because it was the fallback before the export arrived |
 | An install prompt | Owner decision. One known user, one-time act, and the repo has a recorded preference against first-run noise |
