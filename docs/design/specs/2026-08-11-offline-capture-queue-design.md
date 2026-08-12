@@ -209,11 +209,18 @@ answer:**
    So the fix is: do all the expensive work **first**, then re-read, and abandon the write if the stored
    string moved. Only `setItem` stays inside the window.
 
+   **The bound is three attempts** (`COMMIT_ATTEMPTS = 3`), and review of this spec was right that
+   *"a bounded number of attempts"* without a number is not a specification. Two covers what this exists
+   for — one other tab committing once while we measure the caps and serialise — and the third is a stop, so
+   a store being written in a tight loop cannot spin us. ⚠️ **On the last attempt the write proceeds
+   without the comparison, deliberately:** refusing would be a certain loss of the capture in hand, and an
+   improbable clobber is the better of those two.
+
    ⚠️ **"Abandon" means recompute and retry, never drop — and an earlier draft of this line did not say
    so.** Read literally it describes exactly the failure this design exists to prevent: a capture
    discarded because another tab happened to write first. What actually happens is that the whole
    read-compute-write is **re-run against the new stored value**, because the delta being applied is
-   still valid — it was never about *which* queue it was applied to. A bounded number of attempts, and
+   still valid — it was never about *which* queue it was applied to. Three attempts (above), and
    **on exhaustion the caller gets the same refusal a failed `write` produces**, which keeps the words in
    the field and tells the user. There is no path on which the words are silently gone: every exit is
    either "persisted" or "refused, and you can still see it".
@@ -251,7 +258,7 @@ and an async store would make the write-before-network guarantee harder to hold.
 applies no 7-day script-writable-storage eviction, so durability is measured in weeks.
 
 **Cap: 20 items, or 64 KB total, whichever binds first** — "64 KB" throughout this document means **64 Ki
-UTF-16 code units**, defined once under *"What '64 KB' is measured in"* below (owner decision 2026-08-11 — an earlier draft
+UTF-8 bytes**, defined once under *"What '64 KB' is measured in"* below (owner decision 2026-08-11 — an earlier draft
 said 200). At the cap a new capture is **refused with a visible message** and the words stay in the
 field. It does not silently evict the oldest — losing the newest *with the user watching* is honest;
 losing the oldest quietly is the bug this issue exists to fix, in a new costume.
@@ -284,37 +291,50 @@ they have different remedies, and the wording table below carries a separate sen
 | **One capture exceeds 64 KB on its own** | Nothing that is already queued is relevant; this capture cannot ever fit | Shorten *this* one, or copy it elsewhere |
 | **The queue total is at 64 KB and a further capture, however short, does not fit** | This capture is fine; the queue is full | Wait for some to save — **shortening will not help** |
 
-#### What "64 KB" is measured in — UTF-16 code units, and the unit has to be named
+#### What "64 KB" is measured in — UTF-8 bytes, and this section had it wrong
 
 **Review of this spec asked whether the bound is UTF-8 bytes or UTF-16 code units, and it was right to:
-this document said "64 KB" eight times without ever saying, and the two differ by up to 2× on the
+the document said "64 KB" eight times without ever saying, and the two differ by up to 2× on the
 non-ASCII text this app's users type.** Unspecified, an implementer picks one and nobody finds out which.
 
-**The bound is on UTF-16 code units — `JSON.stringify(queue).length` — and the constant is named for
-that**, `QUEUE_MAX_CODE_UNITS = 64 * 1024`, not `..._BYTES`. Reasons, in order:
+⚠️ **CORRECTED. An earlier version of this section answered "UTF-16 code units", and that was wrong — it
+contradicted the code it was describing.** `src/lib/capture-queue.ts` measures **UTF-8 bytes**, via a
+`byteLength(value) => new TextEncoder().encode(value).length` helper, against a constant named
+`CAPTURE_QUEUE_MAX_BYTES`. **The bound is on UTF-8 bytes**, and the constant's existing name is already
+right.
 
-- **That string is already being computed**, once, on the write path. The two-tab section above establishes
-  that this write is CPU-bound on `JSON.stringify` over as much as 64 KB, and that the whole fix was to
-  get expensive work *out* of the read-compare-write window. Adding a `TextEncoder().encode()` pass over
-  the same string purely to re-express the number in a different unit would widen the window the
-  reconciliation exists to narrow, to buy nothing the bound needs.
-- **A code-unit count never *under*-states length relative to characters**, so the bound cannot be
-  overshot by a surprising input. It over-states for non-BMP characters (an emoji is two code units), and
-  that direction is the safe one for a guard whose job is refusing an unbounded write.
-- **The user-facing copy names no unit at all** — *"too long to hold safely"*, *"no room to hold more"* —
-  and must keep not doing so. A byte figure is not something anyone can count in their own queue; that is
-  the same reason the byte-total sentence deliberately quotes no number while the item cap quotes 20.
+**The argument that produced the wrong answer is worth recording, because it was wrong on its own
+premise.** It reasoned that adding a `TextEncoder().encode()` pass would widen the read-compare-write
+window the two-tab reconciliation exists to narrow — so code units were preferable because
+`JSON.stringify(queue).length` is free. **The code already makes that `TextEncoder` pass.** The cost being
+avoided had already been paid, so the trade being weighed did not exist. A design claim about
+implementation cost has to be checked against the implementation; this one was not.
 
-**Honest consequence, stated because it is the thing a reader would otherwise discover:** a queue of CJK
-or emoji text reaches the bound after fewer visible characters than an ASCII one. That is acceptable — the
-bound exists to stop one pasted essay exhausting the quota, not to promise a character budget — and it is
-why no copy anywhere quotes a length the user could check.
+**Why UTF-8 bytes is also the better answer on the merits, now that it is the actual one:**
+
+- **The bound's whole job is preventing `QuotaExceededError`**, which is about storage, and storage is
+  charged in bytes. Code units are a property of the JavaScript string, not of what gets stored.
+- **The constant is called `..._BYTES`.** A name that contradicts its unit is precisely how the same
+  confusion reached the route's own body-size backstop — `MAX_BODY_CHARS`, derived from
+  `CAPTURE_QUEUE_MAX_BYTES` but compared against `rawBody.length`, letting a Cyrillic or CJK body reach
+  roughly 3× the intended budget. **Same defect, same document, two surfaces** — which is the argument for
+  naming the unit once and reusing one helper rather than re-deriving the measurement.
+- **There is exactly one measurement helper**, and both the module and the route must use it. Two
+  independent answers to "how big is this" is how these drifted apart.
+
+**Honest consequence, stated because a reader would otherwise discover it:** a queue of CJK or emoji text
+reaches the bound after fewer visible characters than an ASCII one — CJK costs 3 bytes per character
+against ASCII's 1. That is acceptable; the bound exists to stop one pasted essay exhausting the quota, not
+to promise a character budget. **The user-facing copy names no unit at all** — *"too long to hold
+safely"*, *"no room to hold more"* — and must keep not doing so, for the same reason the byte-total
+sentence quotes no number while the item cap quotes 20: a byte total is not something anyone can count in
+their own queue.
 
 ⚠️ **What this spec deliberately does not claim: how a given browser charges `localStorage` against its
 quota.** Accounting is implementation-defined, so tying the constant to a real `QuotaExceededError`
-threshold is an implementation-time **measurement**, not something to assert here. 64 Ki code units is
-comfortably inside every engine's documented floor, and `QuotaExceededError` recovery is a tested path
-regardless — see the testing section.
+threshold is an implementation-time **measurement**, not something to assert here. 64 KiB is comfortably
+inside every engine's documented floor, and `QuotaExceededError` recovery is a tested path regardless —
+see the testing section.
 
 Collapsing them repeats round 1's defect in a new place: telling someone whose two-word capture was
 refused to *"shorten it"* is advice that cannot work, in exactly the way telling someone who pasted one
@@ -333,6 +353,42 @@ long essay that *"20 captures are already waiting"* — a number that may well b
 The item cap is about how many are queued; the byte cap is about how big one of them
 is. Separate sentences, in the wording table above.
 
+#### A shared browser — the queue is per-origin, and that is a privacy gap
+
+⚠️ **Raised in review of this spec and it is real, verified against the code rather than reasoned about.**
+`localStorage` is scoped to the **origin**, not to a session or a workspace. `readQueue` returns every
+stored entry with **no workspace filter** — `workspaceId` appears in the module only for validation and for
+the server's `409` comparison. So: user A queues text, signs out, user B signs in on the same browser, and
+**the strip renders A's unsaved words to B.** Nothing in this document previously addressed it, so it was
+an omission rather than a decision.
+
+**The obvious fix is wrong.** Clearing the queue on sign-out destroys exactly what this feature exists to
+protect: unsaved words, belonging to someone who has not necessarily finished with them. A capture queue
+that empties itself on sign-out is a capture queue that loses words on the most ordinary event there is.
+
+**So the rule is: scope the VIEW, keep the DATA.**
+
+- **The strip renders only entries whose `workspaceId` matches the live session's resolved workspace.** B
+  never sees A's text. A's entries are inert for B — not displayed, not flushed, not retried.
+- **Nothing is deleted on sign-out.** A's entries survive and flush when A signs back in, which is the
+  behaviour the whole design promises.
+- **The two caps split, and the split follows the purposes this document already gave them.** The
+  **item cap counts per workspace**, because its stated job is keeping the strip legible and the wait
+  comprehensible — both properties of what *this* user can see. The **byte cap counts every entry in the
+  key**, because its job is preventing `QuotaExceededError` and the quota is charged per origin. Splitting
+  them the other way round would either let the strip fill with rows the user cannot act on, or let two
+  workspaces jointly exhaust the quota with neither seeing why.
+
+⚠️ **Residual, named rather than left to be found:** B can still be refused by the byte cap because of A's
+entries, and the refusal copy — *"no room to hold more until some of these save"* — will name captures B
+cannot see. That is a **metadata** disclosure (that *something* is queued), never content. It is accepted
+because the alternative is either deleting A's words or letting the origin's quota be exhausted, and both
+are worse. The copy stays as it is: it is about room, and it remains true.
+
+**This is not the same problem as the `409` path** and must not be collapsed into it. A `409` is the
+*server* refusing a capture whose declared workspace no longer matches. This is the *client* showing text
+to the wrong person, and it happens before any request is made.
+
 ### Idempotency — a separate column, not a client-chosen primary key
 
 ```prisma
@@ -346,6 +402,23 @@ model BrainDumpItem {
   @@unique([workspaceId, clientKey])
 }
 ```
+
+**How the `clientKey` is generated — three tiers, and review of this spec was right that leaving it
+unstated was a gap.** A collision does not error (the index is per-workspace, so it silently makes a
+distinct capture look like a replay and **loses it**), which is exactly why the generation method belongs
+in the spec rather than being left to the implementer:
+
+1. **`crypto.randomUUID()`** where available. The whole answer on every target browser.
+2. **`crypto.getRandomValues()`** into 16 bytes, hex-encoded. Same entropy, for contexts that have the
+   CSPRNG but not the convenience method.
+3. **A clock-and-counter fallback**, `clk-<base36 ms, padded to 9>-<base36 sequence, padded to 6>`, for a
+   browser with no CSPRNG at all. The module-scoped counter is what makes two calls in the same
+   millisecond distinct — two capture bars on one page, or a flush racing a fresh capture.
+
+⚠️ **`Math.random()` is deliberately not a tier**, and this is a decision rather than an oversight: it was
+in an earlier implementation and was replaced after a SAST finding. The `clk-` prefix on tier 3 is also
+deliberate — a key that reaches the database is then recognisable as having come from a browser with no
+CSPRNG, which is worth knowing and is otherwise indistinguishable from tier 2's hex.
 
 `id` stays a server-side `cuid()`. A client-chosen primary key would let a caller probe row existence
 through unique-violation timing and pre-empt ids; a separate scoped column has neither property.
@@ -568,6 +641,29 @@ a cookie and a workspace the worker has no access to, so:
   compromise: the worker retrying a capture that a later sign-in *will* save is exactly the behaviour
   wanted, and the only thing the worker's ignorance costs is background attempts nobody sees.
 
+⚠️ **And the worker must be able to WRITE a mark, not only read one — which the paragraphs above do not
+allow for.** Review of this spec found the hole: they assume every mark is written by a foreground tab, but
+a capture's **first** failure can happen purely in the background. The worker flushes, gets a `403`, and
+now knows the capture is terminal — with no tab open to record it and no ability to write `localStorage`.
+Left there, the worker retries a permanently-refused capture on every sync forever, and the user's strip
+eventually shows it as merely *"waiting"* with no explanation, because nothing ever persisted the reason.
+
+**The worker records the mark in the mirror, which it CAN write, and reconciliation propagates it.** That
+requires one narrow, explicit exception to the rule above:
+
+> `localStorage` wins in every disagreement — **except `blockedBy`, where a mark present in the mirror and
+> absent in `localStorage` is copied INTO `localStorage`.**
+
+**The exception is safe in exactly one direction and must not be generalised.** The worker is the only
+writer that can learn a refusal while no tab is open, so for this one field the mirror can legitimately be
+newer. Nothing else may flow that way: a mirror entry with no `localStorage` counterpart is still
+**deleted**, never resurrected, because that rule is what stops the mirror putting back a capture the user
+discarded or already saved.
+
+**Precedence still decides the merge**, so this cannot downgrade anything: an `account-revoked` mark in the
+mirror wins over an absent one, and a `session-expired` mark in the mirror loses to an `account-revoked`
+already in `localStorage`.
+
 **Which means the mirrored entry has to carry `blockedBy`, not just the capture.** Stated here because the
 mirror is described above as "a cache of the real thing" and a reader could reasonably mirror only the
 fields the `POST` body needs, which would silently remove the worker's only way to skip a terminal entry —
@@ -605,12 +701,18 @@ recovers the item on next open and the background flush simply has nothing to fi
 is a delayed save, never a lost one.
 
 **Reconciliation on mount runs in both directions, and the second one is the point.** `localStorage`
-wins in every disagreement, but "wins" resolves to two different actions:
+wins on **membership** — which captures exist — and "wins" resolves to two different actions:
 
 - an IndexedDB entry with **no** `localStorage` counterpart is **deleted** — it was already saved, or
   the user cleared it, and a mirror is not allowed to resurrect it;
 - a `localStorage` entry **missing** from IndexedDB is **re-mirrored**, and `sync` is re-registered
   for it.
+
+⚠️ **`blockedBy` is the one field where the mirror may be newer, and it is a deliberate exception to the
+line above** — see *"the worker must be able to WRITE a mark"* in the flush-triggers section. The worker is
+the only writer that can learn a refusal while no tab is open, and it cannot write `localStorage`, so a
+mark present only in the mirror is **copied in**. Membership is unaffected: this exception moves a *field*
+onto an entry that already exists on both sides, and never adds or revives an entry.
 
 Only the first direction is obvious, and stopping there would have left a real hole. The paragraph
 above concedes that the IndexedDB write settles *after* the synchronous `localStorage` write, so a tab
@@ -880,6 +982,23 @@ TDD, failing test first, in this order:
      the owner cookie is deleted in the same response that answered `403`, so the very next attempt is a
      guest and `409`s, and a plain last-write-wins therefore re-offers a sign-in to a revoked account on
      the *second* flush, every time.
+   - **The strip is scoped to the live workspace, and the caps split.** A queue holding entries for two
+     workspaces renders only the current one's — asserted with a **non-empty** other-workspace set present,
+     so a filter that returns nothing cannot pass. The **item** cap counts per workspace (20 of A's entries
+     do not block B's first capture); the **byte** cap counts every entry in the key (A's bulk *does*
+     refuse B, with the room-not-ownership copy). Both directions, because getting the split backwards
+     passes any test that only checks "a cap fired".
+   - **`clientKey` generation, per tier.** Tier 1 and 2 exercised where `crypto` is present; tier 3 driven
+     by removing `crypto` from the global, asserting the `clk-` prefix, the padded widths, and — the one
+     that matters — that **two calls in the same millisecond differ**. A collision silently makes a distinct
+     capture look like a replay and loses it, so the counter is the assertion, not the format.
+   - **The mirror's `blockedBy` exception, in both directions.** A mark present in the mirror and absent in
+     `localStorage` is **copied in**; a mirror entry with no `localStorage` counterpart is still **deleted,
+     not resurrected**. The second is the control: an implementation that generalised the exception into
+     "the mirror can be newer" would pass the first test and fail this one.
+   - **The CAS bound is three.** A store that changes under every read must produce a write on the third
+     attempt rather than a refusal — the deliberate last-attempt behaviour, and the thing a reader is most
+     likely to "fix" into a refusal.
    - **`isQueuedCapture` validates `blockedBy`, with a passing control.** A stored entry carrying a value
      outside the union is rejected; entries carrying **each** valid value, and entries carrying none, are
      kept. The kept cases are the point — a guard that rejected everything would satisfy a test that only
