@@ -3,11 +3,60 @@ import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-// WCAG 2.0 + 2.1, levels A and AA — the standard *mechanical* ruleset that
+// WCAG 2.0 + 2.1 + 2.2, levels A and AA — the standard *mechanical* ruleset that
 // catches contrast, missing labels, wrong/absent roles and name/role/value
 // issues (issue #31). Axe's "best-practice" rules are intentionally excluded:
 // they are not WCAG-normative and would add noise to a blocking gate.
-export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+//
+// ── #263: the 2.2 pair is the fix, not decoration ────────────────────────────
+//
+// This list was `["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]` for the life of
+// the suite. axe turns it into `runOnly: { type: "tag" }` and runs a rule only if
+// one of the rule's tags is in the list, so no WCAG 2.2 success criterion had
+// ever been evaluated — seven specs reporting green on criteria nothing looked
+// at, which is the failure shape the `document-title` paragraph below and
+// `e2e-project-split.test.ts` are both about.
+//
+// What the pair actually buys, measured in a real browser against axe-core
+// 4.12.1 (pinned by `@axe-core/playwright@4.12.1`): 62 rules evaluated before,
+// 63 after, delta exactly `["target-size"]`, nothing dropped. That rule is
+// **WCAG 2.5.8 Target Size (Minimum), Level AA**, whose normative figure is 24 by
+// 24 CSS pixels, and its checks report at impact `serious` — so it clears
+// BLOCKING_IMPACTS and can genuinely fail the gate.
+//
+// Three things this does NOT do, stated because a change about criterion
+// coverage that overclaims its coverage is the original bug one level up:
+//
+//   * It does not deliver **2.4.11 Focus Not Obscured (Minimum), Level AA** —
+//     axe-core has no rule for it at any tag. `src/lib/a11y-class-hygiene.ts`
+//     stays the only check in the repo that can see 2.4.11, and a Playwright
+//     keyboard walk is still outstanding on #263.
+//   * It does not improve **1.4.11 Non-text Contrast**, which is Level AA and
+//     WCAG *2.1* — already covered by `wcag21aa` — and which axe cannot measure
+//     reliably for a focus indicator against adjacent colours.
+//   * It does not raise the house bar. axe's 24px is *weaker* than the 44px
+//     `a11y-class-hygiene` enforces on interactive controls (#205), so a control
+//     between the two passes here and fails there. This gate does not replace
+//     that one. 44px is **2.5.5 Target Size (Enhanced)**, which is Level AAA —
+//     not 2.5.8, and not 2.4.13 Focus Appearance, which is also AAA.
+//
+// `wcag22a` matches zero axe rules today: the only Level A criteria new in 2.2
+// are 3.2.6 Consistent Help and 3.3.7 Redundant Entry, and axe implements
+// neither. It is here so a future axe-core release that adds one is picked up
+// without a code change.
+//
+// `e2e/a11y/axe-wcag22-coverage.spec.ts` is the proof and the regression guard:
+// it fails if either tag is removed, and — because `target-size` ships
+// `enabled: false` in axe-core and is switched on purely by being named in
+// `runOnly` — it also fails if an axe-core upgrade stops honouring that.
+export const WCAG_TAGS = [
+  "wcag2a",
+  "wcag2aa",
+  "wcag21a",
+  "wcag21aa",
+  "wcag22a",
+  "wcag22aa",
+];
 
 // Only serious/critical block the gate. moderate/minor still appear in the axe
 // output for awareness but never fail CI — the conventional axe blocking
