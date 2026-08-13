@@ -252,6 +252,84 @@ describe("writeCapture — a streak touch that fails AFTER the row landed", () =
     expect(line.message).toContain(BOOM);
   });
 
+  // ── When the LOGGER itself cannot do its job (Duo review round 10) ────────
+  //
+  // The docblock promises "swallowed is not invisible … the failure gets one
+  // greppable line", and the logger's own `catch` was empty — so the one case this
+  // function exists to make visible was a case it could silently fail to report.
+  //
+  // ⚠️ **The rejection value has to be one that genuinely breaks the logger, and
+  // the value the finding suggested does not.** A circular object cannot make this
+  // `JSON.stringify` throw, because nothing circular ever reaches it: `message` is
+  // resolved to a STRING first, and the object handed to `stringify` holds four
+  // strings. A test written with a circular value passes against the silent catch
+  // and proves nothing — see the CONTROL below, which pins that so the next reader
+  // does not "improve" these cases into that one.
+  //
+  // These two do reach it, on two different lines:
+  //  * a null-prototype object has no `toString` and no `valueOf`, so `String()`
+  //    raises `TypeError: Cannot convert object to primitive value`;
+  //  * a throwing `message` getter raises during the property read, before
+  //    `String()` is even reached.
+  it.each([
+    ["a null-prototype rejection, where String() throws", Object.create(null)],
+    [
+      "a hostile message getter, which throws during the read",
+      {
+        get message() {
+          throw new TypeError("hostile getter");
+        },
+      },
+    ],
+  ])("still emits the tag for %s", async (_why, rejection) => {
+    touchStreakOnEngagementMock.mockRejectedValueOnce(rejection);
+
+    await expect(
+      writeCapture({ workspaceId: "ws-1", text: "buy milk" }),
+    ).resolves.toBe("created");
+
+    // Not the JSON line — a plain tag and workspace, which is the point: the
+    // fallback must not do the thing that just failed.
+    expect(errorLog).toHaveBeenCalledWith(
+      "capture_streak_touch_failed",
+      "ws-1",
+    );
+  });
+
+  // The end of the line, and a guard on the fix rather than on the original bug:
+  // the fallback calls `console.error` again, so if `console.error` is what threw
+  // in the first place it will throw again. That must not escape, or the logger
+  // takes down the very request it exists to protect.
+  it("never throws, even when console.error itself throws", async () => {
+    errorLog.mockImplementation(() => {
+      throw new Error("stderr is gone");
+    });
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+
+    await expect(
+      writeCapture({ workspaceId: "ws-1", text: "buy milk" }),
+    ).resolves.toBe("created");
+  });
+
+  // CONTROL. Pins the claim above rather than leaving it as prose: a circular
+  // rejection value takes the STRUCTURED path, so it is not evidence about the
+  // fallback and must not be used as a fixture for it.
+  it("CONTROL: a circular rejection still takes the structured path", async () => {
+    const circular: Record<string, unknown> = { message: BOOM };
+    circular.self = circular;
+    touchStreakOnEngagementMock.mockRejectedValueOnce(circular);
+
+    await writeCapture({ workspaceId: "ws-1", text: "buy milk" });
+
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(errorLog.mock.calls[0][0])) as {
+      tag: string;
+      message: string;
+    };
+    expect(line.tag).toBe("capture_streak_touch_failed");
+    expect(line.message).toBe(BOOM);
+  });
+
   // The other direction, and the reason the `try` wraps ONE statement: the
   // swallow covers the streak touch, not the write. An insert that failed has
   // saved nothing, so the caller must hear about it — that is what keeps the

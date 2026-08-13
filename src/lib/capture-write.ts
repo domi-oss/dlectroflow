@@ -75,6 +75,33 @@ function logCaptureBookkeepingFailure(
     // `recordLLMFailure` and `recordAuthFailure` carry, and it matters more here
     // because the catch block calling this exists precisely to keep a committed
     // write from being reported as failed.
+    //
+    // ⚠️ But swallowing SILENTLY here contradicted the promise three paragraphs
+    // up in `writeCapture`'s docblock — "swallowed is not invisible … the failure
+    // gets one greppable line" — and did it in the worst possible place: the one
+    // case this function exists to report was a case it could drop without trace
+    // (Duo review round 10, `!334`). So the fallback emits the tag and the
+    // workspace with **no JSON and no interpolation**, because the whole reason
+    // it is reachable is that building the structured line failed. Less
+    // information, still greppable, and almost nothing left that can throw.
+    //
+    // ⚠️ It is NOT reachable via a circular rejection value, which is the obvious
+    // guess and is wrong: `message` is resolved to a string before
+    // `JSON.stringify` sees anything, so the object it serialises holds four
+    // strings and cannot be cyclic. What does reach here is `String(error)` on a
+    // value with no `toString`/`valueOf` (a null-prototype object raises
+    // `TypeError: Cannot convert object to primitive value`), a `message` getter
+    // that throws during the read, and a `console.error` that throws. All three
+    // are pinned in `capture-write.test.ts`, the last one as a guard on this
+    // fallback rather than on the original defect.
+    try {
+      console.error("capture_streak_touch_failed", workspaceId);
+    } catch {
+      // Genuinely the end of the line: the only remaining statement was the one
+      // that just failed, and there is nowhere left to report to. Empty here is a
+      // conclusion rather than an omission — which is exactly what the outer
+      // `catch` was NOT, and why it needed this.
+    }
   }
 }
 
@@ -169,6 +196,12 @@ export type CaptureInput = {
  * later capture credits the same day in full and nothing is left half-advanced.
  * **Swallowed is not invisible:** the failure gets one greppable line, so "the
  * streak touch is failing for everybody" is something somebody can find out.
+ * That promise is now kept in two tiers rather than one — a structured JSON line
+ * normally, degrading to a bare `capture_streak_touch_failed` and the workspace id
+ * if the structured line cannot be built. The tag is the same either way, so the
+ * grep that finds one finds the other; see `logCaptureBookkeepingFailure`, where
+ * the fallback exists because the first version of this sentence was a promise the
+ * code did not keep.
  *
  * ### Rejected: touch the streak on the `duplicate` arm as well
  *
