@@ -14,7 +14,9 @@ Three sections, in reading order: **To buy → In basket → Saved favourites**.
 
 - **Named templates** ("Weekly shop", "Roast dinner"). Split to #221 and unscheduled — it needs a parent/child table and its own management surface, and folding it in would roughly double this issue.
 - **Rewards.** Shopping earns nothing, by owner decision. `shopping.test.ts` pins the absence, because "deliberately absent" and "forgotten" look identical in a diff.
-- **Offline capture.** That is #175 and it is still awaiting its own brainstorm.
+- **Offline capture.** That is #175, designed 2026-08-11 in
+  `2026-08-11-offline-capture-queue-design.md`. Capture-only by design, so nothing in it reaches the
+  shopping list.
 - **Sharing a list between people.** `ShoppingItem` is workspace-scoped like everything else; nothing here changes tenancy.
 - **A separate "purchased" bucket distinct from "in basket".** The owner named one bucket two ways; it is one bucket, called In basket.
 
