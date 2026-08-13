@@ -5,12 +5,9 @@
 **Milestone:** v0.6.0
 **Primary target:** Android Chrome on a phone, owner-stated
 
-⚠️ **Two dates, and the second one is why this line is not just "approved".** Review of this spec flagged
-that the approval date sat *earlier* than an owner decision recorded inside the document — the cap split
-under *"A shared browser"*, dated 2026-08-12 — which read as a document approved before a decision it
-contains. Both dates are real and neither is a typo: the design was approved on the 11th and then amended
-across a day of review, taking one further owner decision on the way. **The approval covers the design as
-amended**; the header now says so rather than leaving a reader to reconcile the two.
+⚠️ **Two dates, both real.** The design was approved on the 11th and then amended across a day of review,
+taking one further owner decision on the way — the cap split under *"A shared browser"*, dated 2026-08-12.
+**The approval covers the design as amended.**
 
 ## Goal
 
@@ -93,12 +90,10 @@ blurred together. They are labelled from here on.**
   `blockedBy` and nothing else, so every statement in this document about the `blockedUnder` comparison —
   the withdrawn sign-in offer, the *"these can't be saved to this account any more"* sentence, the worker's
   inability to compute it — and every statement about orphan expiry describe **design, not code**. They are
-  called out because this list exists precisely to flag claims a reader cannot check, and its first version
-  omitted the one field that needed it. ⚠️ **The earlier version of this bullet pinned the check to
-  `fd768ff` and called that "the sibling branch's head", which it no longer is** — a *ref* is durable
-  evidence and a *role* like "the head" expires the next time anyone pushes, which is the same defect as
-  the rotted line numbers this table was converted to symbols to escape. The absence holds at both commits;
-  the ref is named with a date from here on, and the role is not claimed.
+  called out because this list exists precisely to flag claims a reader cannot check. ⚠️ **Every ref here is
+  named with a date and never by the role "the branch head"** — a ref is durable evidence, a role expires
+  the next time anyone pushes, and that is the same defect as the rotted line numbers this table was
+  converted to symbols to escape.
 
 **So for a window after this document lands, its most concrete statements describe code a reader on `main`
 cannot find**, which is the mirror image of the dangling-reference problem the merge order exists to
@@ -174,14 +169,13 @@ here — they are only additional *flush* triggers.
 
 `localStorage`, one key, following the `df-` prefix three of the repo's five client-side keys already use:
 
-⚠️ **This line said "the repo's existing `df-` convention" and overstated how settled that is.** Verified
-at `cb3aeee`: `df-theme`, `df-hyper-focus` and `df-guest-banner` carry the prefix; the two day-keys are
-`dlectroflow-review-nudge-fired-<date>` and `dlectroflow-roundup-fired-<date>` and do not. `df-guest-banner`
-is also in **`sessionStorage`**, not `localStorage`, so it is a prefix sibling rather than a storage one.
-**Both load-bearing halves of the original claim survive** — every existing key is a flag or a preference,
-and none of them holds user-typed text, which is what makes `df-capture-queue` a new category for the
-privacy notice. `df-` is still the right prefix to pick; it is a majority convention rather than a
-universal one, and a reader auditing the five keys against this sentence would have found it false.
+⚠️ **`df-` is a majority convention, not a universal one — stated precisely because "the repo's existing
+convention" is checkable and would not survive the check.** Verified at `cb3aeee`: `df-theme`,
+`df-hyper-focus` and `df-guest-banner` carry the prefix; the two day-keys,
+`dlectroflow-review-nudge-fired-<date>` and `dlectroflow-roundup-fired-<date>`, do not. `df-guest-banner`
+is also in **`sessionStorage`**, so it is a prefix sibling rather than a storage one. **What matters here
+survives that audit:** every existing key is a flag or a preference and none holds user-typed text, which
+is what makes `df-capture-queue` a new category for the privacy notice.
 
 
 ```
@@ -195,23 +189,20 @@ type QueuedCapture = {
   /**
    * The text as typed, inline note syntax included; the server splits it.
    *
-   * ⚠️ This said "raw text as typed", which is not what happens: `enqueue`
-   * stores `capture.text.trim()`. The route deliberately does **not** trim, so
-   * the two write paths disagree by one transformation — harmless, because
-   * leading and trailing whitespace is not content anyone typed on purpose, but
-   * worth stating rather than leaving as a surprise to whoever compares a queued
-   * capture against a directly-written one.
+   * ⚠️ Not the raw text: `enqueue` stores `capture.text.trim()` and the route
+   * deliberately does **not** trim, so the two write paths disagree by one
+   * transformation. Harmless — leading and trailing whitespace is not content
+   * anyone typed on purpose — but stated rather than left as a surprise to
+   * whoever compares a queued capture against a directly-written one.
    */
   text: string;
   /** Workspace this was captured under. Compared, never trusted — see below. */
   workspaceId: string;
   /**
    * ms epoch, for the **age** shown beside an entry in the strip — and for
-   * nothing else. **It does not order the queue**; see "Display order" below.
-   *
-   * An earlier draft of this comment said it drove ordering, which contradicted
-   * that section outright. Caught in review of this spec, and it was the one
-   * sentence here two readers could reasonably read two different ways.
+   * nothing else. **It does not order the queue**; see "Display order" below,
+   * which explains why a skewed clock must not be allowed to move a capture
+   * the user is already looking at.
    */
   capturedAt: number;
   /**
@@ -373,10 +364,9 @@ Chrome target a discarded-and-reopened tab makes overlapping lifetimes normal ra
 lost capture is the exact failure this feature exists to prevent, so this is not deferrable in full.
 
 **Three things are worth stating because each contradicts the obvious answer — and exactly one of them
-was settled by measurement rather than argument.** ⚠️ **An earlier version of this sentence claimed all
-three were**, which review of this spec was right to call out: (3) says outright that it *follows from*
-(2), and (1)'s *"three `JSON.stringify` passes"* is a count of the code's passes, not a timing. Only
-(2) carries a measurement, and it is labelled below as the sibling-branch evidence it is.
+was settled by measurement rather than argument.** ⚠️ **Only (2) carries a measurement**, labelled below
+as the sibling-branch evidence it is: (3) *follows from* (2), and (1)'s *"three `JSON.stringify` passes"*
+is a count of the code's passes, not a timing.
 
 1. **"Re-read immediately before writing" is a no-op here.** Both `enqueue` and `applyFlushOutcome`
    *already* read immediately before writing, in one synchronous block. What was actually open was the CPU
@@ -416,20 +406,14 @@ three were**, which review of this spec was right to call out: (3) says outright
    the branch's head on 2026-08-13, so anyone following the recipe as written gets a different denominator
    and concludes the document is wrong. The recipe is therefore: `git checkout 2136f51` on
    `feat/175-capture-queue-server` (!334) and replace `applyOutcome`'s delta with a union.
-   ⚠️ **The comparison figure said "66 tests at the branch head (`fd768ff`)" and was wrong twice over** —
-   the count is **67**, not 66, and `fd768ff` stopped being the head. Both are now pinned to a dated ref,
-   because a number whose only job is to warn that numbers rot is the worst possible place to carry a stale
-   one. **The denominator that matters, 39 at `2136f51`, re-verified and unchanged.**
    ⚠️ **Sibling-branch evidence, and the label matters** — review of this spec correctly pointed out that
    a test count cited as evidence cannot be checked from a docs-only MR, and an unverifiable number reads
    as stronger than a described mechanism, which is the same trap as a citation to a file nobody opens.
    **The delta-vs-union argument above stands without either figure**; they are corroboration.
-3. **The merge needs no tombstones and consults no timestamp** — which follows from (2). ⚠️ **This said
-   "no per-entry timestamps are needed", which was already untrue of the type it describes and is now
-   untrue twice: `capturedAt` and `unresolvableSince` are both per-entry timestamps.** The claim being made
-   is narrower and is the only one (2) supports — **reconciliation reads neither of them**. Each exists for
-   a job outside the merge (the age display, and orphan expiry), and the merge is a set operation on
-   `clientKey` that would behave identically if both were absent. "Deliberately
+3. **The merge needs no tombstones and consults no timestamp** — which follows from (2). ⚠️ **The claim is
+   "reconciliation reads neither timestamp", not "there are none":** `capturedAt` and `unresolvableSince`
+   both exist, each for a job outside the merge (the age display, and orphan expiry), and the merge is a set
+   operation on `clientKey` that would behave identically if both were absent. "Deliberately
    removed" never has to be *inferred*, because the only entry ever added is the one `enqueue` was handed,
    and the tab doing the removing removes from a read it took itself. A capture another tab flushed is
    simply absent, so the filter and the map are no-ops on it.
@@ -511,23 +495,19 @@ no antecedent in its own subsection. Three copies of an argument is how one of t
 a rule the other two no longer follow, which is precisely the drift the copy for these states has
 already been corrected for twice.
 
-#### What "64 KB" is measured in — UTF-8 bytes, and this section had it wrong
+#### What "64 KB" is measured in — UTF-8 bytes
 
-**Review of this spec asked whether the bound is UTF-8 bytes or UTF-16 code units, and it was right to:
-the document said "64 KB" eight times without ever saying, and the two differ by up to 3× on the
-non-ASCII text this app's users type.** ⚠️ **This sentence said "2×" and that was wrong** — a BMP CJK
-character is **3** UTF-8 bytes to **1** UTF-16 code unit, which is the ratio this document already
-quotes twice below. Unspecified, an implementer picks one and nobody finds out which.
+**The bound must name its unit, because UTF-8 bytes and UTF-16 code units differ by up to 3× on the
+non-ASCII text this app's users type** — a BMP CJK character is **3** UTF-8 bytes to **1** UTF-16 code
+unit. Unspecified, an implementer picks one and nobody finds out which.
 
-⚠️ **CORRECTED. An earlier version of this section answered "UTF-16 code units", and that was wrong — it
-contradicted the code it was describing.** `src/lib/capture-queue.ts` measures **UTF-8 bytes**, via a
+**The answer is UTF-8 bytes.** `src/lib/capture-queue.ts` measures them via a
 `byteLength(value) => new TextEncoder().encode(value).length` helper, against a constant named
-`CAPTURE_QUEUE_MAX_BYTES`. **The bound is on UTF-8 bytes**, and the constant's existing name is already
-right.
+`CAPTURE_QUEUE_MAX_BYTES`, so the constant's existing name is already right.
 
-**The argument that produced the wrong answer is worth recording, because it was wrong on its own
-premise.** It reasoned that adding a `TextEncoder().encode()` pass would widen the read-compare-write
-window the two-tab reconciliation exists to narrow — so code units were preferable because
+⚠️ **The argument for code units is recorded because it is wrong on its own premise, and a later reader
+will reach for it again.** It reasons that adding a `TextEncoder().encode()` pass would widen the
+read-compare-write window the two-tab reconciliation exists to narrow — so code units are preferable because
 `JSON.stringify(queue).length` is free. **The code already makes that `TextEncoder` pass.** The cost being
 avoided had already been paid, so the trade being weighed did not exist. A design claim about
 implementation cost has to be checked against the implementation; this one was not.
@@ -658,13 +638,10 @@ while still consuming the origin-wide byte cap forever.
 - ⚠️ **The collapsed row carries the STATE, not only the count** — see immediately below. Without this the
   rule repairs the last of the four failures it lists and silently leaves the first three.
 
-⚠️ **The rule above fixes Discard and the never-matching entry, and as written it does NOT fix the three
-copy failures in its own list — which makes this section contradict itself.** Found checking the document
-against itself rather than raised in review, and it is the sharper half of the defect this section already
-records once. The list of what a bare match-or-hide filter breaks has **four** entries: the `403` copy, the
-*"sign in and these will save"* sentence, `blockedUnder` going dead, and Discard being out of reach. **Only
-the fourth is about a control**; the first three are about **copy that exists only on a full entry row**,
-and the rule gave those entries no row.
+⚠️ **Scoping the text is necessary and not sufficient, and the reason is the whole content of what
+follows.** Of the four failures listed above — the `403` copy, the *"sign in and these will save"* sentence,
+`blockedUnder` going dead, and Discard being out of reach — **only the fourth is about a control.** The
+first three are **copy that exists only on a full entry row**, so hiding the row takes the copy with it.
 
 **Trace the `409` and it is unreachable even while the page is open, not merely after a reload.** A `409`
 means the *resolved* workspace disagreed with the capture's declared `workspaceId` — and the route resolves
@@ -763,9 +740,9 @@ in the spec rather than being left to the implementer:
    collision needs **two Enter presses, in two different tabs, inside the same millisecond**, which one
    person cannot do. The reachable version of this — a **double-press**, which is this project's standard
    bar for "ordinary" rather than hypothetical — happens *within* one tab, and the module-scoped counter
-   already covers it. ⚠️ **An earlier version of this bullet cited *"a flush racing a fresh capture"* as the
-   second reason for the counter, and that was wrong on the document's own mechanism**: the flush has no key
-   to mint.
+   already covers it. ⚠️ **A flush is deliberately not on that list: it mints no key.** Replaying the
+   existing `clientKey` *is* the idempotency mechanism, so anything that gives the flush path a key
+   generator has broken the column's whole purpose.
 
    ⚠️ **Take the guard anyway, because it costs one comparison and removes the argument entirely.** `enqueue`
    already holds a **fresh read of the queue inside its CAS window** (see *"Two tabs on one storage key"*),
@@ -1284,8 +1261,8 @@ cap, not the item cap.
 
 It is also the missing half of copy this document already commits to. **The refusal messages tell the user
 to copy their words out.** ⚠️ **This sentence said "three of the refusal messages"** — four of the rows in
-the wording table below carry that exact phrase and a fifth offers the same advice in different words, so
-the count was stale the moment a row was added. It is not a number this argument needs. **Advice to copy
+the wording table below carry that exact phrase and a fifth offers the same advice in different words — a
+count this argument does not need and which goes stale the moment a row is added. **Advice to copy
 something out, with no way to then put it down, is not advice.** The user does the copying and is left with the queue exactly as full as before.
 
 So each expanded entry carries a **Discard** control:
@@ -1331,6 +1308,42 @@ So each expanded entry carries a **Discard** control:
   saved** — *"that one saved just before you discarded it; it's in your inbox now"* — rather than doing
   nothing. Silence there is the same defect as a silent save, one step further along: the user pressed a
   destructive control, was shown nothing, and the words are somewhere they were told they would not be.
+
+  ⚠️ **The check is evaluated TWICE, and the one at confirm-resolution is the load-bearing one.** The two
+  paragraphs above are silent on *when* "refused for an entry with a flush in flight" is evaluated: the
+  table is framed on *"the confirm resolves…"* while the refusal reads like a gate at press time, and the
+  document held both readings without joining them. **An open-time-only check does not close the race** — it
+  leaves a third case neither row covers, and it is the ordinary one, because the two-step confirm is a human
+  pause of exactly the length a flush trigger needs:
+
+  | At confirm-open | At confirm-resolution | Under an open-time-only check |
+  | --- | --- | --- |
+  | no flush in flight | **a flush started during the pause** — any of the four foreground triggers can fire, and `visibilitychange` fires on the very tab-switch a hesitating user makes | Discard proceeds, both deletes land, the `POST` returns `201`. **"A silent save after an explicit refusal"** — the outcome the mirror-first table calls unrecoverable |
+  | no flush in flight | **a flush started and already returned `201`** | Discard is a **silent no-op** over a capture now sitting in the inbox |
+
+  **The resolution order, stated so it is not left to the implementer:**
+
+  1. **At press**, refuse if a flush is in flight for this entry, and say why. This check is a **courtesy,
+     not the guard** — it exists so nobody reads a confirmation dialog only to be told no afterwards.
+  2. **At confirm-resolution, re-evaluate against live state.** This is the guard. Three arms, and all
+     three already have their copy specified above: the entry is **gone** → *"that one saved just before you
+     discarded it"*; a flush is **in flight** → the same refusal as step 1, with focus returned to the
+     Discard control per *"Focus, on unmount and on Discard"*; **neither** → proceed.
+  3. **Claim the entry synchronously in the same tick as that re-check**, before awaiting anything. The
+     mirror delete is asynchronous, so the re-check and the delete are not one atomic step — and a claim is
+     enough to bridge them because both the flush loop and the discard run on **one tab's single thread**.
+  4. **The flush's per-entry loop skips a claimed entry.** Per-entry, matching *"Failures are per-entry, not
+     per-pass"*: one claimed entry must not stop the pass draining the rest.
+
+  **Why a claim rather than suppressing flush triggers while the dialog is open:** suppression would need
+  every trigger to know about a dialog, which is four call sites and a new coupling, and it fails open —
+  a trigger added later simply would not know. The claim fails closed, because the skip lives in the one
+  place a `POST` is issued.
+
+  **Residual, and it is the one this section already accepts:** the tab can still die between the mirror
+  delete and the `localStorage` delete. That is the mirror-first table's first row — still queued, still
+  visible, re-mirrored on next mount. **Persisted, or refused and still visible**, like every other exit
+  here.
 
 - **The confirm is what makes the ordering affordable.** Discard already takes the app's two-step confirm,
   so there is a natural point at which to start the mirror delete and await it before touching
@@ -1572,12 +1585,9 @@ land here, and both cover things no other check in the repo can see:
   level"_**; it is the repo's control, not this design's, and correcting it here would make a docs-only MR
   touch `src/`.
 
-  ⚠️ **This bullet said the mislabel was "in five places", and re-verifying the citation rather than
-  restating it showed the count matched neither reading of the file**: the *phrase* occurs three times and
-  the bare *number* six. So the sites are enumerated above instead — **an enumeration of what and where
-  survives an edit to the file; a count is stale as soon as anyone touches it**, which is the rule this
-  document already applies to its own refusal states and to the test denominators in *"Two tabs on one
-  storage key"*.
+  ⚠️ **The sites are enumerated rather than counted, deliberately** — the bare number 2.4.11 occurs six
+  times in that file and the phrase three, so any single count is wrong for one reading and stale for both.
+  **An enumeration of what and where survives an edit; a count does not.**
 
 #### Target size, the disabled Retry, and the announcements that do not repeat
 
@@ -1653,13 +1663,10 @@ Required in **MR 2**, the MR that first writes user text to storage (see _Sequen
   servers as any other capture
 - `df-capture-queue` added to the storage list, with its retention — **three triggers, not two: until it
   saves, until the user clears it, or until it can no longer be saved to any account this browser can
-  reach.** ⚠️ **This bullet said "until saved, or until the user clears it", and the orphan-expiry rule
-  under *"A shared browser"* declares that exact two-trigger sentence false** — it is the sentence that rule
-  quotes and refutes, because for an entry whose workspace can never resolve again neither trigger can ever
-  fire. Left as it was, this list required MR 2 to write a promise this document had already shown to be
-  untrue, on the page UK GDPR Art. 13 makes load-bearing. **The third trigger is the one the orphan rule
-  adds**, and the notice has to carry it for the same reason the rule exists: storage limitation is not
-  optional, and a retention statement with a gap in it is worse than a longer one
+  reach.** ⚠️ **The third trigger is not optional and the two-trigger version is false**, which is why the
+  orphan-expiry rule under *"A shared browser"* quotes and refutes it: for an entry whose workspace can never
+  resolve again, neither of the first two can ever fire. This is a promise on the page UK GDPR Art. 13 makes
+  load-bearing, and a retention statement with a gap in it is worse than a longer one
 - ⚠️ **the IndexedDB mirror named too, and this list omitted it.** Found in review of this spec. The mirror
   is not an implementation detail of the `localStorage` key — it is a **second at-rest copy of the same
   user-typed text**, in a different store, written on a different schedule, and deleted on a different
@@ -1689,15 +1696,10 @@ TDD, failing test first, in this order:
      implementation, and each of the four carries a different sentence. The storage one asserts the two
      things it must not do as well as the refusal: **nothing already queued is evicted**, and the copy
      offers no wait. ⚠️ **Why they are distinct states is argued in exactly one place — the byte-condition
-     table above — and is deliberately not restated here.** Review of this spec flagged that reasoning as
-     appearing in three places, which is a drift trap: the copy for these states has already been corrected
-     twice, and three copies of the argument is how one of them ends up describing a rule the other two no
-     longer follow. ⚠️ **This item said "argued once, in the byte-condition table above *and* the storage
-     section beneath it", which names two places in a sentence claiming one** — the same defect it exists to
-     warn about, one level up. The storage section does not re-argue the rule; it **applies** it to a
-     fourth state, which is what the table's closing sentence tells every later state to do. ⚠️ **This item
-     also said "three", which was correct until `QuotaExceededError` acquired a specification and a
-     sentence** — it was listed as a test on the line above with neither.
+     table above — and is deliberately not restated here.** Three copies of an argument is how one of them
+     ends up describing a rule the other two no longer follow, and the copy for these states has already
+     been corrected twice. The storage section does not re-argue the rule; it **applies** it to a fourth
+     state, which is what the table's closing sentence tells every later state to do.
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
@@ -1829,6 +1831,16 @@ TDD, failing test first, in this order:
      it saved** rather than silently doing nothing. Both are assertions about what the user is told, not
      just about the store, because in both cases the store ends up in the state a naive implementation
      would also reach.
+     - ⚠️ **The re-check at confirm-resolution is its own test, and it is the one an open-time-only
+       implementation fails.** Open the confirm with **no** flush in flight, start one **while the dialog is
+       open**, then resolve. Assert the discard is **refused**, that **no `POST` is issued for that entry
+       after the confirm**, and that the row is **not** written. An implementation that checks only at press
+       passes every other Discard test in this list and fails this one — which is the whole reason it is
+       written separately rather than folded into the bullet above.
+     - **The claim is asserted through the flush, not by reading state.** With a discard claimed, a flush
+       pass **skips that entry and still drains the others** — the per-entry rule. Counting `POST`s is the
+       assertion; an implementation that aborts the whole pass satisfies "no `POST` for the claimed entry"
+       while reintroducing the head-of-line failure this design refuses.
    - **Two sibling live regions with fixed roles**, both present and empty before the first message: the
      polite one carries the count, the assertive one carries the refusals, neither is nested in the other
      (`write-notice-hygiene` rule D also blocks that mechanically), and **no element's `role` changes
