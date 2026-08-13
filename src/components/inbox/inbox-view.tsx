@@ -2218,23 +2218,48 @@ export function InboxView({
     );
   };
 
-  // Delete, in three shapes, all sharing one `confirmDeleteId` so confirming or
-  // cancelling either resting variant keeps the other in sync.
+  // `InboxView`'s delete factory. Two resting shapes plus the armed confirm, all
+  // sharing one `confirmDeleteId` so confirming or cancelling either resting variant
+  // keeps the other in sync.
   //
-  // #253 retired the "▾ lists ALL the row's options including duplicates" rule
-  // this factory was written for: the ▾ list now holds only what is not already
-  // on the row, so `fullWidth` is the ROUTE to delete on every `RowActions` row
-  // rather than a mirror of the 🗑 beside it. `icon` survives for one caller —
-  // the Done bucket hand-rolls its action line (it needs Reopen where the primary
-  // CTA goes) and is not a `RowActions` row, so its 🗑 was never in the cluster
-  // #253 deleted.
+  // ⚠️ NOT the same function as `ItemRow`'s `deleteControl(key)` further down this
+  // file. That one takes a key alone and has no `icon` at all, and its comment says
+  // so — "the `icon` branch had no caller left" — which is true OF THAT FACTORY and
+  // false of this one. Read the arity before believing either sentence: a reviewer of
+  // `ed4dffb` conflated the two and reported this `icon` option as dead.
+  //
+  // #253 retired the "▾ lists ALL the row's options including duplicates" rule this
+  // factory was written for: the ▾ list now holds only what is not already on the
+  // row, so the menu entry is the ROUTE to delete on every `RowActions` row rather
+  // than a mirror of the 🗑 beside it. `icon` survives for one caller — the Done
+  // bucket hand-rolls its action line (it needs Reopen where the primary CTA goes)
+  // and is not a `RowActions` row, so its 🗑 was never in the cluster #253 deleted.
+  /**
+   * The row's delete control, in the only two shapes anything renders.
+   *
+   * ⚠️ `fullWidth` is GONE, and the reason is the shape #213 was written against.
+   * Duo's review of `ed4dffb` reported the `icon` option as dead code with no
+   * caller. That is false — `icon: true` is the Done row's resting 🗑
+   * (`delete-done`), the one bucket that hand-rolls its action line instead of
+   * rendering `RowActions`; forcing that branch off reds `sizes every control in
+   * every bucket's action group` and `sizes the ARMED delete confirm, in both
+   * factories that render one`.
+   *
+   * The genuinely inert path was the OTHER one. Every menu caller passed
+   * `fullWidth: true` and the Done row passes `icon: true`, so the default
+   * `fullWidth: false, icon: false` combination had **no caller at all** — and it
+   * was the one shape here that omitted `touchTarget`, so anyone who did reach for
+   * it would have got a sub-44px delete that `expectFullTargets` would then have
+   * caught. An unreachable trap is worse than a reachable one because nothing
+   * exercises it.
+   *
+   * So the resting control is now always the full-width menu entry, leaving exactly
+   * two shapes and no unsized one. `icon` stays because it renders.
+   */
   const deleteControl = (
     itemId: string,
     key: string,
-    {
-      fullWidth = false,
-      icon = false,
-    }: { fullWidth?: boolean; icon?: boolean } = {},
+    { icon = false }: { icon?: boolean } = {},
   ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
@@ -2294,13 +2319,11 @@ export function InboxView({
         key={key}
         // Colours unchanged: muted at rest, `hover:text-foreground` on the accent
         // background. #253 changed WHERE the resting delete lives, not how it reads.
-        className={
-          fullWidth
-            ? rowMenuEntry("text-muted-foreground hover:text-foreground")
-            : cn(
-                "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-              )
-        }
+        //
+        // Unconditionally the menu-entry shape now: `rowMenuEntry` carries the 44px
+        // floor, and the narrow variant this used to fall back to had no caller and
+        // no `touchTarget`. See the docblock above.
+        className={rowMenuEntry("text-muted-foreground hover:text-foreground")}
         onClick={() => requestDelete(itemId)}
       >
         {t("action.delete", voice)}
@@ -3296,11 +3319,7 @@ export function InboxView({
                                       />
                                     ) : null,
                                   ],
-                                  [
-                                    deleteControl(item.id, "delete-m", {
-                                      fullWidth: true,
-                                    }),
-                                  ],
+                                  [deleteControl(item.id, "delete-m")],
                                 ])}
                               />
                               {scheduleErrors[item.id] && (
@@ -3556,11 +3575,7 @@ export function InboxView({
                                       />
                                     ) : null,
                                   ],
-                                  [
-                                    deleteControl(item.id, "delete-m", {
-                                      fullWidth: true,
-                                    }),
-                                  ],
+                                  [deleteControl(item.id, "delete-m")],
                                 ])}
                               />
                               {scheduleErrors[item.id] && (
@@ -3803,11 +3818,7 @@ export function InboxView({
                                       {t("action.completeFull", voice)}
                                     </button>,
                                   ],
-                                  [
-                                    deleteControl(item.id, "delete-saved-m", {
-                                      fullWidth: true,
-                                    }),
-                                  ],
+                                  [deleteControl(item.id, "delete-saved-m")],
                                 ])}
                               />
                             ) : (
@@ -4469,12 +4480,16 @@ function ItemRow({
     settings,
     now,
   );
-  // #253 — one resting shape, not two. This factory had an `icon` variant for the
-  // end cluster and a `fullWidth` one for the ▾ list, both driven by the same
-  // `confirmingDelete`; the cluster is gone, so the ▾ entry is the route and the
-  // `icon` branch had no caller left. `rowMenuEntry` keeps it at 44px, which the
-  // old mirror-only entry never was — it did not need to be while a 44px 🗑 sat
-  // beside it.
+  // ⚠️ `ItemRow`'s OWN delete factory — a different function from `InboxView`'s
+  // `deleteControl(itemId, key, opts)` above, which still has a live `icon` branch
+  // for the Done row. Distinguishable by arity: this one takes a key alone.
+  //
+  // #253 — one resting shape, not two. THIS factory had an `icon` variant for the
+  // end cluster and a full-width one for the ▾ list, both driven by the same
+  // `confirmingDelete`; the cluster is gone, so the ▾ entry is the route and
+  // **this** factory's `icon` branch had no caller left. `rowMenuEntry` keeps it at
+  // 44px, which the old mirror-only entry never was — it did not need to be while a
+  // 44px 🗑 sat beside it.
   const deleteControl = (key: string) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">

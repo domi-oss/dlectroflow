@@ -4655,6 +4655,85 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   // list has no shortcut bar under their thumb. Height only, since a full-width entry
   // is already well past 44px wide. jsdom computes no layout, so the classes are what
   // is checked.
+  /**
+   * The same floor for `InboxView`'s OWN delete factory, which the test below does
+   * not reach.
+   *
+   * ⚠️ That test renders a Needs-review row, and that row's Delete comes from
+   * `ItemRow`'s local `deleteControl(key)`. `InboxView`'s
+   * `deleteControl(itemId, key, opts)` serves the Multi-step, Single-task, Saved and
+   * Done rows instead — four call sites, none of them covered. Proven by mutation:
+   * reverting its resting shape to the old narrow, `touchTarget`-less variant passed
+   * the whole file, because nothing measured it.
+   *
+   * That gap is why the unreachable `fullWidth: false` path was dangerous rather than
+   * merely untidy — it was one caller away from shipping a sub-44px delete with no
+   * test to say so. The path is gone; this is what stops it coming back.
+   */
+  it.each([
+    ["a Multi-step row", "plan trip", () => makeMultiStep()],
+    [
+      "a Single-task row",
+      "single todo",
+      () => makeItem({ id: "st44", text: "single todo", status: "triaged" }),
+    ],
+  ])(
+    "%s's ▾ Delete entry carries the 44px floor (InboxView's factory)",
+    async (_label, text, make) => {
+      const user = userEvent.setup();
+      render(
+        <InboxView
+          now={Date.now()}
+          initialItems={[make()]}
+          settings={settings}
+          welcomeVisible={false}
+          resumeStep={null}
+        />,
+      );
+      const row = screen.getByText(text).closest("li")!;
+      await user.click(
+        within(row).getByRole("button", { name: "All options" }),
+      );
+      const del = within(
+        within(row).getByRole("dialog", { name: "All options" }),
+      ).getByRole("button", { name: "Delete" });
+      expect(
+        del.className,
+        "the resting ▾ Delete is under 44px tall",
+      ).toContain("min-h-11");
+      expect(
+        del.className,
+        "the resting ▾ Delete is under 44px wide",
+      ).toContain("min-w-11");
+    },
+  );
+
+  it("the Done row's 🗑 keeps the floor too — the one icon caller", () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "dn44",
+            text: "finished 44",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("finished 44").closest("li")!;
+    // `icon: true` — asserted directly, because a reviewer of `ed4dffb` reported this
+    // branch as having no caller. It has exactly one, and this is it.
+    const del = within(row).getByRole("button", { name: "Delete" });
+    expect(del.className).toContain("min-h-11");
+    expect(del.className).toContain("min-w-11");
+    expect(del.textContent).toBe("🗑");
+  });
+
   it("every ▾ entry carries the 44px minimum height", async () => {
     const user = userEvent.setup();
     render(
