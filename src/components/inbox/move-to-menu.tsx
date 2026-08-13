@@ -8,7 +8,6 @@ import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
-  restoreFocusToTrigger,
 } from "@/components/ui/anchored-popup";
 
 /**
@@ -21,9 +20,9 @@ import {
  * also brings what the hand-rolled version had to state explicitly, and a
  * little more: `aria-haspopup`/`aria-expanded`/`aria-controls`, Escape and
  * outside-press dismissal, focus returned to the trigger on close, and
- * arrow-key roving focus over the entries. The focus return is the one that
- * needed help — Base UI does it asynchronously, and #253 put this menu somewhere
- * that out-races it (see `onOpenChange` below).
+ * arrow-key roving focus over the entries. The focus return is asynchronous, which
+ * matters only where an enclosing popover can out-race it — not here, since #253
+ * removed the ▾ entry that put this menu inside one. Measured, see `Menu.Root`.
  *
  * The popup is portaled into this component's own wrapper (`container={host}`)
  * rather than to `<body>`: it keeps the menu inside the row it belongs to — so
@@ -73,7 +72,6 @@ export function MoveToMenu({
   describedById?: string;
 }) {
   const host = useRef<HTMLSpanElement>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const targets = BUCKET_ORDER.filter((b) => b !== currentBucket);
 
   return (
@@ -83,28 +81,36 @@ export function MoveToMenu({
           scroll must not dismiss the menu. */}
       <Menu.Root
         modal={false}
-        // #253 — hand focus back here rather than leaving it to Base UI's own
-        // async restoration, which the enclosing ▾ popover out-races: see
-        // `restoreFocusToTrigger`. On the two rows that still render this — the
-        // idle Saved row and the Done row, neither of which has a ▾ carrying
-        // destinations — it is the only non-drag route to a bucket, so losing the
-        // user's place in the list on every Escape is a WCAG 2.4.3 failure on
-        // those rows' only move path.
+        // ── No explicit focus hand-off here, and that is measured, not assumed ───
         //
-        // Stated that way rather than "the only route now that the compact 📥 has
-        // gone": this component IS that 📥. What #253 removed is the full-width
-        // "Move to…" entry, and on the rows whose ▾ now names its destinations
-        // there is a second, 44px route. See the docblock above.
+        // #253 briefly added `onOpenChange={() => restoreFocusToTrigger(...)}` to
+        // this menu, justified as beating "the enclosing ▾ popover" whose async
+        // `restoreFocus: "popup"` manager grabs its own container a frame late.
+        // That race is real — see `restoreFocusToTrigger` — but it needs an
+        // enclosing popover, and this issue removed the "Move to…" ▾ entry that
+        // provided one. The two remaining render sites (`inbox-view.tsx`'s idle
+        // Saved row and Done row) are plain inline flex lines with nothing around
+        // them to lose the race to, so there was no composition left for the line
+        // to change.
         //
-        // Runs on the item-select close too, which is what it should do — that
-        // is the case move-to-menu.test.tsx already asserts, and it cannot see
-        // this bug because it renders the menu with no outer popup to lose to.
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) restoreFocusToTrigger(triggerRef.current);
-        }}
+        // Removed rather than kept as defence-in-depth, on this MR's own precedent:
+        // `RowActions`'s `move`/`schedule`/`del` props and this file's `compact`
+        // prop were deleted rather than left inert, because #213 had already been
+        // written against a prop with no render path.
+        //
+        // Base UI's own restoration is what returns focus here, and the docblock
+        // above lists that as something it already provides. Verified by the same
+        // 10-run method that found the original race: with the line removed,
+        // "dismissing the Move-to menu hands focus back to the 📥 that opened it"
+        // passed 10/10, where the genuine bug failed 7/10. That e2e assertion stays
+        // — it is now an explicit check that the platform default suffices in THIS
+        // composition, which is the thing that would stop being true if the picker
+        // were ever put back inside a popup.
+        //
+        // `ScheduleControl`/`ScheduleMenu` keep the explicit hand-off. Those are
+        // genuinely nested inside the ▾ popup and their spec fails without it.
       >
         <Menu.Trigger
-          ref={triggerRef}
           aria-label="Move to"
           aria-describedby={describedById}
           title="Move to"

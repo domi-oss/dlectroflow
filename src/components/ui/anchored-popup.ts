@@ -101,11 +101,18 @@ export function popupSurface(className?: string): string {
  * fix rather than a stylistic preference.
  *
  * Deleting the row's trailing icon cluster left the ▾ list as the only route to
- * Schedule, which opens a second floating layer of its own inside it. The nested
- * Move-to list has the same shape and the same bug, reached from the inline 📥 on
- * the idle Saved row and the Done row — not from a ▾ entry, since the later
- * "Move to…" entry removal took that entrance away. Both callers are why this is
- * a shared helper rather than a fix inside `RowActions`.
+ * Schedule, which opens a second floating layer of its own inside it. That is the
+ * composition this fixes, and — as it turns out — the ONLY one.
+ *
+ * ⚠️ `MoveToMenu` was a second caller and no longer is. It had the same nested
+ * shape while a "Move to…" ▾ entry opened it; this issue removed that entry, so its
+ * two remaining render sites are plain inline flex lines with no enclosing popover
+ * to lose the race to. Measured by the same 10-run method used below: with the
+ * explicit hand-off removed there, the Move-to focus spec passed 10/10. The call
+ * was deleted rather than kept as defence-in-depth, on this MR's precedent for
+ * inert code (#213). So this helper has one caller, `ScheduleControl` — kept as a
+ * shared helper because the race it defuses is a property of Base UI's
+ * `restoreFocus: "popup"` manager rather than of one component.
  *
  * Base UI restores focus on close by itself — but
  * ASYNCHRONOUSLY, and it loses a race to the enclosing list. `Popover.Popup`
