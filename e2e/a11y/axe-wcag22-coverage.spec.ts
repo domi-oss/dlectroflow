@@ -56,8 +56,16 @@ import { WCAG_TAGS, scanA11y } from "./axe-helpers";
  *     deliver 2.4.11 and this file does not test it. It needs a Playwright
  *     keyboard walk that Tabs a long page and asserts the focused element's rect
  *     is not covered by a sticky ancestor; that is a separate checklist item on
- *     #263 and is out of scope here. `src/lib/a11y-class-hygiene.ts` remains the
- *     only check in the repo that can see 2.4.11 at all.
+ *     #263 and is out of scope here.
+ *
+ *     ⚠️ Comments across `src/` (and `a11y-class-hygiene.ts` itself) say that
+ *     module is "the only check that can see 2.4.11". Verified this session:
+ *     that is the #258 mislabelling, not a coverage claim to inherit. Rule D
+ *     catches a focus indicator that is only a colour swap — **2.4.13 Focus
+ *     Appearance, Level AAA** and **1.4.11 Non-text Contrast, Level AA (WCAG
+ *     2.1)** — while carrying 2.4.11's number. Real 2.4.11 is a focused control
+ *     resting UNDER a sticky bar, which is geometry no class-string check can
+ *     reach. So nothing in this repo detects 2.4.11 today.
  *   * **1.4.11 Non-text Contrast** is Level AA and WCAG **2.1**, not 2.2 — it
  *     was already covered by `wcag21aa` before this change. axe cannot reliably
  *     measure a focus indicator's 3:1 against adjacent colours, so the widening
@@ -70,12 +78,28 @@ import { WCAG_TAGS, scanA11y } from "./axe-helpers";
  *     verified against the W3C Recommendation, not recalled: 2.5.8 is Level AA
  *     in <https://www.w3.org/TR/WCAG22/#target-size-minimum>.
  *
- * The 24px consequence matters to this repo specifically: `a11y-class-hygiene`
- * enforces **44px** on interactive controls (#205), so axe's rule is strictly
- * WEAKER than the house bar. A control between 24px and 44px passes here and
- * fails there. This gate therefore does not replace that one, and the corrected
- * fixture below is sized 44px rather than 24px so a test fixture cannot be read
- * as endorsing the weaker figure.
+ * The 24px consequence matters to this repo specifically. The house style asks
+ * **44px** of an interactive control — that is **2.5.5 Target Size (Enhanced)**,
+ * Level **AAA**, not 2.5.8 — and it is enforced by COLOCATED COMPONENT UNIT
+ * TESTS asserting `min-h-[44px]`/`min-h-11` class strings
+ * (`theme-toggle.test.tsx`, `sub-header.test.tsx`, `inbox-view.test.tsx` …).
+ * Checked rather than assumed: there is no repo-wide touch-target gate, and
+ * `a11y-class-hygiene` has no touch-target rule at all — its exports are
+ * contrast and focus-indicator rules.
+ *
+ * That makes the two checks complementary, not redundant, and it is the real
+ * argument for turning a 24px rule on when the house bar is 44px:
+ *
+ *   * theirs is stricter, but only exists where somebody wrote one, and it reads
+ *     CLASS STRINGS — so a 20px control in a file nobody wrote a test for is
+ *     invisible to it. Two of those reached `main` in
+ *     `src/components/breakdown/breakdown-chat.tsx` and this widening is what
+ *     found them (#205's family);
+ *   * this one is repo-wide across every gated surface and measures RENDERED
+ *     geometry, so it cannot be fooled by a class that does not apply.
+ *
+ * The corrected fixture below is sized 44px rather than 24px so a test fixture
+ * cannot be read as endorsing the weaker figure.
  */
 
 /**

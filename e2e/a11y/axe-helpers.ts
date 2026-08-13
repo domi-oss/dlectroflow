@@ -28,17 +28,29 @@ import AxeBuilder from "@axe-core/playwright";
 // coverage that overclaims its coverage is the original bug one level up:
 //
 //   * It does not deliver **2.4.11 Focus Not Obscured (Minimum), Level AA** —
-//     axe-core has no rule for it at any tag. `src/lib/a11y-class-hygiene.ts`
-//     stays the only check in the repo that can see 2.4.11, and a Playwright
-//     keyboard walk is still outstanding on #263.
+//     axe-core has no rule for it at any tag, and a keyboard walk is still
+//     outstanding on #263. Nothing in this repo detects real 2.4.11 today.
+//     ⚠️ `a11y-class-hygiene` is NOT 2.4.11 coverage, whatever a comment
+//     elsewhere may still say — its Rule D catches a focus indicator that is
+//     merely a colour swap, i.e. **2.4.13 Focus Appearance (AAA)** and **1.4.11
+//     Non-text Contrast (AA, WCAG 2.1)**. It carried 2.4.11's NUMBER with
+//     2.4.13's TITLE; #258 / !340 is the correction, and any surviving comment
+//     that reads otherwise predates it. Real 2.4.11 is a focused control coming
+//     to rest UNDER a sticky bar — geometry, which no class-string check can
+//     reach at all.
 //   * It does not improve **1.4.11 Non-text Contrast**, which is Level AA and
 //     WCAG *2.1* — already covered by `wcag21aa` — and which axe cannot measure
 //     reliably for a focus indicator against adjacent colours.
-//   * It does not raise the house bar. axe's 24px is *weaker* than the 44px
-//     `a11y-class-hygiene` enforces on interactive controls (#205), so a control
-//     between the two passes here and fails there. This gate does not replace
-//     that one. 44px is **2.5.5 Target Size (Enhanced)**, which is Level AAA —
-//     not 2.5.8, and not 2.4.13 Focus Appearance, which is also AAA.
+//   * It does not reach the 44px the house style asks of interactive controls.
+//     44px is **2.5.5 Target Size (Enhanced)**, Level **AAA**; axe's rule is the
+//     AA floor of 24px, so a 30px control passes here. That bar is enforced by
+//     COLOCATED COMPONENT UNIT TESTS asserting `min-h-[44px]`/`min-h-11` class
+//     strings (`theme-toggle.test.tsx`, `sub-header.test.tsx`,
+//     `inbox-view.test.tsx` …) — there is no repo-wide touch-target gate, which
+//     is exactly why two 20px controls in `breakdown-chat.tsx` reached `main`
+//     unseen (#205's family). So the two checks are complementary rather than
+//     redundant: theirs is stricter but only exists where someone wrote one,
+//     while this one is repo-wide and measures RENDERED geometry.
 //
 // `wcag22a` matches zero axe rules today: the only Level A criteria new in 2.2
 // are 3.2.6 Consistent Help and 3.3.7 Redundant Entry, and axe implements
@@ -134,8 +146,22 @@ function report(violations: Violation[], allowed: Set<string>): string {
     for (const node of v.nodes) {
       const fp = nodeFingerprint(v.id, node);
       if (allowed.has(fp)) continue;
+      // `failureSummary` as well as `help`, added with the WCAG 2.2 widening
+      // (#263). `help` is the rule's generic sentence — for `target-size` it
+      // reads "All touch targets must be 24px large, or leave sufficient
+      // space", which names neither the measured size nor which half of the
+      // rule failed, so a red CI job said what the rule wants and not what the
+      // page did. axe puts both in `failureSummary` ("Target has insufficient
+      // size (20px by 20px…)"), and the contrast reporter below has always
+      // printed it — this side simply did not, which only became expensive once
+      // a geometry rule started firing. Indented to stay inside the node block.
+      const summary = (node.failureSummary ?? "")
+        .split("\n")
+        .map((line) => `      ${line}`)
+        .join("\n");
       lines.push(
-        `  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}`,
+        `  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}` +
+          (summary.trim() ? `\n${summary}` : ""),
       );
     }
   }
