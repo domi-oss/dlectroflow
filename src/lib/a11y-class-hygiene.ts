@@ -694,7 +694,9 @@ const FOCUS_VARIANTS = ["focus-visible", "focus", "focus-within"];
  *
  * Dropping it from this list would have created the precise false negative Rule D
  * exists to prevent: `outline-hidden focus-visible:bg-accent` would pass while
- * giving an ordinary user a 1.07:1 background swap and nothing else. Nothing in
+ * giving an ordinary user a background swap of the order `app-menu.tsx` measured
+ * at 1.07:1 and nothing else — `bg-accent` specifically is `account-menu.tsx`'s
+ * token, which measured 1.09:1, and neither figure is this scope's. Nothing in
  * the tree uses `outline-hidden` today, so this is future-proofing — and the
  * permissive direction is the expensive one to get wrong.
  */
@@ -772,9 +774,12 @@ function drawsIndicator(base: string): boolean {
  *    indicator at all, so this branch is a plain AA failure and non-negotiable.
  *  * **A colour swap replaces it** → this branch is **deliberately stronger than
  *    the AA bar.** 2.4.7 sets no threshold of contrast or size, so a hue change
- *    can be argued to satisfy it while being invisible in practice: the swap the
- *    two header menus relied on measured **1.07:1 (light)** and **1.17:1 (dark)**
- *    between the focused and unfocused entry, which is the ratio *2.4.13* puts a
+ *    can be argued to satisfy it while being invisible in practice: the swap
+ *    `app-menu.tsx` relied on measured **1.07:1 (light)** and **1.17:1 (dark)**
+ *    on `--muted` against `--background`, and `account-menu.tsx`'s **1.09:1** and
+ *    **1.24:1** on `--accent` against the popup surface — so **1.07:1–1.24:1
+ *    across the two menus**, each figure belonging to the one that measured it.
+ *    That is the ratio *2.4.13* puts a
  *    3:1 floor under, and 2.4.13 is AAA. (The same numbers read on 1.4.11
  *    Non-text Contrast too, which *is* AA and asks 3:1 of the visual information
  *    identifying a state: for a background-only indicator, the adjacent colour a
@@ -805,8 +810,12 @@ function drawsIndicator(base: string): boolean {
  * names 1.4.11 as well, at AA, and says the ratio is unmeasured here.
  *
  * ── Why the finding quotes no ratio ─────────────────────────────────────────
- * The 1.07:1 and 1.17:1 above belong to #117's two menus and stay here, where the
- * case they were measured on is attached. They are **not** in the message, which
+ * The figures above stay here, where the surface each was measured on is named
+ * beside it — which is the whole point, and is why the earlier wording "the swap
+ * the two header menus relied on measured 1.07:1 and 1.17:1" was itself the same
+ * defect at file scope: that pair is `app-menu.tsx`'s, and `account-menu.tsx`
+ * measured 1.09:1 and 1.24:1 on a different token against a different surface.
+ * They are **not** in the message, which
  * is one string returned for every colour-only violation the gate will ever
  * report: a figure from one site, restated for a finding in an unrelated file, is
  * a measurement nobody took, and nothing in the sentence shows the reader it was

@@ -982,17 +982,32 @@ describe("src/ WCAG-AA class hygiene (#109, #117)", () => {
 // Numbers and levels below are from the WCAG 2.2 specification, checked for #258.
 // Only criteria actually verified are policed: an unverified entry here would be
 // the same defect as the one being fixed, wearing a guard's authority.
-const CRITERION_SPEC: Record<string, { name: string; level: string }> = {
+// The `(Minimum)`/`(Enhanced)` qualifier is a FIELD, not a trailing comment. It
+// used to be `// (Enhanced)` beside each entry, which made it invisible to the
+// guard — and the qualifier is the half this repo has already got wrong twice, in
+// the target-size family named further down. `2.5.5 Target Size (Minimum)` and
+// `2.4.11 Focus Not Obscured (Enhanced)` are both welds, and both passed green
+// until this became data.
+const CRITERION_SPEC: Record<
+  string,
+  { name: string; qualifier?: string; level: string }
+> = {
   "1.4.11": { name: "Non-text Contrast", level: "AA" },
   "2.4.3": { name: "Focus Order", level: "A" },
   "2.4.7": { name: "Focus Visible", level: "AA" },
-  "2.4.11": { name: "Focus Not Obscured", level: "AA" }, // (Minimum)
-  "2.4.12": { name: "Focus Not Obscured", level: "AAA" }, // (Enhanced)
+  "2.4.11": { name: "Focus Not Obscured", qualifier: "Minimum", level: "AA" },
+  "2.4.12": { name: "Focus Not Obscured", qualifier: "Enhanced", level: "AAA" },
   "2.4.13": { name: "Focus Appearance", level: "AAA" },
   "2.5.3": { name: "Label in Name", level: "A" },
-  "2.5.5": { name: "Target Size", level: "AAA" }, // (Enhanced)
-  "2.5.8": { name: "Target Size", level: "AA" }, // (Minimum)
+  "2.5.5": { name: "Target Size", qualifier: "Enhanced", level: "AAA" },
+  "2.5.8": { name: "Target Size", qualifier: "Minimum", level: "AA" },
 };
+
+/** How a fault should name a criterion: `Focus Not Obscured (Minimum)`. */
+function displayName(id: string): string {
+  const spec = CRITERION_SPEC[id];
+  return spec.qualifier ? `${spec.name} (${spec.qualifier})` : spec.name;
+}
 
 // A policed number, an optional `(Minimum)`/`(Enhanced)` qualifier, then a
 // criterion-name-shaped phrase. The name must follow the number directly — only a
@@ -1007,11 +1022,75 @@ const CRITERION_SPEC: Record<string, { name: string; level: string }> = {
 // for voice control" captured "Label in Name for" and was reported as a misweld.
 // A guard's alternation is not the place for speculative generality: every extra
 // word it accepts is a sentence it can misread.
+//
+// The leading qualifier position is kept even though nothing in the tree uses it
+// (`2.4.11 (Minimum) Focus Not Obscured` — checked, zero occurrences), because
+// removing it would be a change with no test able to notice.
+//
+// ── Stated gap: a parenthesised NAME is not policed ────────────────────────
+// `WCAG 2.5.3 (Label in Name)` is how ten files in this tree write a citation,
+// and this pattern does not match it at all: after the number it wants a name, and
+// `(` is neither a name nor one of the four separators allowed before one. Such a
+// citation is skipped, not checked — so a weld written that way would pass.
+//
+// Left that way deliberately rather than by oversight. Allowing an optional `(`
+// around the name collides with the name-less `2.5.8 (Minimum)` shape, which three
+// files use: the name group would capture "Minimum" and report a correct citation
+// as a weld. Closing that needs a lookahead excluding the qualifier words, and
+// every extra token this alternation accepts is a sentence it can misread — the
+// `of`/`for` lesson above, which cost a false positive on the first attempt. The
+// qualifier half of the risk IS covered, by {@link CITED_QUALIFIER}; the
+// parenthesised-name half is not, and it is written down here so the coverage is
+// not read as wider than it is.
 const CITED_CRITERION =
   /\b([12]\.[45]\.\d{1,2})\s*(?:\((?:Minimum|Enhanced)\)\s*)?(?:[-—:,]\s*)?((?:Non-text|[A-Z][a-z]+)(?:[ -](?:Non-text|in|[A-Z][a-z]+)){0,3})/g;
 
-/** `AA`, `AAA` or `A` stated close enough to a citation to be read as its level. */
-const STATED_LEVEL = /\b(AAA|AA|A)\b/;
+// A qualifier sitting immediately after a matched citation, which is where every
+// real one in this tree sits: `2.5.5 Target Size (Enhanced)`.
+const TRAILING_QUALIFIER = /^\s*\((Minimum|Enhanced)\b/;
+
+// The name-LESS shape, which {@link CITED_CRITERION} cannot see at all because it
+// requires a name: `2.5.8 (Minimum), at 24x24`. Three scanned files use it
+// (`note-field.tsx`, `shopping-list.tsx`, `row-menu-viewport-fit.spec.ts`), so a
+// qualifier check that only ran after a matched name would have skipped them and
+// called them clean. The inner name is optional so this also matches the shape
+// with a name, which is why the results are deduplicated by offset below.
+//
+// `\b` rather than `\)` after the qualifier on purpose: `2.5.8 (Minimum, AA)` is
+// in the tree, and a strict close would skip it.
+const CITED_QUALIFIER =
+  /\b([12]\.[45]\.\d{1,2})\s*(?:(?:Non-text|[A-Z][a-z]+)(?:[ -](?:Non-text|in|[A-Z][a-z]+)){0,3}\s*)?\((Minimum|Enhanced)\b/g;
+
+/**
+ * `AAA`, `AA`, or a bare `A` that is a conformance level rather than the article.
+ *
+ * The article is the whole difficulty. `/\b(AAA|AA|A)\b/` reports
+ * "2.4.13 Focus Appearance. A hue change carries no area" as *stated here as A* —
+ * and this guard reads 697 files including `CLAUDE.md` and `CHANGELOG.md`, so any
+ * sentence beginning "A " within {@link LEVEL_PROXIMITY} of a citation would red
+ * an unrelated author's MR. This MR rewrote fourteen such comments, so the
+ * exposure was live rather than theoretical.
+ *
+ * Dropping the `A` alternative entirely was the other option, and it is worse: it
+ * would also stop catching a AAA criterion understated as level A, which is
+ * exactly the direction #258's weld failed in. The lookahead keeps that and loses
+ * only `A` followed by a lowercase word — which the article always is and a level
+ * almost never is. `Level A conformance` is the residual blind spot; no citation
+ * in the tree is written that way, and there is no capture group so the match is
+ * read whole.
+ */
+const STATED_LEVEL = /\bAAA\b|\bAA\b|\bA\b(?!\s+[a-z])/;
+
+/**
+ * How far after a citation a level token still counts as ITS level; beyond this it
+ * belongs to somebody else's sentence.
+ *
+ * Named rather than inlined because it is the one magic number in this reader and
+ * it was, until #258's review, the one thing with no test. See
+ * "bounds the level search by index" below, which pins both the bound itself and
+ * the reason the search runs over the whole remainder before being bounded.
+ */
+const LEVEL_PROXIMITY = 40;
 
 /**
  * Every criterion citation in a stretch of text, with what is wrong about it and
@@ -1021,47 +1100,109 @@ const STATED_LEVEL = /\b(AAA|AA|A)\b/;
  * answer at the point of failure. A guard that says only "line 729 is wrong"
  * makes the next person repeat the specification lookup that produced #258.
  */
+/**
+ * Which criterion actually owns a cited name, as a clause to append.
+ *
+ * Every candidate, never the first of several. `2.4.13 Focus Not Obscured
+ * (Enhanced)` used to be answered with *"Focus Not Obscured is 2.4.11, AA"* —
+ * `find` took the first name match and ignored the qualifier, so the guard told
+ * an author who meant 2.4.12 at AAA to renumber to 2.4.11 at AA. **Naming the
+ * wrong answer is worse than naming none**, and this function's whole purpose per
+ * {@link citationFaults} is that the failure names the right one.
+ */
+function ownerClause(name: string, qualifier?: string): string {
+  const owners = Object.entries(CRITERION_SPEC).filter(
+    ([, spec]) =>
+      spec.name === name && (!qualifier || spec.qualifier === qualifier),
+  );
+  if (owners.length === 0) return "";
+  if (owners.length === 1) {
+    const [id, spec] = owners[0];
+    return ` — "${displayName(id)}" is ${id}, ${spec.level}`;
+  }
+  // No qualifier given and the name is shared, so the citation is genuinely
+  // ambiguous. Say so and list both, rather than guessing which was meant.
+  return (
+    ` — "${name}" is ambiguous without a qualifier: ` +
+    owners
+      .map(([id, spec]) => `${id} (${spec.qualifier}), ${spec.level}`)
+      .join(" or ")
+  );
+}
+
 function citationFaults(text: string): { offset: number; fault: string }[] {
   const faults: { offset: number; fault: string }[] = [];
+  const named = new Set<number>();
   for (const match of text.matchAll(CITED_CRITERION)) {
     const [whole, number, name] = match;
     const spec = CRITERION_SPEC[number];
     if (!spec) continue;
+    named.add(match.index);
+    const rest = text.slice(match.index + whole.length);
+    const cited = TRAILING_QUALIFIER.exec(rest)?.[1];
     if (name !== spec.name) {
-      const owner = Object.entries(CRITERION_SPEC).find(
-        ([, value]) => value.name === name,
-      );
       faults.push({
         offset: match.index,
         fault:
-          `${number} is "${spec.name}" (${spec.level}), not "${name}"` +
-          (owner ? ` — "${name}" is ${owner[0]}, ${owner[1].level}` : ""),
+          `${number} is "${displayName(number)}" (${spec.level}), not "${name}"` +
+          ownerClause(name, cited),
+      });
+      continue;
+    }
+    // Right name, wrong Minimum/Enhanced. The qualifier is what carries the level
+    // in this family, so an inversion is a full weld even though the name matches:
+    // `2.5.5 Target Size (Minimum)` makes a voluntary 44x44 read as the AA floor,
+    // which is the correction `note-field.tsx` and `row-menu-viewport-fit.spec.ts`
+    // have already had to make once each.
+    if (cited && cited !== spec.qualifier) {
+      faults.push({
+        offset: match.index,
+        fault:
+          `${number} is "${displayName(number)}", not "${name} (${cited})"` +
+          ownerClause(name, cited),
       });
       continue;
     }
     // The level is the half that misleads hardest, so it is checked wherever it
     // is stated: told they fail AA a developer treats it as non-negotiable, told
-    // AAA they know it is a project's choice. Only the first level token within 40
-    // characters of the citation counts — beyond that it is somebody else's.
+    // AAA they know it is a project's choice.
     //
     // Measured from the match's OWN index, not from `indexOf(name)`. Two
     // citations of the same name in one sentence — "2.5.5 Target Size (Enhanced)
     // is AAA; 2.5.8 Target Size (Minimum) is AA" — both resolve `indexOf` to the
     // first, so the second read the first one's level and was reported as wrong.
+    // Pinned by HONEST #6 below.
     //
     // And searched over the whole remainder, then bounded BY INDEX, rather than
-    // over a 40-character slice: slicing first cuts the token itself, so the
-    // trailer after "Focus Appearance's area … contrast (AAA" ends inside the AAA
-    // and `\b(AAA|AA|A)\b` matches the "A" that is left, reporting a correct AAA
-    // citation as level A. Both were caught by the honest-citation controls
-    // below — the half of a guard's test that is easiest to leave out and the
-    // only half that finds this class of bug.
-    const from = match.index + whole.length;
-    const stated = STATED_LEVEL.exec(text.slice(from));
-    if (stated && stated.index < 40 && stated[1] !== spec.level) {
+    // over a `LEVEL_PROXIMITY`-character slice: slicing first can cut the token
+    // itself, leaving `AA` where `AAA` was written and reporting a correct AAA
+    // citation as AA. That one is pinned by "bounds the level search by index"
+    // and by nothing else — the honest fixtures cannot reach it, because
+    // `faultsIn` passes only the fixture lines and the remainder is then too
+    // short to run past the bound. An earlier version of this comment claimed
+    // those fixtures covered it; they did not, and reverting the fix reddened
+    // none of them.
+    const stated = STATED_LEVEL.exec(rest);
+    if (stated && stated.index < LEVEL_PROXIMITY && stated[0] !== spec.level) {
       faults.push({
         offset: match.index,
-        fault: `${number} ${spec.name} is ${spec.level}, stated here as ${stated[1]}`,
+        fault: `${number} ${displayName(number)} is ${spec.level}, stated here as ${stated[0]}`,
+      });
+    }
+  }
+  // The name-less `2.5.8 (Minimum)` shape, deduplicated against the pass above so
+  // one citation cannot raise two faults. Additive by construction: it can only
+  // reach numbers the first pass never matched.
+  for (const match of text.matchAll(CITED_QUALIFIER)) {
+    const [, number, qualifier] = match;
+    const spec = CRITERION_SPEC[number];
+    if (!spec || named.has(match.index)) continue;
+    if (qualifier !== spec.qualifier) {
+      faults.push({
+        offset: match.index,
+        fault:
+          `${number} is "${displayName(number)}", not "(${qualifier})"` +
+          ownerClause(spec.name, qualifier),
       });
     }
   }
@@ -1108,13 +1249,25 @@ const CITATION_SELF = path.join("src", "lib", "a11y-class-hygiene.test.ts");
  * original line numbers.
  *
  * Matching line by line is not good enough and this is measured, not
- * hypothetical: the first version of this guard reported six of the eight welded
- * citations in the tree and called the rest clean, because `add-note-button.tsx`
- * and `note-field.tsx` had both wrapped the citation at 80 columns —
- * `WCAG 2.4.11 Focus` / `// Appearance`. Prettier's `printWidth` guarantees that
- * happens, so a per-line scan is structurally unable to police an 80-column repo.
- * The same failure as `regexp-source-hygiene`'s first version, which silently
- * missed four files and called them clean.
+ * hypothetical, and the numbers are the measured ones rather than the remembered
+ * ones. Against `origin/main`, where **eleven** welds were live: this reader finds
+ * all eleven, a per-line reader finds **ten**, and the one it misses entirely is
+ * `note-field.tsx:342`, which wrapped BEFORE the name (`… WCAG 2.4.11` /
+ * `// Focus Appearance …`) so no name is on the line at all.
+ *
+ * `add-note-button.tsx:114` wrapped INSIDE the name (`… WCAG 2.4.11 Focus` /
+ * `// Appearance …`) and is **not** missed — it is flagged with a degraded
+ * correction, `not "Focus"`, which reads as "rename the criterion" when the fix is
+ * to renumber it. Both shapes are Prettier's `printWidth` doing its job, so a
+ * per-line scan is structurally unable to police an 80-column repo; the same
+ * failure as `regexp-source-hygiene`'s first version, which silently missed four
+ * files and called them clean.
+ *
+ * An earlier version of this docblock said "six of the eight… because
+ * `add-note-button.tsx` and `note-field.tsx` had both wrapped the citation" — and
+ * disagreed with the fixture comment below it on all three counts. A stated
+ * measurement that does not match what was measured is #258's own defect, so it is
+ * corrected here rather than left as approximately right.
  *
  * The marker is stripped **before** the join, not after: stripping after leaves
  * the second line's `//` between the two halves of a wrapped name, so
@@ -1176,14 +1329,106 @@ describe("WCAG criterion citations (#258)", () => {
     // weld has already cost this repo two corrections: 2.5.5 Target Size
     // (Enhanced) is AAA, and calling it AA is what makes a voluntary 44x44 read
     // as an obligation.
-    for (const broken of [
-      ["// WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2"],
-      ["// WCAG 2.4.13 Focus Not Obscured (Minimum) is AA"],
-      ["// a ring is needed for WCAG 2.4.13 Focus Appearance, which is AA"],
-      ["// the shared 44x44 floor, WCAG 2.5.5 Target Size, which is AA"],
-    ]) {
-      expect(faultsIn(...broken), broken.join(" ⏎ ")).not.toEqual([]);
+    //
+    // Every one asserts the CORRECTION, not merely that some fault was raised.
+    // `.not.toEqual([])` was the original shape and it is too weak to be worth
+    // keeping anywhere in this file: all four happen to produce the right fault
+    // today, but reordering `CRITERION_SPEC` would make the second blame 2.4.12
+    // and the assertion would still pass. The wrap fixtures below are the case
+    // where that weakness was not hypothetical.
+    for (const [broken, correction] of [
+      [
+        ["// WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2"],
+        '2.4.11 is "Focus Not Obscured (Minimum)" (AA), not "Focus Appearance" — "Focus Appearance" is 2.4.13, AAA',
+      ],
+      [
+        ["// WCAG 2.4.13 Focus Not Obscured (Minimum) is AA"],
+        '2.4.13 is "Focus Appearance" (AAA), not "Focus Not Obscured" — "Focus Not Obscured (Minimum)" is 2.4.11, AA',
+      ],
+      [
+        ["// a ring is needed for WCAG 2.4.13 Focus Appearance, which is AA"],
+        "2.4.13 Focus Appearance is AAA, stated here as AA",
+      ],
+      [
+        ["// the shared 44x44 floor, WCAG 2.5.5 Target Size, which is AA"],
+        "2.5.5 Target Size (Enhanced) is AAA, stated here as AA",
+      ],
+    ] as [string[], string][]) {
+      expect(faultsIn(...broken), broken.join(" ⏎ ")).toEqual([correction]);
     }
+
+    // ── The (Minimum)/(Enhanced) inversion ──────────────────────────────────
+    //
+    // The qualifier is where the level lives in these two families, so inverting
+    // it is a full weld even though the name is right — and it is the weld this
+    // repo has actually shipped twice, in `note-field.tsx` and
+    // `row-menu-viewport-fit.spec.ts`. All four of these passed **green** until
+    // the qualifier became a field on `CRITERION_SPEC` instead of a trailing
+    // comment beside it, which is a guard naming a precedent it could not see.
+    for (const [broken, correction] of [
+      [
+        ["// 2.5.5 Target Size (Minimum), which is AAA"],
+        '2.5.5 is "Target Size (Enhanced)", not "Target Size (Minimum)" — "Target Size (Minimum)" is 2.5.8, AA',
+      ],
+      [
+        ["// 2.5.8 Target Size (Enhanced), at 24x24 — AA"],
+        '2.5.8 is "Target Size (Minimum)", not "Target Size (Enhanced)" — "Target Size (Enhanced)" is 2.5.5, AAA',
+      ],
+      [
+        ["// 2.4.11 Focus Not Obscured (Enhanced) is AA"],
+        '2.4.11 is "Focus Not Obscured (Minimum)", not "Focus Not Obscured (Enhanced)" — "Focus Not Obscured (Enhanced)" is 2.4.12, AAA',
+      ],
+      [
+        ["// 2.4.12 Focus Not Obscured (Minimum) is AAA"],
+        '2.4.12 is "Focus Not Obscured (Enhanced)", not "Focus Not Obscured (Minimum)" — "Focus Not Obscured (Minimum)" is 2.4.11, AA',
+      ],
+      // Name-less, which `CITED_CRITERION` cannot match at all. Three scanned
+      // files write citations this way, so without the second pass the guard
+      // would read every one of them as nothing at all.
+      [
+        ["// 2.5.8 (Enhanced), at 24x24"],
+        '2.5.8 is "Target Size (Minimum)", not "(Enhanced)" — "Target Size (Enhanced)" is 2.5.5, AAA',
+      ],
+      // A qualifier on a criterion that has no Minimum/Enhanced variant.
+      [
+        ["// 2.4.13 Focus Appearance (Minimum) is AAA"],
+        '2.4.13 is "Focus Appearance", not "Focus Appearance (Minimum)"',
+      ],
+    ] as [string[], string][]) {
+      expect(faultsIn(...broken), broken.join(" ⏎ ")).toEqual([correction]);
+    }
+
+    // ── The correction must name the RIGHT criterion, or none ───────────────
+    //
+    // `find` on the name alone answered "Focus Not Obscured is 2.4.11, AA" for a
+    // citation qualified `(Enhanced)`, sending an author who meant 2.4.12 at AAA
+    // to renumber to 2.4.11 at AA. A guard whose stated purpose is naming the
+    // right answer must not name a wrong one, and when the name genuinely does
+    // not resolve it says so instead of picking the first match.
+    expect(faultsIn("// 2.4.13 Focus Not Obscured (Enhanced) is AAA")).toEqual([
+      '2.4.13 is "Focus Appearance" (AAA), not "Focus Not Obscured" — "Focus Not Obscured (Enhanced)" is 2.4.12, AAA',
+    ]);
+    expect(faultsIn("// 2.4.13 Focus Not Obscured is AA")).toEqual([
+      '2.4.13 is "Focus Appearance" (AAA), not "Focus Not Obscured" — "Focus Not Obscured" is ambiguous without a qualifier: 2.4.11 (Minimum), AA or 2.4.12 (Enhanced), AAA',
+    ]);
+
+    // ── A capital "A" is usually the article, not a level ───────────────────
+    //
+    // `/\b(AAA|AA|A)\b/` read the article and reported a correct AAA citation as
+    // level A. This guard scans `CLAUDE.md`, `CHANGELOG.md` and `AGENTS.md`, so
+    // that reds an unrelated author's MR for beginning a sentence with "A " near
+    // a citation — and this MR rewrote fourteen comments of exactly that shape.
+    //
+    // Deleting the `A` alternative was the other candidate fix and it is worse:
+    // it also stops catching a AAA criterion understated as A, which is the
+    // direction #258's own weld failed in. Both directions are pinned here.
+    expect(
+      faultsIn("// 2.4.13 Focus Appearance. A hue change carries no area."),
+    ).toEqual([]);
+    expect(faultsIn("// 2.4.13 Focus Appearance, which is A")).toEqual([
+      "2.4.13 Focus Appearance is AAA, stated here as A",
+    ]);
+    expect(faultsIn("// 2.5.3 Label in Name, which is A")).toEqual([]);
 
     // The two 80-column wrap shapes, asserted on the CORRECTION rather than on
     // "some fault", because `.not.toEqual([])` does not discriminate the reader
@@ -1209,7 +1454,7 @@ describe("WCAG criterion citations (#258)", () => {
       ["// not a colour swap: WCAG 2.4.11 Focus", "// Appearance is not met"],
     ]) {
       expect(faultsIn(...wrapped), wrapped.join(" ⏎ ")).toEqual([
-        '2.4.11 is "Focus Not Obscured" (AA), not "Focus Appearance" — "Focus Appearance" is 2.4.13, AAA',
+        '2.4.11 is "Focus Not Obscured (Minimum)" (AA), not "Focus Appearance" — "Focus Appearance" is 2.4.13, AAA',
       ]);
     }
 
@@ -1238,9 +1483,67 @@ describe("WCAG criterion citations (#258)", () => {
       "// carries none of 2.4.13 Focus Appearance's area or its contrast (AAA)",
       "// WCAG 2.4.11 — the UA outline is removed, so the ring has to paint",
       "// 2.4.7 has no threshold of its own, which is the whole problem",
+      // The name-less qualifier shape, correct. `note-field.tsx`,
+      // `shopping-list.tsx` and `row-menu-viewport-fit.spec.ts` all write it.
+      "// 2.5.8 (Minimum), at 24x24, is the AA floor",
+      // ...and with a level inside the same bracket, which `a11y-class-hygiene.ts`
+      // itself writes, so a strict `\\)` after the qualifier would skip it.
+      "// 2.5.8 (Minimum, AA) against 2.5.5 (Enhanced, AAA)",
+      // A parenthesised NAME, which ten files write. Legal, and honestly not
+      // policed: see the note on `CITED_CRITERION`.
+      "// satisfying WCAG 2.5.3 (Label in Name) for voice control",
     ]) {
       expect(faultsIn(honest), honest).toEqual([]);
     }
+  });
+
+  it("bounds the level search by index, not by slicing the text first", () => {
+    // `LEVEL_PROXIMITY` is the one magic number in this reader, and until #258's
+    // review it was the one thing with no control at all: reverting the
+    // search-then-bound fix reddened **none** of the sixteen fixtures above. The
+    // honest fixtures are structurally unable to reach it, because `faultsIn`
+    // passes only the fixture lines, so the remainder is about thirty characters
+    // and never runs past the bound. The comment claiming they covered it was
+    // wrong, and this is what actually covers it.
+    //
+    // The bug needs a level token that STRADDLES the bound. Slicing first —
+    // `text.slice(from, from + LEVEL_PROXIMITY)` — truncates `AAA` to `AA`, and
+    // the pattern matches the fragment against the end of the slice, so a
+    // CORRECT AAA citation is reported as AA. Searching the whole remainder and
+    // then bounding the match's index cannot do that.
+    //
+    // Offsets are computed and asserted rather than hand-spaced, because a
+    // hand-spaced fixture is exactly what failed here: the one documented as
+    // pinning this put `AAA` at offset 25, comfortably inside a 40-char window.
+    const cite = "2.4.13 Focus Appearance";
+    const probe = (fillerLength: number, level: string) => {
+      // Lowercase filler — a capitalised word would be swallowed into the name.
+      const { text } = flatten(
+        `// ${cite} ${"y".repeat(fillerLength)} ${level} is stated`,
+      );
+      const rest = text.slice(text.indexOf(cite) + cite.length);
+      return {
+        offset: rest.indexOf(level),
+        faults: citationFaults(text).map(({ fault }) => fault),
+      };
+    };
+
+    // Correct AAA, straddling the bound: starts inside it and ends outside.
+    const straddling = probe(LEVEL_PROXIMITY - 4, "AAA");
+    expect(straddling.offset).toBe(LEVEL_PROXIMITY - 2);
+    expect(straddling.faults).toEqual([]);
+
+    // Wrong level, comfortably inside the bound: read, and reported.
+    const inside = probe(10, "AA");
+    expect(inside.offset).toBeLessThan(LEVEL_PROXIMITY);
+    expect(inside.faults).toEqual([
+      "2.4.13 Focus Appearance is AAA, stated here as AA",
+    ]);
+
+    // Wrong level, past the bound: somebody else's sentence, so not ours.
+    const outside = probe(LEVEL_PROXIMITY, "AA");
+    expect(outside.offset).toBeGreaterThan(LEVEL_PROXIMITY);
+    expect(outside.faults).toEqual([]);
   });
 
   it("reports the line a citation is actually on, wrap and all", () => {
