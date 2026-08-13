@@ -113,9 +113,28 @@ export const STRINGS = {
   // nag; it clears only on an explicit move out). An unbroken-down Multi-step task
   // is a legitimate permanent resting state, which is why this is a real
   // destination and not a staging step.
+  //
+  // ⚠️ "**Add** as multi-step to-do", not "**Break into** multi-step to-do" — the
+  // owner's call from the review app, and it does two things. It parallels
+  // `action.addTodoFull` ("Add as single-task to-do") directly beneath it in the
+  // list, so the two park-into-a-bucket actions share one construction; and it drops
+  // the "Break" prefix, which now belongs to the NAVIGATING entry alone. Before, the
+  // parking entry and the navigating entry both opened with "Break" and were too
+  // close to tell apart at a glance — the entry that parks read like the entry that
+  // moves you.
+  //
+  // The KEY still says `breakdownFull` and its value no longer does. Deliberate:
+  // `t()` is a public surface a self-hoster's voice override reaches by key, so
+  // renaming it is the breaking half of the change for no user-visible gain. Read
+  // the value, not the key.
+  //
+  // Keeps its own 🍿 rather than borrowing `action.addTodoFull`'s 🍽️: the playful
+  // column is frozen while #86 decides whether that voice survives, so a rename
+  // carries the existing emoji onto the new words. It also means the two "Add as …"
+  // entries diverge at character 1 in playful, which is stronger than plain manages.
   "action.breakdownFull": {
-    plain: "Break into multi-step to-do",
-    playful: "🍿 Break into multi-step to-do",
+    plain: "Add as multi-step to-do",
+    playful: "🍿 Add as multi-step to-do",
   },
   // ⚠️ The NAVIGATING twin, and it is a separate key from `prompt.breakNow` on
   // purpose — they used to be one, and #253 F1 split them.
@@ -145,9 +164,18 @@ export const STRINGS = {
   // applied to a navigating action, the same shape as `action.startFocusTimer`
   // ("Start visual focus timer"). Imperative, no question mark, and distinct from
   // both inline siblings in both voices.
+  //
+  // ⚠️ "Break down in the editor", not "Break **it** down in the editor" — owner's
+  // call. Every other entry in this list is verb-first with no pronoun (`Add as
+  // single-task to-do`, `Save for later`, `Mark as completed`, `Add to calendar`), so
+  // the pronoun made this one read as a sentence fragment among imperatives. Shorter
+  // too, and the shortening was re-checked against every sibling on the row for
+  // equality, prefix and containment in both voices — see the guard at the foot of
+  // `strings.test.ts`, which is there because the FIRST attempt at this label was
+  // character-identical to `action.breakdown`.
   "action.breakNow": {
-    plain: "Break it down in the editor",
-    playful: "🍿 Break it down in the editor",
+    plain: "Break down in the editor",
+    playful: "🍿 Break down in the editor",
   },
   "action.addTodoFull": {
     plain: "Add as single-task to-do",
@@ -257,7 +285,7 @@ export const STRINGS = {
   //
   // The one destination the canonical ▾ entries did not already cover when the
   // nested `Move to…` picker was removed: `ACTION_FOR_BUCKET` maps five buckets and
-  // the entries cover four of them (`Break into multi-step to-do` → multiStep,
+  // the entries cover four of them (`Add as multi-step to-do` → multiStep,
   // `Add as single-task to-do` → singleTask, `Save for later` → savedLater,
   // `Mark as completed` → completed), leaving `needsReview → moveToReview` reachable
   // only through the picker on three of the four renderers.

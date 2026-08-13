@@ -569,7 +569,7 @@ describe("#163 the keyboard path", () => {
       // way to another bucket is a drag.
       const MOVE_ENTRIES = [
         "Send back to review",
-        "Break into multi-step to-do",
+        "Add as multi-step to-do",
         "Add as single-task to-do",
         "Save for later",
       ];

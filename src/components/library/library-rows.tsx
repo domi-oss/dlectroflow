@@ -341,7 +341,7 @@ export function LibraryRows({
                              and `library/page.tsx` resolves no dispatcher), so an
                              entry would be new capability rather than a restored
                              route. Not this issue's to add.
-                           • No `Break into multi-step to-do` / `Add as single-task
+                           • No `Add as multi-step to-do` / `Add as single-task
                              to-do`. Both tabs here are ALREADY triaged — `plated` IS
                              the single-task bucket and `pantry` the saved one — so
                              one names what the row already is and the other has no

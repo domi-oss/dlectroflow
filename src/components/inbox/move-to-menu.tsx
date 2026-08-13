@@ -35,7 +35,7 @@ import {
  *
  * This was two variants — a compact 📥 icon and a full-width "Move to…" text entry
  * for a row's ▾ list. The text entry is REMOVED from every ▾, because the canonical
- * list's own entries name the same destinations: `Break into multi-step to-do`,
+ * list's own entries name the same destinations: `Add as multi-step to-do`,
  * `Add as single-task to-do`, `Save for later` and `Mark as completed` are four of
  * the five buckets in `ACTION_FOR_BUCKET`, and the fifth (`needsReview`) now has its
  * own `action.sendToReview` entry on each row that needed one. A nested picker

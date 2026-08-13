@@ -3223,7 +3223,7 @@ export function InboxView({
                                     // The two were one key until #253 F1 split them:
                                     // a menu entry is a command, so this reads as an
                                     // imperative that names where it takes you
-                                    // ("Break it down in the editor"), while the
+                                    // ("Break down in the editor"), while the
                                     // card's red button keeps "Break into steps
                                     // now?" — a question is the right register on a
                                     // card, and it is the only thing that visually
@@ -3457,7 +3457,7 @@ export function InboxView({
                                    is the identical expression in both places, and that
                                    is now the point rather than the objection.
 
-                                   Not `Break into multi-step to-do` / `Add as
+                                   Not `Add as multi-step to-do` / `Add as
                                    single-task to-do`: this row IS the single-task
                                    bucket, so one is what it already is and the other is
                                    reached by `Move to… → Multi-step`. */
@@ -3469,7 +3469,7 @@ export function InboxView({
                                   // three are added, all through `moveItemToBucket` so
                                   // the behaviour is identical to the picker's.
                                   //
-                                  // ⚠️ `Break into multi-step to-do` on THIS row parks
+                                  // ⚠️ `Add as multi-step to-do` on THIS row parks
                                   // the item in Multi-step with a "Break into steps
                                   // now?" CTA (`requestBreakdown`) — what
                                   // `Move to… → Multi-step` always did here. On the
@@ -4656,7 +4656,7 @@ function ItemRow({
 
                ⚠️ **The nested `Move to…` picker is GONE, and this list is why.**
                The owner's observation on seeing it rendered: the four entries below
-               ARE the buckets — `Break into multi-step to-do` → Multi-step,
+               ARE the buckets — `Add as multi-step to-do` → Multi-step,
                `Add as single-task to-do` → Single-task, `Save for later` → Saved,
                `Mark as completed` → Completed — so a submenu offering the same four
                was a second route to the same places, one tap deeper, and the only

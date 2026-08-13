@@ -128,7 +128,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
    * absences are asserted too, so a later "consistency" pass cannot quietly add
    * capability this surface has no plumbing for:
    *   • no `Move to…` — there is no bucket-move dispatcher on this page at all;
-   *   • no `Break into multi-step to-do` / `Add as single-task to-do` — both tabs are
+   *   • no `Add as multi-step to-do` / `Add as single-task to-do` — both tabs are
    *     already triaged, so one names what the row is and the other has no handler;
    *   • no `Edit time estimate` — `EstimateEditor` is a permanently-visible 44px
    *     control on the row's meta line, so a ▾ twin would be the `editMenuItem`
@@ -167,7 +167,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       ).toHaveLength(1);
       for (const absent of [
         "Move to…",
-        "Break into multi-step to-do",
+        "Add as multi-step to-do",
         "Add as single-task to-do",
         "Edit time estimate",
       ]) {

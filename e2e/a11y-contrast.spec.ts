@@ -387,7 +387,7 @@ for (const theme of THEMES) {
       // Multi-step with this CTA instead of navigating into the editor — is reached
       // from a SINGLE-TASK row's ▾. On a Needs-review row the same label runs
       // `startBreakdown`, which opens the editor and would never render the CTA at
-      // all. So: capture → Add as single-task to-do → Break into multi-step to-do.
+      // all. So: capture → Add as single-task to-do → Add as multi-step to-do.
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
       await row.getByRole("button", { name: "All options" }).click();
@@ -400,7 +400,7 @@ for (const theme of THEMES) {
       await expect(singleTaskRow).toBeVisible();
       await singleTaskRow.getByRole("button", { name: "All options" }).click();
       await singleTaskRow
-        .getByRole("button", { name: "Break into multi-step to-do" })
+        .getByRole("button", { name: "Add as multi-step to-do" })
         .click();
 
       const multiStepRow = page

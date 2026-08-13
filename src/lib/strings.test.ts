@@ -92,8 +92,8 @@ describe("t() function", () => {
     // The app-wide sweep of the same rule is #259; #253 renames only the ▾ entries
     // it renders. Both voices are pinned here because the rename has to carry the
     // playful variant with it (#86) — same emoji, new words.
-    ["action.breakdownFull", "plain", "Break into multi-step to-do"],
-    ["action.breakdownFull", "playful", "🍿 Break into multi-step to-do"],
+    ["action.breakdownFull", "plain", "Add as multi-step to-do"],
+    ["action.breakdownFull", "playful", "🍿 Add as multi-step to-do"],
     // #253 F1 — the navigating twin, split off `prompt.breakNow`. Both are pinned
     // here BY VALUE because the whole point of the split is that they diverge: the
     // menu entry is an imperative, the card's CTA keeps its question mark. A future
@@ -102,8 +102,8 @@ describe("t() function", () => {
     // It must also stay distinct from `action.breakdown`, the SHORT inline CTA on the
     // same row — a dedicated case for that sits at the foot of this file, because a
     // value assertion alone would not notice the two converging.
-    ["action.breakNow", "plain", "Break it down in the editor"],
-    ["action.breakNow", "playful", "🍿 Break it down in the editor"],
+    ["action.breakNow", "plain", "Break down in the editor"],
+    ["action.breakNow", "playful", "🍿 Break down in the editor"],
     ["action.addTodoFull", "plain", "Add as single-task to-do"],
     ["action.addTodoFull", "playful", "🍽️ Add as single-task to-do"],
     ["action.saveShort", "plain", "Save"],
@@ -861,6 +861,54 @@ describe("the break-up labels stay distinct (#253 F1)", () => {
           inline.startsWith(entry),
           `"${entry}" is a prefix of "${inline}" in ${voice} voice`,
         ).toBe(false);
+      }
+    },
+  );
+
+  /**
+   * ── The ▾'s own entries, which now share a construction on purpose ───────────
+   *
+   * The owner's rename made `action.breakdownFull` "Add as multi-step to-do" so it
+   * parallels `action.addTodoFull` ("Add as single-task to-do") beneath it. That is
+   * the right call for scannability AND it creates exactly the condition this file
+   * guards: two labels sharing the prefix `Add as ` that **co-occur in one list**.
+   *
+   * Asserted rather than assumed to be fine. Sharing a leading substring is
+   * harmless; what defeats a voice command or a `getByRole` name is one label being
+   * EQUAL to, a PREFIX of, or CONTAINED IN another. These two diverge at "multi" vs
+   * "single", so none of the three holds — and in playful they diverge at character 1
+   * (🍿 against 🍽️), which is stronger still.
+   *
+   * `action.addToCalendar` is in the set because it also opens with "Add " and sits in
+   * the same list, which the two-entry framing would have missed.
+   */
+  const sameList = [
+    "action.breakNow",
+    "action.breakdownFull",
+    "action.addTodoFull",
+    "action.saveForLater",
+    "action.completeFull",
+    "action.addToCalendar",
+    "action.delete",
+  ] as const;
+
+  it.each(["plain", "playful"] as const)(
+    "no ▾ entry is equal to, a prefix of, or contained in another (%s)",
+    (voice) => {
+      const rendered = sameList.map((k) => [k, t(k, voice)] as const);
+      for (const [ka, a] of rendered) {
+        for (const [kb, b] of rendered) {
+          if (ka === kb) continue;
+          expect(a, `${ka} equals ${kb}`).not.toBe(b);
+          expect(
+            b.startsWith(a),
+            `${ka} ("${a}") is a prefix of ${kb} ("${b}")`,
+          ).toBe(false);
+          expect(
+            b.includes(a),
+            `${ka} ("${a}") is contained in ${kb} ("${b}")`,
+          ).toBe(false);
+        }
       }
     },
   );
