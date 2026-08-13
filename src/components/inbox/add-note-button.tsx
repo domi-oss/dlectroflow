@@ -112,7 +112,7 @@ export function AddNoteButton({
         // its content and centring pushed the pair off the left edge.
         touchTarget,
         // `focus-visible:ring-2` and not a colour swap: a change of hue alone
-        // leaves nothing an indicator (2.4.7 Focus Visible, AA) and carries
+        // leaves no indicator to see (2.4.7 Focus Visible, AA) and carries
         // neither the area nor the focused/unfocused contrast of 2.4.13 Focus
         // Appearance (AAA, the stronger bar this repo chooses). axe implements no
         // rule for either — see a11y-class-hygiene.ts, and #258 for why the

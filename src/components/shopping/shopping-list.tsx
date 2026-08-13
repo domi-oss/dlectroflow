@@ -729,9 +729,15 @@ export function ShoppingList({
   // (Enhanced, AAA); the AA one is 2.5.8 (Minimum) at 24x24. And the focus
   // indicator is a RING rather than a background swap: a hover-coloured
   // background alone leaves nothing visible (2.4.7 Focus Visible, AA) and the
-  // ring is what clears 2.4.13 Focus Appearance (AAA) too. axe implements no rule
-  // for any of them, so the broken version would ship green (#117, #258). --ring
-  // is the same token app-menu.tsx measured.
+  // ring is what clears 2.4.13 Focus Appearance (AAA) too.
+  //
+  // axe ships no rule for either focus criterion, and the one rule it does have
+  // for target size is not selected by the tags `axe-helpers.ts` requests — so
+  // the broken version would ship green on both counts (#117, #258). Spelled out
+  // rather than left as "no rule for any of them", which was false: axe does
+  // implement 2.5.8, and that over-generalisation is the one #258 already had to
+  // correct in a11y-class-hygiene.ts's header. --ring is the same token
+  // app-menu.tsx measured.
   const ICON_BUTTON =
     "text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md px-2 text-xs outline-none focus-visible:ring-2";
 
