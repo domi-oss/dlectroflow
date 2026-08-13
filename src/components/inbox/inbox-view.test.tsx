@@ -2412,8 +2412,16 @@ describe("InboxView — Move to… menu dispatch", () => {
     //     subject survives intact;
     //   • needs-review → `startBreakdown`, which navigates into the editor.
     // Both land in the same bucket, which is what the shared label names; the
-    // difference in what happens next predates this change. Parking a NEEDS-REVIEW
-    // row without navigating is now drag-only, which is stated in #253.
+    // difference in what happens next predates this change, and the owner's call
+    // on #253 is to keep the split rather than reopen a settled interaction.
+    //
+    // The consequence, scoped precisely because the loose version of this sentence
+    // contradicted a sibling spec: parking a Needs-review row **in MULTI-STEP**
+    // without navigating is now drag-only. Parking one generally is NOT — its ▾
+    // still carries `Save for later`, which is `dropPlan(needsReview →
+    // savedLater)` and navigates nowhere. `inbox-view.drag.test.tsx` presses
+    // exactly that entry, so an unqualified "parking is drag-only" here would have
+    // been contradicted by the same MR one file over.
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(
       await within(row).findByRole("button", {

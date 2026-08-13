@@ -97,8 +97,13 @@ export function popupSurface(className?: string): string {
  * fix rather than a stylistic preference.
  *
  * Deleting the row's trailing icon cluster left the ▾ list as the only route to
- * Move to and to Schedule, and both of those entries open a second floating layer
- * of their own inside it. Base UI restores focus on close by itself — but
+ * Schedule, which opens a second floating layer of its own inside it. The nested
+ * Move-to list has the same shape and the same bug, reached from the inline 📥 on
+ * the idle Saved row and the Done row — not from a ▾ entry, since the later
+ * "Move to…" entry removal took that entrance away. Both callers are why this is
+ * a shared helper rather than a fix inside `RowActions`.
+ *
+ * Base UI restores focus on close by itself — but
  * ASYNCHRONOUSLY, and it loses a race to the enclosing list. `Popover.Popup`
  * (which `RowActions` renders the ▾ list as) mounts its focus manager with
  * `restoreFocus: "popup"`, whose `focusout` handler fires in a microtask and
@@ -137,9 +142,16 @@ export function restoreFocusToTrigger(trigger: HTMLElement | null): void {
  * used to be a full mirror: every entry it held was also a 44px control on the
  * row itself (📥 move, 📅 schedule, 🗑 delete) or a permanently-visible inline
  * button. Deleting the trailing icon cluster leaves the list as the ONLY route to
- * Move to, Snooze, Schedule, Add to calendar, Edit and Delete — so an entry that
- * was a convenience at ~24px is now the whole affordance, and one of them deletes
- * a task.
+ * Schedule, Add to calendar, Edit and Delete — so an entry that was a convenience
+ * at ~24px is now the whole affordance, and one of them deletes a task.
+ *
+ * ⚠️ `Move to` and `Snooze` were in that sentence and have been struck from it,
+ * because both were removed from the list later in this same issue and the list is
+ * not a route to either: the nested Move-to picker is now reached only from the
+ * inline 📥 on the idle Saved row and the Done row, and `Snooze 1h` went by the
+ * owner's decision, its 60-minute write still reachable through `Save for later`.
+ * The destinations the picker used to offer are named directly by the list's own
+ * entries instead, which are already at this size.
  *
  * `min-h-11` + `min-w-11` rather than `touchTarget`, which also sets
  * `justify-center` and would centre the label in a left-aligned list. The width
@@ -154,12 +166,22 @@ export function restoreFocusToTrigger(trigger: HTMLElement | null): void {
  *
  * ── Deliberately NOT everything in a row popup ─────────────────────────────
  *
- * `MoveToMenu`'s nested bucket items keep their existing size. They were already
- * the sole route to a given bucket before #253 — both the compact 📥 and the text
- * "Move to…" open the same nested list — so nothing this issue does changes their
- * reachability. Sizing them is #205's sweep, not this one. The line drawn here is
- * "entries whose sole-route status THIS change creates", which is checkable
- * against the diff rather than a matter of taste.
+ * `MoveToMenu`'s nested bucket items keep their existing size, and their
+ * reachability is not narrowed by this issue — it is WIDENED. Those items were
+ * always the sole route to a given *bucket* from the row they sit on; what this
+ * issue removed was one of two ENTRANCES to the same nested list (the full-width
+ * "Move to…" entry), while adding explicit destination entries to every ▾ that
+ * needed them, each already at 44px via `rowMenuEntry`. So the buckets those
+ * items reach now have a 44px route they did not have before.
+ *
+ * ⚠️ Do NOT read this as "#205 will size them". That issue's method is to grep
+ * `py-1` under `inbox/` and `library/` and then DISCARD every file containing
+ * `touchTarget` — and `move-to-menu.tsx` contains it, for its trigger. Its sweep
+ * structurally cannot see these items, so a deferral pointing there would go
+ * nowhere. They are unsized on the merits above, not parked.
+ *
+ * The line drawn here is "entries whose sole-route status THIS change creates",
+ * which is checkable against the diff rather than a matter of taste.
  */
 export function rowMenuEntry(className?: string): string {
   return cn(

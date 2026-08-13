@@ -85,9 +85,16 @@ export function MoveToMenu({
         modal={false}
         // #253 — hand focus back here rather than leaving it to Base UI's own
         // async restoration, which the enclosing ▾ popover out-races: see
-        // `restoreFocusToTrigger`. This is the ONLY route to a bucket now that
-        // the compact 📥 has gone, so losing the user's place in that list on
-        // every Escape is a WCAG 2.4.3 failure on the row's only move path.
+        // `restoreFocusToTrigger`. On the two rows that still render this — the
+        // idle Saved row and the Done row, neither of which has a ▾ carrying
+        // destinations — it is the only non-drag route to a bucket, so losing the
+        // user's place in the list on every Escape is a WCAG 2.4.3 failure on
+        // those rows' only move path.
+        //
+        // Stated that way rather than "the only route now that the compact 📥 has
+        // gone": this component IS that 📥. What #253 removed is the full-width
+        // "Move to…" entry, and on the rows whose ▾ now names its destinations
+        // there is a second, 44px route. See the docblock above.
         //
         // Runs on the item-select close too, which is what it should do — that
         // is the case move-to-menu.test.tsx already asserts, and it cannot see
