@@ -293,6 +293,49 @@ client component cannot read a non-public env var. So the client holds its own c
 **at least** the server default, and erring long is the safe direction: a generous window only delays
 reclaiming bytes, while a short one deletes a capture whose workspace was going to resolve again.
 
+⚠️ **That reasoning is right and it created two numbers that must agree with nothing watching them.**
+Raised in review of this spec, and it is the correct objection to the paragraph above rather than to the
+design: a client constant and `GUEST_SANDBOX_TTL_HOURS`'s default are now **two surfaces stating the same
+fact**, and an operator who sets `GUEST_SANDBOX_TTL_HOURS=72` moves one of them. The client then expires
+orphans at 24 hours while sandboxes live for 72 — deleting queued captures whose workspace still resolves,
+which is the one outcome this document forbids everywhere else.
+
+**The repo already has the pattern, and it is `log-retention` (#157), not `enum-constraint-sync`.** Review
+pointed at the enum/constraint-sync family, which is the right family and the wrong member; both of the
+obvious candidates are structurally unable to do this:
+
+| Candidate | Why it cannot | Verified |
+|---|---|---|
+| `enum-constraint-sync.integration.test.ts` | Queries `pg_constraint WHERE contype = 'c'` — CHECK constraints and the enum/range/length registries. A TS constant is not a database constraint and is invisible to it | the `WHERE contype = 'c'` line, `src/lib/enum-constraint-sync.integration.test.ts` |
+| `env-drift` | Diffs **key sets** in both directions — a key read in code but undocumented, or documented but unread. `computeConfigSurfaceDrift` takes `Iterable<string>` of *keys* and builds `Set`s; **no value is ever compared**, so a `24` drifting to `72` passes it | `computeConfigSurfaceDrift`, `src/lib/env-drift.ts` |
+| **`log-retention`** | **The right one.** Its module docblock states this exact principle — *"two surfaces stating the same fact must state the same fact"* — and its helpers exist to read a declared default out of one file and compare it against a flag in another | `shellDefault` and `retentionDaysFlags`, `src/lib/log-retention.ts` |
+
+**So the guard follows `log-retention`'s shape**, which is also the shape `CLAUDE.md` prescribes for the
+whole family — a pure module with no `fs` so the parsing is unit-testable on synthetic input, and a
+colocated `.test.ts` that reads the real files:
+
+- **It reads the server default where the server reads it** — the `?? 24` in `src/lib/purge.ts` — and
+  compares it against the client constant. Not `.env.example`, which an operator's real value overrides
+  anyway; the default is the only number the code itself commits to.
+- ⚠️ **It must return `null` rather than a guess when it cannot find either number, and fail on that.**
+  This is `shellDefault`'s own discipline and the reason it is quoted here: *"an absent default fails the
+  … assertion loudly instead of comparing two things that are both missing."* A renamed constant is
+  exactly how this class of guard starts passing vacuously.
+- **The assertion is `client >= server`, not equality.** Erring long is the safe direction, per the
+  paragraph above, so pinning them equal would red CI for a change that is *safe* — and a guard that
+  fails on safe changes is a guard people relax.
+- **The operator override is out of CI's reach and must be said so, not asserted around.** CI can compare
+  the two defaults; it cannot see that a cluster sets `72`. `log-retention` has the same boundary and
+  handles it by reporting **undetermined rather than clean** — so the client constant's own comment
+  carries the operator-facing consequence, and `docs/legal.md`'s **Guest TTL** row gains the orphan
+  window, because that table is already the registry tying this TTL to the three places user-facing prose
+  states it.
+
+**And this is the second reason the retention sentence matters.** The privacy notice now promises a
+three-trigger retention including *"until it can no longer be saved to any account you can reach"* — that
+promise **is** the client constant, stated in prose to a user, so the drift being guarded here is not an
+internal tidiness matter but the accuracy of a legal page.
+
 **`blockedBy` is a persisted field, and both of its values are needed.** An
 earlier draft of this document had neither — it declared the type without it while
 the flush table below said a refusal "marks `needsSignIn`", and it collapsed two
@@ -703,7 +746,43 @@ in the spec rather than being left to the implementer:
    CSPRNG but not the convenience method.
 3. **A clock-and-counter fallback**, `clk-<base36 ms, padded to 9>-<base36 sequence, padded to 6>`, for a
    browser with no CSPRNG at all. The module-scoped counter is what makes two calls in the same
-   millisecond distinct — two capture bars on one page, or a flush racing a fresh capture.
+   millisecond distinct — two capture surfaces on one page (`createBrainDumpItem` has two non-test callers
+   on `main`, `inbox-view.tsx` and `breakdown-chat.tsx`), or a double-press on submit.
+
+   ⚠️ **The counter is scoped to a JS realm, so it is per-TAB, not per-origin — and this document treats
+   multi-tab as ordinary.** Raised in review of this spec, and the mechanism is real: two tabs each load
+   their own module instance, each counter starts at zero, so two tier-3 realms minting in the same
+   millisecond produce the **same key**. Under `@@unique([workspaceId, clientKey])` the second is read as a
+   replay, the route answers `200 — already saved`, and **the capture is silently lost** — precisely the
+   failure the tier list exists to prevent, and it must not be waved away on a document with a whole section
+   about two-tab contention.
+
+   ⚠️ **It is nonetheless not reachable, and the reason is worth stating rather than the conclusion.** A key
+   is minted **only** inside `enqueue`, which is only ever called from `submit()` — a user pressing Enter. A
+   flush mints nothing; replaying the existing `clientKey` **is** the idempotency mechanism. So a cross-tab
+   collision needs **two Enter presses, in two different tabs, inside the same millisecond**, which one
+   person cannot do. The reachable version of this — a **double-press**, which is this project's standard
+   bar for "ordinary" rather than hypothetical — happens *within* one tab, and the module-scoped counter
+   already covers it. ⚠️ **An earlier version of this bullet cited *"a flush racing a fresh capture"* as the
+   second reason for the counter, and that was wrong on the document's own mechanism**: the flush has no key
+   to mint.
+
+   ⚠️ **Take the guard anyway, because it costs one comparison and removes the argument entirely.** `enqueue`
+   already holds a **fresh read of the queue inside its CAS window** (see *"Two tabs on one storage key"*),
+   so tier 3 compares its candidate against the `clientKey`s in that read and increments the sequence on a
+   hit. That is collision-free across tabs for every entry **still queued** — which is exactly the window in
+   which a collision causes the loss — at no extra read and no new entropy source. It is deliberately not a
+   new mechanism: this design's rule is that a cheap mechanical guard beats a correctness argument a later
+   reader has to re-derive.
+   - **Residual, stated because a queue-local check cannot cover it:** a collision against a twin that has
+     **already flushed and left the queue** still resolves to `200 — already saved`. It needs the same
+     same-millisecond coincidence, so the reachability above is unchanged and no further guard is
+     warranted — but the check is not a proof of uniqueness and must not be described as one.
+   - **Tier 3's own population is close to empty, which is why none of this is urgent.** `crypto.randomUUID`
+     requires a secure context, so a plain-HTTP origin drops to **tier 2** — and `crypto.getRandomValues`
+     has no secure-context requirement, so tier 3 needs a browser with no Web Crypto at all. Nothing that
+     can run this app is in that set. Tier 3 is a defence against a capability check being wrong, not a
+     browser anyone is using.
 
 ⚠️ **`Math.random()` is deliberately not a tier**, and this is a decision rather than an oversight: it was
 in an earlier implementation and was replaced after a SAST finding. The `clk-` prefix on tier 3 is also
@@ -1655,6 +1734,13 @@ TDD, failing test first, in this order:
      by removing `crypto` from the global, asserting the `clk-` prefix, the padded widths, and — the one
      that matters — that **two calls in the same millisecond differ**. A collision silently makes a distinct
      capture look like a replay and loses it, so the counter is the assertion, not the format.
+     - **Tier 3's cross-tab guard, driven by a colliding queue rather than by two realms.** The test cannot
+       hold two JS realms, and it does not need to: **seed the store with an entry already carrying the key
+       tier 3 is about to mint** (fixed clock, counter at zero) and assert the minted key **differs**. That
+       is the same state a second tab would have produced, reached through the store instead of through
+       concurrency — the property is "does not collide with what is in the queue", and that is testable
+       directly. Control: with **no** colliding entry seeded, the key comes out at sequence zero, so a
+       guard that always increments cannot pass both halves.
    - **The mirror's `blockedBy` carve-out, in both directions.** A mark present in the mirror and absent in
      `localStorage` is **copied in**; a mirror entry with no `localStorage` counterpart is still **deleted,
      not resurrected**. The second is the control: an implementation that generalised the carve-out into
@@ -1683,7 +1769,24 @@ TDD, failing test first, in this order:
      removed, and an entry inside it is **kept**. The kept case is the assertion that matters, because
      an expiry that fires early destroys unsaved words, which is the one thing this feature exists to
      prevent. Drive it with a fake clock, never a real wait.
-2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
+2. **The orphan-window drift gate** — a **new hygiene test in the `log-retention` family**, not a case in
+   the queue module's suite, because it asserts on the repo rather than on behaviour. Same shape as the
+   rest of that family and as `CLAUDE.md` prescribes: **a pure module with no `fs`**, unit-tested on
+   synthetic input, plus a colocated `.test.ts` that reads the real files.
+   - It extracts the `?? 24` default from `src/lib/purge.ts` and the client orphan constant from the queue
+     module, and asserts **client ≥ server**. Not equality — erring long is safe, and a gate that reds on a
+     safe change is a gate someone relaxes.
+   - ⚠️ **Both extractors return `null` when they cannot find their number, and `null` fails the
+     assertion.** This is the one line that stops the whole gate passing vacuously after a rename, and it
+     is lifted from `shellDefault`'s own docblock: *"an absent default fails the … assertion loudly instead
+     of comparing two things that are both missing."* Assert it directly — feed the parser a file with the
+     constant renamed and require a failure.
+   - **The parser is a string scan, not a `RegExp` built from its argument.** `regexp-source-hygiene` is a
+     compensating control for a demoted CWE-185 rule and would reject the regex form; `log-retention`'s own
+     docblock records making exactly this choice for exactly this reason.
+   - **It cannot see an operator's real `GUEST_SANDBOX_TTL_HOURS`**, and says so rather than implying
+     coverage — the same boundary `log-retention` handles by reporting undetermined rather than clean.
+3. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
    - **CSRF, both arms**: a mismatched `Origin` is refused **and writes no row**; a **missing** `Origin`
@@ -1696,11 +1799,11 @@ TDD, failing test first, in this order:
      the matching-origin case the first arm already covers. A third test would assert the same thing
      twice while reading as though it had exercised the worker — the shape of false coverage this repo's
      hygiene tests exist to catch. The worker path is a claim about which `Origin` a worker sends, which
-     is a platform guarantee, not a branch in this route; it is asserted in the worker tests (5) where
+     is a platform guarantee, not a branch in this route; it is asserted in the worker tests (6) where
      there is a worker to assert about.
    - The CSRF refusal **does not** carry the `409` or `403` user-facing copy. Asserted, because those
      sentences tell the user to sign in, and a request they never made must not.
-3. **Migration** — the `@@unique([workspaceId, clientKey])` index exists, the same `clientKey` in two
+4. **Migration** — the `@@unique([workspaceId, clientKey])` index exists, the same `clientKey` in two
    different workspaces yields two rows, and multiple null `clientKey`s coexist. This gets **its own
    integration test** (`src/lib/braindump-client-key-unique.integration.test.ts`) and is **not**
    registered in `enum-constraint-sync.integration.test.ts` — an earlier draft of this section said it
@@ -1708,7 +1811,7 @@ TDD, failing test first, in this order:
    constraints and the enum, array-containment, numeric-range and text-length registries. A unique
    *index* is not a CHECK and is invisible to it, so adding a line to its registry would have asserted
    nothing while reading as covered.
-4. **`inbox-view.tsx`** — the strip's **content** renders only when the queue is non-empty, and the
+5. **`inbox-view.tsx`** — the strip's **content** renders only when the queue is non-empty, and the
    flush triggers fire. ⚠️ **This item said "the strip renders only when the queue is non-empty", and
    that contradicted the a11y contract in the same breath as asserting it.** If the live regions arrive
    with the strip then the strip's first paint *is* their first message, which is exactly the
@@ -1746,13 +1849,13 @@ TDD, failing test first, in this order:
    - **`aria-expanded` tracks the collapse toggle**, both values.
    - **`capture-failure-pile-up` in `inbox-view.test.tsx` will change**, which is intended and was
      predicted on #175 on 8 Aug: a second failure no longer displaces the first.
-5. **Worker and the mirror** — the `sync` handler drains the store, in a worker context, with the
+6. **Worker and the mirror** — the `sync` handler drains the store, in a worker context, with the
    capability check exercised both ways. Mount reconciliation is asserted in **both directions
    separately**: an IndexedDB entry with no `localStorage` counterpart is deleted, **and** a
    `localStorage` entry missing from IndexedDB is re-mirrored and re-registered for `sync`. One test
    covering "the queue still matches after mount" passes a one-way implementation, which is exactly
    how the missing direction survived this spec's first draft.
-6. **e2e** — extend `e2e/smoke/brain-dump.spec.ts` using Playwright's `context.setOffline(true)`:
+7. **e2e** — extend `e2e/smoke/brain-dump.spec.ts` using Playwright's `context.setOffline(true)`:
    capture offline, reload the page, assert the words are still queued, go online, assert exactly one
    row lands.
 
@@ -1780,6 +1883,15 @@ nowhere below. **Three artefacts, in this order:**
 matter:** nothing puts user-typed text into browser storage until the strip calls `enqueue` from
 `submit()`. MR 1 ships the module that *could*, with no caller. A notice describing storage that is not
 yet written to would be the mirror image of the omission it exists to fix.
+
+**The orphan window and its drift gate belong to MR 2 as well, for the same reason and one more.** The
+window is only *read* by the expiry sweep, which needs the live-workspace comparison the strip performs, so
+MR 1 has nothing to compare; and the window's user-facing statement is the privacy notice's third retention
+trigger, which is already MR 2's. Putting the constant in MR 1 would land a number whose only two readers —
+the sweep and the notice — both arrive later, and a gate asserting that number against
+`GUEST_SANDBOX_TTL_HOURS` would be guarding a value nothing consumes. ⚠️ **MR 2 must also add the new gate
+to the hygiene-test list in `CLAUDE.md`**, which enumerates the family by name and is how the next person
+learns the check exists; a compensating control missing from that list is one nobody knows not to relax.
 
 ⚠️ **The two are not independent, and MR 2 carries MR 1's safety net.** Found in review of this spec. The
 last CAS attempt writes **without** the comparison (see *"Two tabs on one storage key"*), so an improbable
