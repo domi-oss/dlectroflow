@@ -26,11 +26,12 @@ import {
  *  * #117's menu-entry focus indicator is invisible to axe for a different
  *    reason: **axe ships no rule for any of WCAG 2.2's focus criteria** — that
  *    alone is why no fixture would have caught it, and it is measured in
- *    `a11y-class-hygiene.ts`'s header rather than asserted. The e2e runs also ask
- *    for 2.0/2.1 tags only, but that is *not* the reason and the header says why:
- *    those tags still select three rules carrying a 2.2 tag. The three criteria
- *    and their levels are set out at `findWeakFocusIndicators`; this docblock used
- *    to cite the wrong one of them (#258).
+ *    `a11y-class-hygiene.ts`'s header rather than asserted. The e2e runs asking
+ *    for 2.0/2.1 tags only is a second and independent reason, and that header
+ *    shows it holds by example — axe's one WCAG 2.2 rule is not selected — rather
+ *    than by assumption. The three criteria and their levels are set out at
+ *    `findWeakFocusIndicators`; this docblock used to cite the wrong one of them
+ *    (#258).
  *
  * !188 fixed #95 by seeding the state — backdating a library row by 13 hours so
  * the amber existed during the scan. That works, and it is the right tool for a

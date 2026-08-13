@@ -18,22 +18,30 @@
  *    structurally incapable of seeing it.
  *
  *    Measured against axe-core 4.12.1 on 2026-08-13: 105 rules, none carrying a
- *    `wcag247`, `wcag2411`, `wcag2413` or `wcag1411` tag. Re-measure rather than
- *    trust the sentence — `axe.getRules()` takes one line — because the reason
- *    this header gave until #258 was measured was **wrong**. It said
- *    `e2e/a11y/axe-helpers.ts` asks for `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`
- *    only, "so a 2.2 rule would not run here even if one existed". Those tags
- *    select 69 of the 105 rules, three of which do carry a 2.2 tag (`blink`,
- *    `marquee` and `meta-refresh` are each `wcag2a` as well). The focus criteria
- *    are unobserved because **no rule exists**, full stop; the tag list is not
- *    what hides them, and a coverage claim resting on the wrong mechanism is one
- *    axe upgrade away from being confidently backwards.
+ *    `wcag247`, `wcag2411`, `wcag2413` or `wcag1411` tag. **No rule exists** is
+ *    the load-bearing reason, and `axe.getRules()` re-takes the measurement in one
+ *    line, so re-measure rather than trust this sentence.
  *
- *    The tag list does cost exactly one rule, and it is not a focus one:
- *    `target-size` is the only rule tagged `wcag22aa`, it covers 2.5.8 Target
- *    Size (Minimum) at AA, and those four tags do not select it. Recorded here
- *    rather than fixed, because it is a different gap from this module's and the
- *    same 24x24 floor is cited in `utils.ts`.
+ *    The tag list is a second and independent reason, not a redundant one:
+ *    `e2e/a11y/axe-helpers.ts` asks for `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`,
+ *    which are version-and-level tags, and a criterion new in WCAG 2.2 carries
+ *    `wcag22aa` instead — never `wcag2a`, because it did not exist in 2.0. So a
+ *    2.2 rule would not run here even if axe had one for these criteria. That is
+ *    shown rather than assumed, because axe does ship exactly one: `target-size`,
+ *    the only rule tagged `wcag22aa`, covering 2.5.8 Target Size (Minimum) at AA.
+ *    Those four tags do not select it, so it does not run — a different gap from
+ *    this module's, recorded rather than fixed, and the same 24x24 floor is cited
+ *    in `utils.ts`.
+ *
+ *    Do not re-derive any of this from a grep for `wcag22`. axe has two shapes of
+ *    tag and only one of them is a version: `wcagXYZ` names success criterion
+ *    X.Y.Z, so `wcag221`, `wcag222` and `wcag224` are SC 2.2.1, 2.2.2 and 2.2.4 —
+ *    all WCAG 2.0 — and `blink`, `marquee` and `meta-refresh` carry them next to
+ *    `wcag2a`. A grep counted those three as "2.2 rules that do run" and produced
+ *    a confident correction to this paragraph that was backwards; it was caught by
+ *    reading the paragraph against the tag list it cites. Reading a number as the
+ *    wrong *kind* of thing is #258's own defect one level down, which is why the
+ *    trap is written down instead of just removed.
  *
  *    The criteria and their levels are set out at {@link findWeakFocusIndicators};
  *    they were read off the specification for #258, because the citation this
