@@ -9,6 +9,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   bestEffort,
   recordBookkeepingFailure,
@@ -179,6 +181,106 @@ describe("bestEffort", () => {
         Promise.reject(new TypeError("not a function")),
       ),
     ).resolves.toBeNull();
+  });
+});
+
+/**
+ * ── The exception list must not go stale (Duo review, `!339`, 4th recurrence) ──
+ *
+ * `best-effort.ts` claimed ONE deliberately-bundled tag when there were three, and
+ * an incomplete list undermines the invariant it exists to protect: a future
+ * maintainer reading "any other bundled thunk is a bug" could "fix" a correct site.
+ *
+ * This is the cheap half of a guard, deliberately not a new hygiene module. It
+ * derives the tags that WRAP a bundling callee from the call sites, and requires
+ * each to carry the ⚠️ marker on its union member — so adding a `bestEffort` call
+ * around `rewardStepDone` or `touchStreakOnEngagement` without marking it fails
+ * here rather than in a review six rounds later.
+ *
+ * It does not re-derive which callees bundle; that lives in their docblocks and
+ * changing it is a deliberate act. What it pins is the part that silently drifted.
+ */
+describe("the deliberately-bundled exception list stays complete", () => {
+  const read = (p: string) =>
+    readFileSync(join(__dirname, p), "utf8").replace(/\r\n/g, "\n");
+
+  /** Callees that are themselves a bundle — see their docblocks in `rewards.ts`. */
+  const BUNDLING = ["rewardStepDone", "touchStreakOnEngagement"];
+
+  /** Every `bestEffort("tag", ws, () => callee(...))`, as [tag, callee] pairs. */
+  const callSites = () => {
+    const src =
+      read("../app/actions/focus.ts") + read("../app/actions/breakdown.ts");
+    const out: { tag: string; callee: string }[] = [];
+    const re =
+      /bestEffort\(\s*"([a-z0-9_]+)"\s*,\s*\w+\s*,\s*(?:async\s*)?\(\)\s*=>\s*([\s\S]{0,200}?)\)[,;]/g;
+    for (let m = re.exec(src); m; m = re.exec(src)) {
+      // `includes` rather than a built `new RegExp`: the two names cannot collide
+      // as substrings, and `regexp-source-hygiene` stands in for a demoted SAST
+      // rule (#234) that a pattern interpolating a variable would engage for no
+      // benefit here.
+      const callee = BUNDLING.find((b) => m[2].includes(`${b}(`));
+      if (callee) out.push({ tag: m[1], callee });
+    }
+    return out;
+  };
+
+  /** Tags whose union member carries the ⚠️ marker. */
+  const markedTags = () => {
+    const src = read("./best-effort.ts");
+    const union = src.slice(
+      src.indexOf("export type BookkeepingTag ="),
+      src.indexOf('| "first_focus_badge_failed";'),
+    );
+    // Each member is `/** … */ | "tag"`; a member is marked if its own docblock
+    // contains the warning sign.
+    return new Set(
+      union
+        .split(/\|\s*"/)
+        .slice(1)
+        .map((chunk, i, all) => ({
+          tag: chunk.slice(0, chunk.indexOf('"')),
+          doc: all[i - 1] ?? "",
+        }))
+        .filter((_, i) => i >= 0)
+        .filter(({ tag }) => {
+          const at = union.indexOf(`| "${tag}"`);
+          const before = union.slice(0, at);
+          const docStart = before.lastIndexOf("/**");
+          return docStart >= 0 && before.slice(docStart).includes("⚠️");
+        })
+        .map(({ tag }) => tag),
+    );
+  };
+
+  // The control: the extraction must actually find call sites, or an empty set
+  // would make every assertion below vacuously true.
+  it("finds the call sites that wrap a bundling callee", () => {
+    const sites = callSites();
+    expect(sites.length).toBeGreaterThanOrEqual(3);
+    expect(sites.map((s) => s.tag).sort()).toEqual([
+      "breakdown_streak_touch_failed",
+      "focus_step_reward_failed",
+      "step_done_bookkeeping_failed",
+    ]);
+  });
+
+  it("marks every tag that wraps a bundling callee", () => {
+    const marked = markedTags();
+    // The control for the OTHER side: the marker extraction must find some.
+    expect(marked.size).toBeGreaterThan(0);
+
+    const unmarked = callSites()
+      .filter(({ tag }) => !marked.has(tag))
+      .map(({ tag, callee }) => `${tag} (wraps ${callee})`);
+    expect(unmarked).toEqual([]);
+  });
+
+  // The converse, so the marker cannot be sprinkled on a site that does not need
+  // it — which would make the ⚠️ meaningless by inflation.
+  it("marks nothing that does not wrap a bundling callee", () => {
+    const wrapping = new Set(callSites().map((s) => s.tag));
+    expect([...markedTags()].filter((t) => !wrapping.has(t))).toEqual([]);
   });
 });
 

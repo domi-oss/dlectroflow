@@ -71,25 +71,34 @@
  *
  * Named `<site>_..._failed`, matching `capture_streak_touch_failed`.
  *
- * **One member per consequence a site can lose.** The rule that produces that
- * shape, and its single exception, live on {@link bestEffort} — not repeated here,
- * because a rule written in two places drifts in one of them. Each member below
- * carries only what is local to it: which site, which consequence.
+ * **One member per consequence a site can lose**, with the ⚠️-marked exceptions
+ * below. The rule that produces that shape lives on {@link bestEffort} — not
+ * repeated here, because a rule written in two places drifts in one of them. Each
+ * member below carries only what is local to it: which site, which consequence.
  */
 export type BookkeepingTag =
   /** `confirmBreakdown` — the BreakdownConfirmed points. */
   | "breakdown_points_failed"
   /** `confirmBreakdown` — the once-ever FirstBreakdown badge. */
   | "breakdown_badge_failed"
-  /** `confirmBreakdown` — the qualifying-engagement streak touch. */
+  /**
+   * `confirmBreakdown` — the qualifying-engagement streak touch.
+   *
+   * ⚠️ **Deliberately bundled.** Wraps `touchStreakOnEngagement`, which is itself
+   * five consequences: the `StreakRecord` insert and `Streak` update inside its
+   * transaction, then up to three streak badges. Legitimate under the callee test
+   * on {@link bestEffort} — `streakRecord.aggregate` reads the `StreakRecord` row
+   * that same transaction may have just written, so the BeatBestStreak decision
+   * cannot be separated from the write it measures.
+   */
   | "breakdown_streak_touch_failed"
   /**
    * `completeStep` — `rewardStepDone`: points, streak and ten-steps badge under
    * ONE tag.
    *
-   * ⚠️ **The one deliberately bundled site in this union** — flagged here rather
-   * than only behind the pointer, because a reader who meets three consequences on
-   * one tag needs to know it is a decision without going to look. The dependency
+   * ⚠️ **Deliberately bundled** — one of three such members, flagged at each rather
+   * than only behind the pointer, because a reader who meets several consequences
+   * on one tag needs to know it is a decision without going to look. The dependency
    * that forces it, and the residual it leaves, are in `rewardStepDone`'s docblock
    * (`src/lib/rewards.ts`).
    */
@@ -98,7 +107,18 @@ export type BookkeepingTag =
   | "task_complete_points_failed"
   /** `markTaskCompleted` — the once-ever TaskComplete badge. */
   | "task_complete_badge_failed"
-  /** `completeFocus` — the step payout (points, streak, ten-steps badge). */
+  /**
+   * `completeFocus` — the step payout (points, streak, ten-steps badge).
+   *
+   * ⚠️ **Deliberately bundled, and the same bundle as
+   * `step_done_bookkeeping_failed`** — both wrap `rewardStepDone`, so the one
+   * exception reaches the union under two tags. Missing this was the fourth
+   * recurrence of the bundling class on `!339` (Duo review): a sweep counting
+   * consequences *at the call site* sees one call here and calls it clean, because
+   * the bundling lives one level down in the callee. Same dependency and same
+   * residual as that member; `rewardStepDone`'s docblock is the one place both are
+   * written.
+   */
   | "focus_step_reward_failed"
   /** `completeFocus` — the session-finished bonus, independent of the above. */
   | "focus_session_bonus_failed"
@@ -276,26 +296,49 @@ function isDefect(error: unknown): boolean {
  * payouts to be independent of each other calls this twice, which is what
  * `completeFocus` does.
  *
- * ## ONE CALL PER INDEPENDENT CONSEQUENCE — the rule, and its one exception
+ * ## ONE CALL PER INDEPENDENT CONSEQUENCE — the rule, as a decidable test
  *
- * The thunk is sequential, so **two payouts inside one thunk are not independent
- * of each other**: the first rejection cancels the rest, and the shared tag cannot
- * say which was lost. Duo review found that shape three times on `!339` — in
- * `completeFocus`, `confirmBreakdown` and `markTaskCompleted` — and it is worth
- * naming why it kept recurring: a bundled thunk still satisfies every *aggregate*
- * measure of the fix. One call, one tag, no duplicate tags. The only measure that
- * sees it is **independent consequences per thunk**, counted per call site.
+ * The thunk is sequential, so **two consequences inside one thunk are not
+ * independent of each other**: the first rejection cancels the rest, and a shared
+ * tag cannot say which was lost. Duo review found that shape **four times** on
+ * `!339` — `completeFocus`, `confirmBreakdown`, `markTaskCompleted`, and then this
+ * paragraph's own exception count.
  *
- * So the rule for a caller is: **split unless a later consequence reads what an
- * earlier one wrote.** Not "always split" — the read-after-write case must stay in
- * one unit, because splitting it produces a wrong answer rather than a missing one.
+ * **The rule, stated so a reader can decide a NEW site without consulting a list:**
  *
- * As of `!339` this file's sweep stands at **nine calls across five sites, one
- * consequence each, except `step_done_bookkeeping_failed`** — `rewardStepDone`,
- * the single deliberate exception, which bundles three because
- * `maybeAwardTenStepsDay` counts `logReward`'s row. Its docblock in `rewards.ts`
- * records the dependency and the residual. Any other bundled thunk in this app is
- * a bug, not a decision.
+ * > A thunk may bundle consequences **iff** every consequence after the first reads
+ * > something an earlier one wrote. Otherwise each gets its own call and its own
+ * > tag.
+ *
+ * Phrased as a property rather than an enumeration on purpose. The previous version
+ * said "any other bundled thunk is a bug", which is only protective while the
+ * exception list is complete — and it was incomplete the moment it was written,
+ * because it named one exception when there were three. A list of exceptions rots;
+ * a test does not.
+ *
+ * ## ⚠️ Applying it requires following the call INTO the callee
+ *
+ * This is where three of the four recurrences hid, and it is the part worth
+ * internalising. Counting consequences **at the call site** is not enough: a thunk
+ * can be a single bare `await` and still bundle, because the bundling lives one
+ * level down in what it calls. `bestEffort(tag, ws, () => rewardStepDone(ws))` reads
+ * as one consequence and is three.
+ *
+ * So the question is asked of the **callee**, and the current answers are:
+ *
+ * - `logReward` — one `RewardEvent` insert. Single.
+ * - `awardBadge` — one `Badge` upsert behind an existence check. Single.
+ * - `rewardStepDone` — **bundles 3**, legitimately: `maybeAwardTenStepsDay` counts
+ *   the `RewardEvent` that `logReward` just wrote. Reached under **two** tags,
+ *   `step_done_bookkeeping_failed` and `focus_step_reward_failed`.
+ * - `touchStreakOnEngagement` — **bundles 5**, legitimately: `streakRecord.aggregate`
+ *   reads the `StreakRecord` its own transaction may have just written. Reached
+ *   directly under `breakdown_streak_touch_failed`, and transitively inside
+ *   `rewardStepDone`.
+ *
+ * Three tags therefore wrap a legitimate bundle, and all three carry the ⚠️ marker
+ * on their union member. Both bundling callees record their own dependency and
+ * residual in `src/lib/rewards.ts`; neither is repeated here.
  */
 export async function bestEffort<T>(
   tag: BookkeepingTag,
