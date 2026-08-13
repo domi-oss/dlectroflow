@@ -129,6 +129,29 @@ export const UserRole = {
 } as const;
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
+/**
+ * #252 — longest `User.displayName` we will store.
+ *
+ * Not a guess at how long names get: it is the width the HEADER can absorb. The
+ * label is `truncate`d at 64px on a phone and 160px above `sm`, so anything past
+ * roughly 30 characters is already being clipped, and 60 is double that. The
+ * bound exists so a paste accident cannot put a wall of text through a column
+ * rendered on every page and interpolated into an `aria-label`.
+ *
+ * **Here rather than in `src/app/actions/account.ts`, and that is not a taste
+ * call.** A `"use server"` module may only export async functions — Next refuses
+ * the build outright with "the module has no exports at all" — so a bound shared
+ * by the action that enforces it and the field that sets its `maxLength` from it
+ * cannot live beside the action. One number either way, so the field stops
+ * accepting characters at exactly the length the server accepts and a user cannot
+ * reach a refusal by typing.
+ *
+ * No CHECK constraint mirrors this one: it is a display bound, not a data
+ * invariant, and a longer name arriving from a hand-edited row renders truncated
+ * rather than wrongly.
+ */
+export const MAX_DISPLAY_NAME_LENGTH = 60;
+
 /** `revoked` freezes sign-in immediately; the data is purged later (Phase D). */
 export const UserStatus = {
   Active: "active",

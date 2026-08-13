@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
-import { cn, touchTarget } from "@/lib/utils";
+import { cn, controlSurface, touchTarget } from "@/lib/utils";
 
 // #23 — the `dark` class on <html> is the theme's single source of truth (the
 // pre-hydration inline script sets it, and every toggle writes it), so read it
@@ -73,8 +73,11 @@ export function ThemeToggle({
   // name comes from the visible words or the aria-label, never the glyph.
   const Icon = dark ? Sun : Moon;
 
-  const shared =
-    "hover:bg-accent hover:border-primary/40 rounded-md border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  // #252 — moved verbatim to `controlSurface` in @/lib/utils, because the header
+  // now renders the shopping and focus quick-access links beside this button and
+  // all three have to read as one set. A local copy per control is how the two
+  // popup menus drifted apart in #117.
+  const shared = controlSurface;
 
   if (variant === "icon") {
     // Dropping the visible words drops the button's accessible name with them,

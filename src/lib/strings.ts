@@ -137,6 +137,22 @@ export const STRINGS = {
   // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
   // a kind of task". Only rendered when Settings.shoppingList is on.
   "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
+  // #252 — the header's quick-access icons. Their own keys rather than reusing
+  // `nav.focusTimer` / `nav.shopping`, for a reason that only applies to an
+  // icon-only control: those two are VISIBLE menu text, so the playful voice
+  // decorates them with an emoji, and these strings are an `aria-label` and a
+  // `title`. A screen reader spells an emoji out, so the flavour would be read
+  // aloud as part of the control's name ("stopwatch Focus Timer") — and unlike
+  // the menu rows there is no visible text for WCAG 2.5.3 to require it to
+  // match. Identical across both voices for the same reason `action.complete`
+  // is: the name of a destination is not where a skin belongs. The WORDS still
+  // match the menu rows exactly, so the icon and the row it duplicates cannot
+  // start describing two different places.
+  "nav.focusQuickAccess": { plain: "Focus Timer", playful: "Focus Timer" },
+  "nav.shoppingQuickAccess": {
+    plain: "Shopping list",
+    playful: "Shopping list",
+  },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
@@ -594,6 +610,21 @@ export const STRINGS = {
   // CONSEQUENCE in both directions, including what off means: someone reaching
   // for the player's pause button normally just wants quiet, so "this also
   // stops your session" has to be on screen before they turn it on.
+  // #252 — the header's focus shortcut. The hint carries the one thing the
+  // checkbox cannot: turning it off hides an ICON, it does not take the focus
+  // timer away. From the switch alone those two read identically, and only one of
+  // them is what happens — the same reasoning `shopping.settingsHint` gives for
+  // saying that hiding the list does not delete it.
+  "focusSettings.quickAccess": {
+    plain: "Shortcut in the header",
+    playful: "⏱️ Shortcut in the header",
+  },
+  "focusSettings.quickAccessHint": {
+    plain:
+      "Adds a one-tap timer button to the top bar. Turning it off hides the button — the focus timer is still in the menu.",
+    playful:
+      "Adds a one-tap timer button to the top bar. Turning it off hides the button — the focus timer is still in the menu.",
+  },
   "focusSettings.pauseTogether": {
     plain: "Pause music and timer together",
     playful: "⏸️ Pause music and timer together",
@@ -1165,6 +1196,53 @@ export const STRINGS = {
     plain: "Finished — every step done.",
     playful: "Finished — every step done. 🎉",
   },
+  // ── #251 — the Done row's delete-failure notice ──────────────────────────
+  //
+  // Named `lib.error.*`, following `focus.error.*` rather than the inbox's and
+  // shopping's `errorSave*` family, and the naming carries the decision: owning
+  // a `<prefix>.errorSaveTimeout` key is what enrols a surface in
+  // `write-notice-hygiene` rules A-C, which require the full four-cell
+  // timedOut × rowGone matrix. That matrix exists for the `rowGone` dimension —
+  // a write that needs a row to act on becomes un-retryable once the row is
+  // gone. **A delete is the one write for which the row being gone is the
+  // goal**, so those two cells could never be honestly selected here and adding
+  // them would mean writing copy for states that cannot occur. `focus-timer.tsx`
+  // is the recorded precedent for a notice with no row to lose; rules D and E
+  // still watch this file's live-region structure, which is the half that can
+  // see a missing or mis-nested announcement.
+  //
+  // Each message is the LEAD of a sentence the notice finishes by quoting the
+  // row's title, so each ends on a colon — the same shape the other surfaces'
+  // copy has, for the same reason.
+  "lib.error.delete": {
+    plain: "Couldn't delete that just now:",
+    playful: "Couldn't delete that just now:",
+  },
+  // Never "nothing changed": a timeout's verdict is genuinely unknown and the
+  // delete may well have landed. Retry stays on offer, and unlike the inbox and
+  // shopping surfaces it cannot mislead here — re-posting a delete that already
+  // landed is a no-op that reaches the state the user asked for either way.
+  "lib.error.deleteTimeout": {
+    plain:
+      "No answer from the server, so it may already have been deleted. Try again to be sure:",
+    playful:
+      "No answer from the server, so it may already have been deleted. Try again to be sure:",
+  },
+  // A stale action id cannot be re-posted — the running deployment has forgotten
+  // it — so this cell offers a reload and nothing else, and says so rather than
+  // inviting a press that is not on the screen.
+  "lib.error.stale": {
+    plain:
+      "The app updated while this page was open, so that didn't go through. Reload to carry on:",
+    playful:
+      "The app updated while this page was open, so that didn't go through. Reload to carry on:",
+  },
+  "lib.error.retry": { plain: "Try again", playful: "Try again" },
+  "lib.error.retrying": { plain: "Trying again…", playful: "Trying again…" },
+  "lib.error.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
   "lib.added": { plain: "added", playful: "added" },
   "lib.wakes": { plain: "wakes", playful: "wakes" },
   "lib.aToDo": { plain: "a to-do", playful: "a to-do" },
@@ -1315,6 +1393,20 @@ export const STRINGS = {
   // changes (it pays for their breakdowns, so no instance cap applies) is the one
   // thing they cannot discover, so the copy states it outright.
   "settings.accountHeading": { plain: "Account", playful: "Account" },
+  // #252 — the name the header calls you by. The hint carries the four things
+  // that are not discoverable from an input box: WHERE it shows (the header, on
+  // every page, so it is not private to this panel), the length bound (the field
+  // silently stops accepting characters at the cap, so the number has to be said
+  // out loud), that it is a display name and not a login (changing it cannot lock
+  // anybody out), and that emptying it is the way BACK — otherwise "clear it" and
+  // "break it" look identical from here.
+  "settings.accountNameLabel": { plain: "Your name", playful: "Your name" },
+  "settings.accountNameHint": {
+    plain:
+      "What the header calls you, on every page — up to 60 characters. It does not change how you sign in, and leaving it empty goes back to your provider username.",
+    playful:
+      "🏷️ What the header calls you, on every page — up to 60 characters. It does not change how you sign in, and leaving it empty goes back to your provider username.",
+  },
   "settings.accountKeyLabel": { plain: "API key", playful: "API key" },
   "settings.accountKeyHint": {
     plain:

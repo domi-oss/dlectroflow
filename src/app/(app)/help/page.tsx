@@ -222,6 +222,16 @@ export default async function HelpPage({
           music keeps playing, there is just nothing on screen to control it
           until you pause.
         </p>
+        {/* #252 — the shortcut is ON for everyone, so the sentence people need is
+            "how do I get rid of it", not "how do I get it". It also has to say
+            that hiding the button leaves the timer where it was, because those
+            two read identically from a checkbox. */}
+        <p className="text-sm">
+          The top bar carries a <strong>one-tap shortcut to the timer</strong>,
+          so starting a session never costs a trip through the menu. It is on to
+          start with; <strong>Focus timer → Shortcut in the header</strong>{" "}
+          hides the button, and the focus timer stays in the menu either way.
+        </p>
       </section>
 
       <section className="space-y-2">
@@ -234,6 +244,17 @@ export default async function HelpPage({
             Settings
           </Link>{" "}
           page.
+        </p>
+        {/* #252 — the header used to greet people by their provider username,
+            which is nobody's name. Says where the field is, and that it changes
+            nothing about signing in — a name field on an account page reads as a
+            login by default. */}
+        <p className="text-sm">
+          The corner of the top bar shows your{" "}
+          <strong>provider username</strong> until you tell it otherwise.{" "}
+          <strong>Account → Your name</strong> sets what it calls you instead;
+          it saves as you type, changes nothing about how you sign in, and
+          emptying it goes back to the username.
         </p>
       </section>
 

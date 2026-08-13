@@ -1,15 +1,31 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 import AppLayout from "./layout";
 import { currentUser } from "@/lib/workspace";
+import { getSettings } from "@/lib/db";
 
 // next/link → plain <a> (same idiom as help.test.tsx) so the header's links
 // resolve under vitest (no Next compiler).
+//
+// #252 — the rest of the props are spread through, not dropped. The quick-access
+// links carry their accessible name on the anchor itself (`aria-label`/`title`),
+// so a mock that forwarded only `href` and `children` would render two unnamed
+// links and every name-based query here would fail for a reason that has nothing
+// to do with the component (#160's class of trap).
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({
+    children,
+    href,
+    ...rest
+  }: {
+    children: ReactNode;
+    href: string;
+  }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
   ),
 }));
 
@@ -25,15 +41,37 @@ vi.mock("@/lib/db", () => ({
         .mockResolvedValue({ expiresAt: new Date("2099-01-01") }),
     },
   },
-  getSettings: vi.fn().mockResolvedValue({
+  getSettings: vi.fn(),
+}));
+
+/**
+ * The Settings row the header reads, as a function of the two #252 gates.
+ *
+ * Set per test rather than baked into the module factory, because both gates are
+ * now things the header BRANCHES on — a fixed factory value could only ever
+ * exercise one arm, and the arm it exercised would be invisible at the call
+ * site. Every field the layout actually reads is present: a factory mock that
+ * silently omits one is #160, and the symptom is a nav test that passes
+ * suspiciously easily.
+ */
+function settingsWith(
+  gates: { shoppingList?: boolean; focusQuickAccess?: boolean } = {},
+) {
+  vi.mocked(getSettings).mockResolvedValue({
     voice: "plain",
     completeStrikethrough: true,
     completeTickColor: "green",
     typeface: "figtree",
     notifyDailyReview: false,
     dailyReviewNudgeTime: "18:00",
-  }),
-}));
+    shoppingList: false,
+    focusQuickAccess: false,
+    ...gates,
+    // The layout reads only the fields above; the row is far wider, and casting
+    // is how every other test here stays about the header rather than about the
+    // schema.
+  } as unknown as Awaited<ReturnType<typeof getSettings>>);
+}
 
 vi.mock("@/lib/workspace", () => ({
   currentUser: vi.fn(),
@@ -54,6 +92,9 @@ const SIGNED_IN = {
   workspaceId: "owner",
   provider: "gitlab",
   handle: "gitlab_dlectronique",
+  // #252 — null, i.e. every account the day the migration lands. The header
+  // must be unchanged for them.
+  displayName: null as string | null,
 };
 
 const MEMBER = {
@@ -62,6 +103,7 @@ const MEMBER = {
   workspaceId: "ws-u2",
   provider: "gitlab",
   handle: "dlectronique",
+  displayName: null as string | null,
 };
 
 vi.mock("@/lib/guest-quota", () => ({
@@ -83,6 +125,11 @@ vi.mock("@/components/dashboard/review-nudge", () => ({
 vi.mock("@/components/nav/app-menu", () => ({
   AppMenu: () => <div data-testid="app-menu" />,
 }));
+
+// `vi.clearAllMocks()` clears CALLS, not implementations, so the resolved value
+// is re-seeded here rather than once at module scope — otherwise a test that
+// flipped a gate would silently set it for every test after it.
+beforeEach(() => settingsWith());
 
 afterEach(() => {
   cleanup();
@@ -215,10 +262,15 @@ describe("AppLayout — header identity (#100)", () => {
     expect(currentUser).toHaveBeenCalledTimes(1);
   });
 
-  // #100's constraint, made mechanical: the bar is collision-prone at 390px
-  // (#72, #92, #103), so naming the account must not add an element. It replaces
-  // two — "Account" and "Sign out" both moved into the popover — so the
-  // signed-in cluster is now the SAME width as a guest's.
+  // #100's constraint, still mechanical and still true of #100's own change:
+  // naming the account adds no element, because it replaced two ("Account" and
+  // "Sign out" both moved into the popover), so a signed-in cluster is the same
+  // width as a guest's.
+  //
+  // #252 amended what the number is a function of. It is now the two quick-access
+  // gates and nothing else — identity state still does not move it. Asserted with
+  // both gates OFF so the claim stays "identity costs nothing", which is what
+  // #100 was about; the gates' own arithmetic is the block below.
   it("adds no element to the header — three controls, signed in or not", async () => {
     vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
     expect((await headerCluster()).children).toHaveLength(3);
@@ -260,5 +312,156 @@ describe("AppLayout — header identity (#100)", () => {
     // positive on a security assertion is worse than no assertion.
     expect(cluster.innerHTML).not.toContain("cuid-secret-1234");
     expect(cluster.textContent).not.toContain("@");
+  });
+});
+
+// #252 — "the nav shows a provider handle and hides shopping and focus".
+//
+// Two halves, and they fail in opposite directions. The name half is about an
+// account that has NOT set one still rendering exactly as it did (the migration
+// leaves every existing row null, so that is not the edge case — it is the
+// default). The quick-access half is about two icons appearing only when their
+// gate says so, and about them costing nothing: both gates are already in the
+// `settings` row the layout reads for the voice.
+describe("AppLayout — header quick access (#252)", () => {
+  const FOCUS = /^Focus Timer$/;
+  const SHOPPING = /^Shopping list$/;
+
+  async function headerCluster(): Promise<HTMLElement> {
+    render(await AppLayout({ children: child }));
+    return screen.getByRole("button", { name: /mode/i })
+      .parentElement as HTMLElement;
+  }
+
+  it("puts a focus-timer shortcut in the bar when the setting is on", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ focusQuickAccess: true });
+    const cluster = await headerCluster();
+    const link = screen.getByRole("link", { name: FOCUS });
+    expect(link).toHaveAttribute("href", "/focus");
+    expect(cluster).toContainElement(link);
+  });
+
+  it("leaves it out when the setting is off", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ focusQuickAccess: false });
+    await headerCluster();
+    expect(screen.queryByRole("link", { name: FOCUS })).toBeNull();
+  });
+
+  it("puts a trolley in the bar when shopping-list mode is on", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ shoppingList: true });
+    const cluster = await headerCluster();
+    const link = screen.getByRole("link", { name: SHOPPING });
+    expect(link).toHaveAttribute("href", "/shopping");
+    expect(cluster).toContainElement(link);
+  });
+
+  it("leaves the trolley out when shopping-list mode is off", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ shoppingList: false });
+    await headerCluster();
+    expect(screen.queryByRole("link", { name: SHOPPING })).toBeNull();
+  });
+
+  // A guest has no account but does have a workspace and a Settings row, so the
+  // gates mean the same thing for them. Nothing here is account-scoped.
+  it("gives a guest the same shortcuts their workspace asked for", async () => {
+    vi.mocked(currentUser).mockResolvedValue(null);
+    settingsWith({ shoppingList: true, focusQuickAccess: true });
+    await headerCluster();
+    expect(screen.getByRole("link", { name: FOCUS })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: SHOPPING })).toBeInTheDocument();
+  });
+
+  // Left-to-right: the two destinations, the theme toggle, the account, the
+  // menu. Destinations lead because they are what you came to press; the theme
+  // toggle keeps its #100 position immediately left of the identity action, and
+  // the menu stays last.
+  it("orders the cluster: focus, shopping, theme, account, menu", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ shoppingList: true, focusQuickAccess: true });
+    const cluster = await headerCluster();
+    const identity = screen.getByRole("button", { name: /^account:/i });
+    expect(
+      [...cluster.children].map(
+        (el) =>
+          el.getAttribute("aria-label") ??
+          (el.contains(identity) ? "account" : el.getAttribute("data-testid")),
+      ),
+    ).toEqual([
+      "Focus Timer",
+      "Shopping list",
+      "Switch to dark mode",
+      "account",
+      "app-menu",
+    ]);
+  });
+
+  // The width arithmetic the issue set, made mechanical. Five is the ceiling and
+  // three is the floor; the MEASURED consequence at 360px is
+  // e2e/smoke/header-quick-access.spec.ts, because a class name is not a layout.
+  it("holds at most five controls, and three when both gates are off", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ shoppingList: true, focusQuickAccess: true });
+    expect((await headerCluster()).children).toHaveLength(5);
+    cleanup();
+    settingsWith({ shoppingList: false, focusQuickAccess: false });
+    expect((await headerCluster()).children).toHaveLength(3);
+  });
+
+  // The issue's "no new network call" constraint. `getSettings` was already
+  // being read for the voice, and both gates are columns on that same row, so
+  // the shortcuts are free.
+  it("reads Settings once, and adds no second query", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    settingsWith({ shoppingList: true, focusQuickAccess: true });
+    await headerCluster();
+    expect(getSettings).toHaveBeenCalledTimes(1);
+    expect(currentUser).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AppLayout — header shows a chosen name (#252)", () => {
+  async function headerCluster(): Promise<HTMLElement> {
+    render(await AppLayout({ children: child }));
+    return screen.getByRole("button", { name: /mode/i })
+      .parentElement as HTMLElement;
+  }
+
+  it("greets the owner by the name they chose, not by the provider handle", async () => {
+    vi.mocked(currentUser).mockResolvedValue({
+      ...SIGNED_IN,
+      displayName: "Domi",
+    });
+    const cluster = await headerCluster();
+    expect(cluster).toHaveTextContent("Domi");
+    expect(cluster).not.toHaveTextContent("gitlab_dlectronique");
+    // WCAG 2.5.3 — the visible words are contained in the accessible name, so
+    // voice control can address what it can see.
+    expect(
+      screen.getByRole("button", { name: "Account: Domi" }),
+    ).toBeInTheDocument();
+  });
+
+  // The default state of every account on the day this ships.
+  it("is unchanged for an account that never set one", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    const cluster = await headerCluster();
+    expect(cluster).toHaveTextContent("gitlab_dlectronique");
+    expect(
+      screen.getByRole("button", { name: "Account: gitlab_dlectronique" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a member their own chosen name, never the owner's", async () => {
+    vi.mocked(currentUser).mockResolvedValue({
+      ...MEMBER,
+      displayName: "Sam",
+    });
+    const cluster = await headerCluster();
+    expect(cluster).toHaveTextContent("Sam");
+    expect(cluster.textContent).not.toMatch(/dlectronique/);
   });
 });

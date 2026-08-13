@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import LibraryPage from "./page";
+import { LIB_PANEL_HEADING_ID } from "@/components/library/library-done-delete";
 
 // Hoisted so the vi.mock factory (which runs before imports) can close over them.
 const { findMany, getSettingsMock, currentWorkspaceIdMock } = vi.hoisted(
@@ -210,6 +211,59 @@ describe("LibraryPage — Done graduation", () => {
     expect(screen.getByText(/2\/2 done/)).toBeInTheDocument();
     // partial multi-step must NOT have graduated
     expect(screen.queryByText("Plan the offsite")).not.toBeInTheDocument();
+  });
+});
+
+// ── #251 — Done gained a delete, and nothing else ──────────────────────────
+//
+// `LibraryRow` was a read-only server component with no controls at all, so a
+// completed to-do could not be removed from the hub. What went in is one client
+// island, not `<LibraryRows>`: that renders ▶ Start focusing, ✓ Complete, an
+// estimate editor, an editable note and select mode, and none of those mean
+// anything on a closed row. These assert the affordance is there, that the row
+// did NOT gain the rest of them, and that the hand-off target the island focuses
+// is actually rendered — the one coupling that would otherwise fail silently by
+// returning focus to <body>.
+describe("LibraryPage — deleting a Done row (#251)", () => {
+  it("gives every Done row a delete control", async () => {
+    await renderTab("done");
+    const rows = screen.getAllByRole("listitem");
+    expect(rows.length).toBeGreaterThan(1);
+    for (const row of rows) {
+      expect(
+        within(row).getByRole("button", { name: "Delete" }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("adds no in-flight affordance to a closed row", async () => {
+    await renderTab("done");
+    const row = screen.getByText("Reply to recruiter").closest("li")!;
+    // The whole reason for the narrow island rather than <LibraryRows>.
+    expect(
+      within(row).queryByRole("button", { name: /Start focusing/i }),
+    ).toBeNull();
+    expect(within(row).queryByRole("button", { name: /Complete/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /estimate/i })).toBeNull();
+  });
+
+  it("renders the panel heading the delete hands focus back to, focusable", async () => {
+    await renderTab("done");
+    const heading = document.getElementById(LIB_PANEL_HEADING_ID);
+    expect(heading).not.toBeNull();
+    // `tabIndex={-1}` or the hand-off silently does nothing and the user is left
+    // on <body> — the WCAG 2.4.3 fault the hand-off exists to avoid.
+    expect(heading).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("leaves the in-flight tabs' own delete alone", async () => {
+    // `plated` renders <LibraryRows>, which has had a delete since Task 7. The
+    // Done island must not have grown a second one into it.
+    await renderTab("plated");
+    const row = screen.getByText("Reply to Sam's email").closest("li")!;
+    expect(within(row).getAllByRole("button", { name: "Delete" })).toHaveLength(
+      1,
+    );
   });
 });
 

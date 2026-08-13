@@ -4,10 +4,10 @@ import {
   RewardType,
   RewardPoints,
   BadgeKey,
-  BrainDumpStatus,
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
+import { inboxZeroQueueWhere } from "@/lib/inbox-zero-queue";
 import { getSettings, getStreak } from "@/lib/db";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -46,16 +46,16 @@ export async function logReward(
 /**
  * When the needs-triage queue just hit empty: award the once-ever Inbox-zero
  * badge (idempotent) and the once/day Inbox-zero points.
+ *
+ * The queue's definition lives in `inbox-zero-queue.ts` since #251's review, so
+ * that `deleteBrainDumpItem` can ask whether the row it removed was in it without
+ * restating the three terms — read that module's note for why there are two
+ * shapes of one predicate and what keeps them honest.
  */
 export async function maybeAwardInboxZero(workspaceId: string) {
   const now = new Date();
   const remaining = await prisma.brainDumpItem.count({
-    where: {
-      workspaceId,
-      status: BrainDumpStatus.Inbox,
-      completedAt: null,
-      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
-    },
+    where: inboxZeroQueueWhere(workspaceId, now),
   });
   if (remaining > 0) return;
   // Inbox-zero badge — once ever, awarded the first time the queue empties.
@@ -174,20 +174,46 @@ export async function rewardStepDone(
  *    could belong to unrelated, legitimately finished work. The inference is gone
  *    rather than made cleverer, because there was nothing correct for it to infer
  *    from.
- *  * **Badges — not reversed.** Once-ever achievements; revoking one would make
- *    the collection lie about the past, and `awardBadge` is idempotent anyway.
+ *  * **Badges — not reversed by an UNDO.** Once-ever achievements; revoking one
+ *    would make the collection lie about the past, and `awardBadge` is
+ *    idempotent anyway.
  *
- * ── Why "the newest row of that type" is enough ─────────────────────────────
+ *    Narrowed from "not reversed" to "not reversed by an undo" in #251, because
+ *    a delete is not an undo and the owner decided the two answer differently.
+ *    Reopening a to-do leaves it on the board still able to earn the badge back;
+ *    **deleting one destroys the evidence it was ever earned**, and a badge whose
+ *    qualifying condition no longer holds anywhere in the workspace is not a
+ *    record of the past, it is a claim nothing supports. That case has its own
+ *    entry point — {@link revokeUnqualifiedBadges} — which every caller here
+ *    still declines to use. The rule above is unchanged for undo; it simply no
+ *    longer over-claims for delete.
+ *
+ * ── Why "the newest row of that type" — and where that stopped being enough ──
  *
  * Each reversal removes the most recent row of its type, not "the one this step
  * earned", because there is no such thing: `RewardEvent` carries type, points and
  * workspace and holds no step or task reference (see `prisma/schema.prisma`), so
  * every row of one type in a workspace is an identical `RewardPoints[type]`.
- * **Within a type, which row goes is unobservable** — the points total, the
- * dashboard and the day rollup all read the same afterwards, and nothing displays
- * per-step or per-task points. Attributing rewards to their source would need a
- * nullable column and a migration, which is not worth buying an identical
- * outcome.
+ * Attributing rewards to their source would need a nullable column and a
+ * migration.
+ *
+ * This paragraph used to end "**within a type, which row goes is
+ * unobservable**", and #251 falsified that. It was true while every reader of
+ * `RewardEvent` summed the whole workspace, and {@link revokeUnqualifiedBadges}
+ * is the **first per-day read of `RewardEvent` inside a reversal path**: it
+ * recounts `step_done` rows from `startOfToday()` to decide whether
+ * `ten_steps_day` still qualifies. The moment a reader groups by day, *which* row
+ * goes decides an answer — measured, deleting an item completed yesterday
+ * consumed three of today's rows, dropped today's count from ten to seven and
+ * revoked a badge earned today by ten steps that still existed.
+ *
+ * So "newest" is now a **default with an upper bound available**, not an
+ * invariant: a caller that knows when the work it is reversing was finished
+ * passes that instant and the reversal prefers the newest row not newer than it.
+ * The claim is left recorded rather than deleted, because the next per-day reader
+ * of this table will be tempted by the same reasoning. `getDashboardData`'s
+ * `todayPoints` and `gatherDayData` in `rollup.ts` are two more such readers, and
+ * they are why the bound is worth having beyond the badge.
  *
  * That argument holds **within** a type and **not across** types, which is
  * exactly where round 2's fix went wrong: deleting a `session_finished` to
@@ -222,7 +248,29 @@ export async function reverseStepCompletionRewards(
 }
 
 /**
- * The same reversal at whole-to-do arity, for `reopenItem` (#196).
+ * The same reversal at whole-to-do arity, for `reopenItem` (#196) and — since
+ * #251 — for `deleteBrainDumpItem`.
+ *
+ * ── Why one primitive serves both ───────────────────────────────────────────
+ *
+ * Deleting a completed to-do owes **what reopening that whole row would owe**:
+ * one `step_done` per step that was done, plus a `task_complete` if it was
+ * carrying a completion. Stating it as an equality rather than as a second rule
+ * is what keeps the two paths from drifting — a user who reopens a to-do and then
+ * deletes it must end on the same balance as one who deletes it outright, and
+ * they only do if both routes ask this function the same question. The delete's
+ * caller therefore counts its arguments off what its own writes destroyed,
+ * exactly as `reopenItem` counts them off what its writes changed.
+ *
+ * The equality is against a **whole-row** reopen, which is the only reopen a
+ * delete has an analogue for — there is no partial delete to compare with
+ * `reopenItem(id, stepIds)`. It also stops short in the one case the two writes
+ * genuinely differ: when another `BrainDumpItem` still references the Task, the
+ * delete destroys no steps and so owes no `step_done`, while a reopen would still
+ * reverse them because it turns those surviving steps back to not-done. No code
+ * path creates a second item on one Task today (see the note at the delete's
+ * call site), so this is a boundary being stated rather than a case being
+ * handled.
  *
  * ── Why the step count is a parameter ───────────────────────────────────────
  *
@@ -251,15 +299,57 @@ export async function reverseStepCompletionRewards(
  *
  * `stepDone` in the result is a COUNT, not a flag, so a caller can be tested on
  * having asked for the right number.
+ *
+ * ── `stepDoneNotAfter`: the step rows, and only the step rows (#251 review) ──
+ *
+ * Read the amended "newest row" note above first. A caller that knows when the
+ * work it is reversing was finished passes that instant, and each `step_done`
+ * reversal then prefers the newest row not newer than it — so a delete of
+ * yesterday's to-do takes yesterday's points and leaves today's count, and the
+ * day's badge, alone.
+ *
+ * **It bounds the step rows only, and that asymmetry is measured rather than
+ * chosen.** `completeItem` banks one `step_done` per step it closes and THEN
+ * stamps `completedAt`, and logs the `task_complete` after the stamp. Measured on
+ * real Postgres against that exact ordering: the step rows land at the stamp or
+ * 2ms before it, the completion row 3ms after. So `completedAt` is a correct
+ * upper bound for the item's own step rows and an incorrect one for its own
+ * completion row — bounding `task_complete` by it would skip the item's row every
+ * time and take an older one instead, which is the defect this fixes rather than
+ * a fix for it. There is no sound bound available for `task_complete` (the only
+ * candidate is "the oldest row at or after the stamp", which inverts the
+ * primitive's meaning and breaks under two completions in the same instant), and
+ * none is needed: the only per-day reader that reversal feeds is
+ * {@link revokeUnqualifiedBadges}'s `task_complete` branch, which recomputes
+ * `brainDumpItem` STATE — "is any item still completed" — and never reads
+ * `RewardEvent` by day. The unobservability argument still holds for that type.
+ *
+ * The bound is a **preference, not a filter**: when the workspace holds fewer
+ * rows inside it than the caller owes, the reversal falls through to the
+ * unbounded set rather than stopping short. Stopping short would leave a payout
+ * banked with nothing left that could ever take it, which is the opposite failure
+ * from the one the floor guard exists for.
  */
 export async function reverseItemCompletionRewards(
   workspaceId: string,
-  opts: { stepDone: number; includeTaskComplete: boolean },
+  opts: {
+    stepDone: number;
+    includeTaskComplete: boolean;
+    /** When the work being reversed was finished — see the note above. */
+    stepDoneNotAfter?: Date;
+  },
   db: Prisma.TransactionClient = prisma,
 ): Promise<{ stepDone: number; taskComplete: boolean }> {
   let stepDone = 0;
   while (stepDone < opts.stepDone) {
-    if (!(await reverseLatestReward(workspaceId, RewardType.StepDone, db))) {
+    if (
+      !(await reverseLatestReward(
+        workspaceId,
+        RewardType.StepDone,
+        db,
+        opts.stepDoneNotAfter,
+      ))
+    ) {
       break; // nothing left in this workspace to take back
     }
     stepDone += 1;
@@ -268,6 +358,127 @@ export async function reverseItemCompletionRewards(
     ? await reverseLatestReward(workspaceId, RewardType.TaskComplete, db)
     : false;
   return { stepDone, taskComplete };
+}
+
+/**
+ * Revoke every badge whose qualifying condition no longer holds — #251.
+ *
+ * Called only by `deleteBrainDumpItem`, and only when that delete actually
+ * reversed something. A delete destroys the work a badge was awarded for, so
+ * unlike an undo it can leave a badge with nothing behind it (see the amended
+ * rule on {@link reverseStepCompletionRewards}).
+ *
+ * ── `reversed`: each badge is gated on the reversal that could un-qualify it ─
+ *
+ * Not on "the delete reversed *something*". Recomputing a condition and revoking
+ * on the answer is only a reversal if this call is what moved that condition;
+ * otherwise it is taking away a badge the deleted row had no part in earning, and
+ * a workspace can already be sitting on an unqualified badge with no delete
+ * involved (reopening the only completed to-do leaves `task_complete` in exactly
+ * that state). Both directions were live and both are now covered:
+ *
+ *  * a **step-only** reversal — the `isFullyDone` route, every step ticked and
+ *    `completedAt` never stamped — recomputed "is any item completed" as false and
+ *    revoked `task_complete`, which it had not touched;
+ *  * a **completion-only** reversal — a stepless to-do — recomputed today's step
+ *    count, found it under ten, and revoked `ten_steps_day` without having changed
+ *    a single `step_done`.
+ *
+ * ── Only badges whose condition is RECOMPUTABLE are in scope ────────────────
+ *
+ * `Badge` records a key, a workspace and `earnedAt`. It records nothing about
+ * *what* earned it, and `RewardEvent` carries no link back to a to-do either —
+ * so "did this item contribute to this badge" is not a question the schema can
+ * answer. What it can answer is "does the condition still hold **now**", and for
+ * two of the nine badges that is the same question:
+ *
+ *  * **`task_complete`** — awarded on a completion (`completeItem`, and
+ *    `markTaskCompleted` in focus.ts, which stamps `completedAt` on the linked
+ *    items too). It qualifies exactly while some item in the workspace carries a
+ *    `completedAt`, so deleting the last one leaves it unsupported.
+ *  * **`ten_steps_day`** — awarded when the day's `step_done` count reaches ten.
+ *    Recheckable **only for a badge earned today**: the model has no per-day
+ *    ledger, so today's count says nothing about the Tuesday it was actually
+ *    earned on, and revoking on that basis would be taking away something the
+ *    deleted item never contributed to. `earnedAt` is the gate that keeps this a
+ *    reversal rather than a guess.
+ *
+ * The other seven are deliberately out of scope, and for two different reasons
+ * rather than one:
+ *
+ *  * `first_breakdown`, `first_schedule`, `first_focus`, `inbox_zero` — a
+ *    completed to-do's deletion cannot un-break-down, un-schedule or un-focus
+ *    anything, and it cannot *add* to the needs-triage queue, so none of their
+ *    conditions can move in the direction that would un-qualify them.
+ *  * `streak_5`, `comeback`, `beat_best_streak` — **not recomputable, and this
+ *    is a real gap rather than a judgement that they should stand.** A streak
+ *    day is earned by *any* qualifying engagement (`touchStreakOnEngagement`: a
+ *    capture, a breakdown-confirm, a step or a task completion), and `Streak`
+ *    holds only `current` and `lastActiveWorkday` — no per-day ledger of what
+ *    supplied each day. So "would this day still have counted without the
+ *    deleted item" has no answer in the schema, and neither reversing nor
+ *    keeping can be shown correct. Keeping is the conservative half: it errs
+ *    toward a badge the user did earn rather than removing one they did. Closing
+ *    it properly needs a per-day engagement record, which is a migration and its
+ *    own decision.
+ *
+ * Returns the keys it revoked, so a caller can be tested on the arithmetic and
+ * so "nothing to revoke" is a normal answer rather than an error — the same
+ * contract {@link reverseItemCompletionRewards} keeps.
+ *
+ * `db` is a parameter for the reason that function's note gives at length: the
+ * revocation runs inside the delete's own transaction, so a failure rolls the
+ * delete back with it rather than leaving a to-do gone and its badge standing.
+ */
+export async function revokeUnqualifiedBadges(
+  workspaceId: string,
+  reversed: { stepDone: number; taskComplete: boolean },
+  db: Prisma.TransactionClient = prisma,
+): Promise<BadgeKeyT[]> {
+  const revoked: BadgeKeyT[] = [];
+
+  /** Drop one badge if it is held. `deleteMany` rather than `delete` for the
+   *  reason {@link reverseLatestReward} gives: a concurrent revocation of the
+   *  same badge must resolve to `count: 0`, not to a P2025 that rolls the
+   *  caller's transaction back over work somebody else had already done. */
+  const revoke = async (key: BadgeKeyT) => {
+    const { count } = await db.badge.deleteMany({
+      where: { workspaceId, key },
+    });
+    if (count > 0) revoked.push(key);
+  };
+
+  // Every read below happens AFTER the delete and the points reversal, never off
+  // a snapshot taken before them: the question is what the workspace looks like
+  // now that this call's writes have landed.
+  if (reversed.taskComplete) {
+    const completedLeft = await db.brainDumpItem.count({
+      where: { workspaceId, completedAt: { not: null } },
+    });
+    if (completedLeft === 0) await revoke(BadgeKey.TaskComplete);
+  }
+
+  const tenStepsDay = reversed.stepDone
+    ? await db.badge.findUnique({
+        where: { workspaceId_key: { workspaceId, key: BadgeKey.TenStepsDay } },
+        select: { earnedAt: true },
+      })
+    : null;
+  if (tenStepsDay && tenStepsDay.earnedAt >= startOfToday()) {
+    const stepsToday = await db.rewardEvent.count({
+      where: {
+        workspaceId,
+        type: RewardType.StepDone,
+        createdAt: { gte: startOfToday() },
+      },
+    });
+    // The same threshold `maybeAwardTenStepsDay` awards on, read the other way
+    // round. Written as `< 10` against that function rather than as its own
+    // constant so the two cannot drift apart silently.
+    if (stepsToday < 10) await revoke(BadgeKey.TenStepsDay);
+  }
+
+  return revoked;
 }
 
 /**
@@ -286,17 +497,40 @@ export async function reverseItemCompletionRewards(
  *
  * A genuine failure (a dead connection, say) still rejects, and must: at the
  * call site it is what rolls the step write back.
+ *
+ * `notAfter` narrows "newest" to "newest that is not newer than this instant" —
+ * see {@link reverseItemCompletionRewards} for what it is for and why only one of
+ * the two types passes it. Two queries rather than one `OR`, deliberately: the
+ * bounded set must be exhausted BEFORE the unbounded one is considered, and a
+ * single ordered query cannot express that preference. Both are served by the
+ * `(workspaceId)` and `(createdAt)` indexes on `RewardEvent`, and the second only
+ * runs when the first came back empty.
+ *
+ * The two reads are written out rather than sharing a `where`-taking helper, and
+ * that is the scoping harness's rule rather than a style choice: it requires the
+ * scope to appear in the call's OWN arguments, so a helper hides exactly the term
+ * that matters. Caught by `scoping.harness.test.ts` when this was first written
+ * the tidier way.
  */
 async function reverseLatestReward(
   workspaceId: string,
   type: RewardTypeT,
   db: Prisma.TransactionClient,
+  notAfter?: Date,
 ): Promise<boolean> {
-  const latest = await db.rewardEvent.findFirst({
-    where: { workspaceId, type },
-    orderBy: { createdAt: "desc" },
-    select: { id: true },
-  });
+  const latest =
+    (notAfter
+      ? await db.rewardEvent.findFirst({
+          where: { workspaceId, type, createdAt: { lte: notAfter } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true },
+        })
+      : null) ??
+    (await db.rewardEvent.findFirst({
+      where: { workspaceId, type },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    }));
   if (!latest) return false;
   // `workspaceId` in the filter as well as the id, not because the id is in doubt
   // — it came from the workspace-scoped read directly above — but because

@@ -100,6 +100,13 @@ export async function loadPeopleAdmin(
         id: true,
         provider: true,
         handle: true,
+        // #252 — selected because `accountLabel()` reads it, and the point of
+        // that function being shared is that the header and this panel cannot
+        // disagree about what an account is called. Omitting it here would
+        // recreate the two-label-rules split identity.ts was written to end:
+        // the owner would see their own chosen name in the header and their
+        // handle in their own row of People, on the same page load.
+        displayName: true,
         role: true,
         status: true,
         aiPolicy: true,
