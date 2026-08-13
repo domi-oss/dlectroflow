@@ -38,7 +38,7 @@ rows; both are marked.
 | Is there a manifest? | **No.** Verified across `manifest.json` / `.webmanifest` / `manifest.ts`, `rel="manifest"`, and `next-pwa` / `workbox` / `serwist` in `package.json` and the lockfile — those last three return **zero** hits (control: the same query for `sharp`/`next` returns 141, so the zero is a real absence and not a query that never ran). Two files do match the word `manifest` and neither is one: `src/lib/export/manifest.ts` is the data-export manifest, and `src/lib/manifest-hygiene.{ts,test.ts}` is about `package.json` declaring its imports |
 | Is there a service worker? | **Yes** — `public/sw.js`, registered at `src/lib/notifications.ts:40`. Notifications only, no `fetch` handler. **An installable app needs no more than this** |
 | Icons available? | `public/brand-mark.png`, **256×256**, and transparent — 79% of its pixels are fully so. No maskable set. Referenced by `src/components/brand/brand-mark.tsx`, its test, and `charts/dlectroflow/Chart.yaml`'s `icon:` — **so it must not be moved or replaced** |
-| Any Next metadata icons already? | ⚠️ **Yes, two — and an earlier draft of this table missed both.** `src/app/icon.png` is **byte-identical** to `public/brand-mark.png` (same git blob, 256×256), and `src/app/apple-icon.png` is 180×180 and **77.3% fully transparent**. Both arrived with #13/#40, and Next already emits `<link>` tags for them, so the app *does* ship an Apple touch icon today. **That file is the one this work replaces** — see Icons below |
+| Any Next metadata icons already? | ⚠️ **Yes, two.** `src/app/icon.png` is **byte-identical** to `public/brand-mark.png` (same git blob, 256×256), and `src/app/apple-icon.png` is 180×180 and **77.3% fully transparent**. Both arrived with #13/#40, and Next already emits `<link>` tags for them, so the app *does* ship an Apple touch icon today. **That file is the one this work replaces** — see Icons below |
 | Image tooling? | `sharp` **already a dependency** (`package.json`). No new dependency needed |
 | Is `PUBLIC_ORIGIN` available at build time? | **No — it is runtime only.** Set in `charts/dlectroflow/templates/deployment.yaml:204`, read at request time via `src/lib/origin.ts:54`. This is load-bearing; see below |
 
@@ -136,11 +136,11 @@ extension-carrying paths, and that is exactly the kind of distinction this secti
 matcher's extension exclusion or those lists change, **install breaks silently on first visit**, which is
 the same "green build, broken install" class this document already rules out for `start_url`.
 
-For completeness, because an earlier draft's summary here named only those two lists and was then read as
-exhaustive of the file: `gate.ts` exports **four** prefix lists, and `/api/auth/` appears in two of them —
-`PUBLIC_PREFIXES` and `CANONICAL_ORIGIN_PREFIXES`. That pair is what makes the OAuth callback reachable
-signed-out *and* pinned to one origin. Nothing here touches either, but neither is empty, and a reader
-sizing up the gate from this document should not conclude it is.
+⚠️ **Do not size up the gate from the two lists named above.** `gate.ts` exports **four** prefix lists, and
+`/api/auth/` appears in two of them — `PUBLIC_PREFIXES` and `CANONICAL_ORIGIN_PREFIXES`. That pair is what
+makes the OAuth callback reachable signed-out *and* pinned to one origin. Nothing here touches either, but
+neither is empty, and reading only the two above has already produced one wrong conclusion about which
+module owns the callback path (see Testing, step 1).
 
 **So it gets a test rather than a sentence** (see Testing). Had the mechanism been the one review assumed —
 a signed-out fetch redirected to `/login` — the fix would have been a `PUBLIC_PREFIXES` entry. It is not,
@@ -191,12 +191,12 @@ reports the furthest drawn pixel at **886.0px** — which is exactly the canvas 
 (`hypot(626.5, 626.5) = 886.0`), i.e. the corner — against a safe radius of 501.6px. It fails the asset,
 for precisely the wrong reason.
 
-One precision an earlier draft got wrong: the *rasterised* PNG is not literally alpha-free. Compositing the
-SVG shell's `matrix(0.749601, …)` transform onto a transparent canvas anti-aliases the outermost edge,
-leaving **2,507 pixels (0.16% of the canvas) below alpha 255**, and exactly one at or below 32. That is a
-rasteriser edge artefact rather than content, and it changes nothing above — but it does mean the generated
-maskable files carry an alpha channel unless the generator drops it, so the "no alpha" claim is about the
-**source bitmap** and should not be restated about the output.
+⚠️ **"No alpha" is a claim about the source bitmap, not about the output — do not restate it of the
+generated files.** The *rasterised* PNG is not alpha-free: compositing the SVG shell's
+`matrix(0.749601, …)` transform onto a transparent canvas anti-aliases the outermost edge, leaving **2,507
+pixels (0.16% of the canvas) below alpha 255**, and exactly one at or below 32. That is a rasteriser edge
+artefact rather than content, so it changes nothing above — but it does mean the generated maskable files
+carry an alpha channel unless the generator explicitly drops it.
 
 **So the two sources need two different methods, and the doc has to say which:**
 
@@ -217,17 +217,14 @@ the measurement is reproducible from this document alone rather than only from t
 | Drawn pixels total | 264,207 (**16.8%** of the canvas) |
 | Mark bounding box | x 205–1047, y 167–1041 — half-diagonal **607.5px** |
 
-Every figure above was **re-derived from the SVG source on 2026-08-13** using the script in *Reproducing
-these numbers* below. All of them reproduced except the drawn-pixel total, which an earlier draft gave as
-264,830 and is corrected here to 264,207. Both round to 16.8% and no decision turned on the difference —
-which is the argument for recording the command rather than only the number.
+Every figure above comes from the script in *Reproducing these numbers* below. Re-derive them from there
+rather than trusting a figure quoted anywhere else.
 
 **No padding, no downscaling, no redraw.** Generated as-is. The mark is centred horizontally (bounding-box
 centre x 626.0 against a canvas centre of 626.5) and sits **offset 1.8% of the canvas above vertical
-centre** — a position, not a size — which is not visible. ⚠️ That 1.8% is the **bounding-box** centre
-(1.79% precisely); the *centroid* of drawn pixels sits 1.35% above, because the mark is not symmetric. Two
-defensible definitions, two different numbers, and an earlier draft named neither — so the figure could not
-be checked without guessing which was meant.
+centre** — a position, not a size — which is not visible. ⚠️ **That 1.8% is the bounding-box centre**
+(1.79% precisely); the *centroid* of drawn pixels sits 1.35% above, because the mark is not symmetric. Both
+definitions are defensible, so the one in use is named.
 
 The `any` raster was checked the same way for completeness — furthest drawn pixel **188.3px** against a
 **204.8px** safe radius at 512 — so it would also survive masking. It stays `purpose: "any"` regardless,
@@ -243,29 +240,26 @@ because its transparency is the point.
 | `public/icon-512-maskable.png` | 512×512 | 246,479 | opaque |
 | `src/app/apple-icon.png` (replaces the existing file) | 180×180 | 33,069 | opaque |
 
-Every byte count is the output of the single command in *Reproducing these numbers* below, re-run on
-2026-08-13. Safari ignores the manifest and uses its own file convention, which is why the last row exists
-at all and why it is the one row not named in the manifest's `icons` array. ⚠️ **Two counts changed from an
-earlier draft and one row moved directories** — both are explained below rather than in this table, so the
-Bytes column stays a column of bytes.
+Every byte count is the output of the single command in *Reproducing these numbers* below. Safari ignores
+the manifest and uses its own file convention, which is why the last row exists at all and why it is the one
+row not named in the manifest's `icons` array.
 
-⚠️ **`apple-icon.png` comes from the OPAQUE source, and leaving that unstated was a real gap.** iOS renders a
-transparent home-screen icon against a **black backdrop** — the same *"dark square"* failure mode described
-above for using the opaque source as `purpose: "any"`, just inverted. Since the mark sits on a near-black
-gradient already, a transparent Apple icon would look *almost* right on a dark background and wrong
-everywhere else, which is the worst kind of bug to leave for an actual iPhone to find.
+⚠️ **`apple-icon.png` comes from the OPAQUE source.** iOS renders a transparent home-screen icon against a
+**black backdrop** — the same *"dark square"* failure mode described above for using the opaque source as
+`purpose: "any"`, just inverted. Since the mark sits on a near-black gradient already, a transparent Apple
+icon would look *almost* right on a dark background and wrong everywhere else, which is the worst kind of
+bug to leave for an actual iPhone to find.
 
 Using the opaque source directly is also simpler than flattening the transparent one onto
 `background_color`: same pixels, one fewer step, and nothing to get wrong. **So of the five generated
 files, three come from the opaque source — both maskable icons and the Apple icon — and two, the
-`purpose: "any"` pair, come from the transparent one.** (An earlier draft said "four … and two" of five
-files, which does not add up; the count is three and two.)
+`purpose: "any"` pair, come from the transparent one.**
 
-⚠️ **The Apple icon replaces `src/app/apple-icon.png`. It does NOT go to `public/apple-icon.png` — that was
-the more serious half of the same gap.** `src/app/apple-icon.png` **already exists** at `2ab3210`: 180×180, with
-**77.3% of its pixels fully transparent**. So the iOS black-backdrop rendering described above is not a
-risk to be avoided in future — it is **what ships today**, and correcting it is part of this work rather
-than a side effect of it.
+⚠️ **The Apple icon replaces `src/app/apple-icon.png`. It does NOT go to `public/apple-icon.png`, and this
+is the one thing in this section most likely to be got wrong.** `src/app/apple-icon.png` **already exists**
+at `2ab3210`: 180×180, with **77.3% of its pixels fully transparent**. So the iOS black-backdrop rendering
+described above is not a risk to be avoided in future — it is **what ships today**, and correcting it is
+the point of this row rather than a side effect of it.
 
 The directory is load-bearing because the two locations are not interchangeable. The `apple-icon` file
 convention is scanned under `app/**` only (`app-icons.md`), and Next already emits
@@ -275,8 +269,8 @@ on fetching `/apple-icon` and go on getting the transparent icon. The fix would 
 image, and change nothing on the phone. **Replace the existing convention file's contents; do not add a
 second icon under `public/`.**
 
-**The four manifest icons total 398,024 bytes (388.7 KiB), re-measured 2026-08-13; the Apple icon adds
-33,069 more.** The two SVG sources are deliberately **NOT** committed. Between them they are
+**The four manifest icons total 398,024 bytes (388.7 KiB); the Apple icon adds 33,069 more.**
+The two SVG sources are deliberately **NOT** committed. Between them they are
 1,837,533 bytes of base64-wrapped bitmap, and neither is editable in this repo — so versioning them costs a
 megabyte and a half in a public repo and buys no editing capability. The generation command and both
 source filenames are recorded in a comment above the icon array; the sources live in the owner's design
@@ -286,14 +280,12 @@ it can be edited.
 The 512 maskable is the heavy one because it is an opaque dark gradient with nothing to compress away, and
 **it is already at the floor for lossless PNG**: `compressionLevel: 9` gives 246,479 bytes, the default
 level 6 gives 250,810, and both `effort: 10` and a second lossless pass over the output return **exactly
-246,479** — byte-identical, not smaller. ⚠️ **An earlier draft said maximum effort produced a *larger* file
-and concluded from that it was optimal. The conclusion is right and the evidence was wrong**: it produces
-an identical file, not a bigger one, so the claim is now stated as what was actually measured.
+246,479** — byte-identical, so there is nothing left to win losslessly.
 
-The measurement that *could* have changed the decision is a different one, and it is recorded rather than
-omitted: `png({ palette: true, effort: 10 })` cuts that file to **117,659 bytes, a 52% saving**. It is
-declined, because that is 256-colour quantisation and this asset is a smooth dark gradient — the one thing
-a small palette bands visibly. A flat background colour would cut it to a few KB, but that is a design
+There is one lossy saving available, recorded so it is declined on the record rather than rediscovered:
+`png({ palette: true, effort: 10 })` cuts that file to **117,659 bytes, a 52% saving**. It is declined
+because that is 256-colour quantisation and this asset is a smooth dark gradient — the one thing a small
+palette bands visibly. A flat background colour would cut it to a few KB, but that is a design
 change and is not proposed here.
 
 #### Reproducing these numbers
@@ -325,25 +317,20 @@ and a byte count is only checkable against a stated setting. The geometry figure
 rasters — `resize(1254, 1254).ensureAlpha().raw()`, then the luminance and alpha thresholds already tabled
 above.
 
-⚠️ **What reproduced and what did not, because that difference is the point of this section.** Re-running
-the above on 2026-08-13 reproduced the two `purpose: "any"` byte counts **exactly** (18,770 and 95,284) and
-every geometry figure to the decimal (501.6, 460.2, zero pixels outside, 204.8, 188.3). The two **maskable**
-byte counts an earlier draft carried — 32,749 and 247,036 — did **not** reproduce. A sweep of roughly a
-thousand combinations of rasterisation density, resize kernel, alpha handling, compression level, adaptive
-filtering, palette mode and a two-stage pipeline found no match for either, while that same sweep hit the
-two `any` figures on its first pass — so the sweep was working and the absence is real. The table above now
-carries the values this recipe actually emits, and the old pair should not be carried forward.
+⚠️ **This recipe is the only authority for these figures.** Byte counts for the two maskable icons have
+circulated that no combination of rasterisation density, resize kernel, alpha handling, compression level,
+filtering or palette mode reproduces — so a figure quoted anywhere other than the table above should be
+distrusted and re-derived, not reconciled.
 
 ### `background_color: "#0a0510"`, and `theme_color` the same
 
 `background_color` is **sampled from the icon's own corner pixels** rather than picked, so the splash
-screen has no seam against the icon it surrounds. Confirmed on re-measurement: pixel (0, 0) of the
-1254×1254 maskable raster is exactly `#0a0510`, and 2,255 pixels across the canvas match it exactly.
+screen has no seam against the icon it surrounds: pixel (0, 0) of the 1254×1254 maskable raster is exactly
+`#0a0510`, and 2,255 pixels across the canvas match it exactly.
 
-**`theme_color` matches it, at `#0a0510`**, so the launch sequence — splash, then app — has no colour
-jump. The obvious alternative was the brand purple that opens the gradient
-(`--gradient-brand: linear-gradient(100deg, #9b5cf0, #e0479e)`, `src/app/globals.css:18`), and it is
-declined for one reason: it does not match the icon's background, so the status bar would disagree with
+**`theme_color` matches it, at `#0a0510`.** The obvious alternative was the brand purple that opens the
+gradient (`--gradient-brand: linear-gradient(100deg, #9b5cf0, #e0479e)`, `src/app/globals.css:18`), and it
+is declined for one reason: it does not match the icon's background, so the status bar would disagree with
 the splash for the duration of the launch.
 
 ⚠️ **A manifest carries exactly one `theme_color`, and this app has a light/dark toggle**
@@ -351,6 +338,38 @@ the splash for the duration of the launch.
 `<meta name="theme-color" media="…">` concern and in Next 16 belongs in the `viewport` export, **not** in
 the manifest — recorded here because the natural instinct is to try to solve it in this file and there is
 nowhere in this file to solve it.
+
+#### `background_color` inherits that limitation, and the residual seam is ACCEPTED
+
+**What matching the two values actually buys, stated precisely, because it is easy to overclaim.**
+`theme_color` paints **OS and browser UI chrome**, not the app canvas — so matching it to
+`background_color` removes the *status-bar-versus-splash* mismatch. It does **not** govern
+splash-versus-app. That is the app's own CSS `--background`, which is theme-dependent. Measured at
+`2ab3210`:
+
+| Surface | Value | Luminance |
+| --- | --- | --- |
+| Manifest splash (`background_color`) | `#0a0510` | 6.9 |
+| App background, dark (`.dark --background`) | `#0c0a14` | 11.1 |
+| App background, light (`:root --background`) | `#fdf6fa` | 247.8 |
+
+In the dark theme the launch really is seamless — 4 luminance units apart, imperceptible. **In the light
+theme it is a 241-unit jump**, and that path is not hypothetical: `src/app/layout.tsx` adds `.dark` only
+when `localStorage["df-theme"] === "dark"`, with **no `prefers-color-scheme` fallback**, so any install
+with no stored preference renders light. On iOS a home-screen web app gets its own storage jar, so a
+freshly added app starts there by construction.
+
+**Accepted, because the manifest offers no way out and the alternative is worse.** Unlike `theme_color`,
+`background_color` has **no per-scheme form at all** — no `viewport` export to move it to, no media-query
+variant in the spec — so this is a stronger version of the callout above, not a second instance of it. And
+the two goals are mutually exclusive: the splash paints the icon *on* `background_color`, and the icon's
+own background is near-black. Setting `background_color` to `#fdf6fa` would put a near-black square on a
+near-white splash, reintroducing the **dark square** artefact this document rules out twice elsewhere — a
+persistent, high-contrast defect on the splash itself, traded for removing one transition on entry. **A
+one-frame jump into the app is the cheaper of the two, so `#0a0510` stands.**
+
+The lever for revisiting this is not in this file: it is giving the app a `prefers-color-scheme` default,
+so a dark-system user lands in the dark theme and the seamless path becomes the common one.
 
 ### `shortcuts` — one entry
 
@@ -363,12 +382,11 @@ TDD, failing test first, in this order:
 
 1. **`scope` covers the OAuth callback.** Assert containment, not string equality.
 
-   ⚠️ **Do not derive the path from `src/lib/auth/gate.ts`. An earlier draft said to, and that would have
-   sent the implementer to the wrong source of truth.** `gate.ts` *does* carry `/api/auth/` — in
-   `PUBLIC_PREFIXES` and again in `CANONICAL_ORIGIN_PREFIXES` — so the file is not silent on the subject.
-   But that is a **prefix**, not the callback path, and it is the wrong anchor for exactly the reason this
-   test exists: if the route directory moved, `/api/auth/` would not change, so a test reading `gate.ts`
-   would keep passing. That is the same failure as hardcoding, with more ceremony.
+   ⚠️ **Do not derive the path from `src/lib/auth/gate.ts` — it is the obvious wrong answer here.**
+   `gate.ts` *does* carry `/api/auth/`, in `PUBLIC_PREFIXES` and again in `CANONICAL_ORIGIN_PREFIXES`, so
+   the file looks like the auth source of truth. But that is a **prefix**, not the callback path, and it
+   fails for exactly the reason this test exists: if the route directory moved, `/api/auth/` would not
+   change, so a test reading `gate.ts` would keep passing. Same failure as hardcoding, with more ceremony.
 
    **What actually owns the path is the App Router file tree.** At `2ab3210` the route is
    `src/app/api/auth/gitlab/callback/route.ts`, and **no module exports the path as a constant.** The
@@ -395,9 +413,9 @@ TDD, failing test first, in this order:
    `src/proxy.ts`'s exported `config.matcher` — `/manifest.webmanifest` plus **all four** icons
    (`/icon-192.png`, `/icon-192-maskable.png`, `/icon-512.png`, `/icon-512-maskable.png`) — and **assert a
    control that IS matched** (`/`, or any extensionless app path), so a test that passes because the regex
-   was misread cannot go green. ⚠️ An earlier draft said "all three icons", which would have left both
-   maskable paths unchecked, and those are precisely the ones Android fetches for the home screen. Derive
-   the list from the manifest's own `icons` array so it cannot fall behind the manifest again.
+   was misread cannot go green. ⚠️ **Derive the list from the manifest's own `icons` array, not by hand** —
+   a hand-written list of three leaves both maskable paths unchecked, and those are precisely the ones
+   Android fetches for the home screen.
    ⚠️ **The Apple touch icon is deliberately not in this list.** It is served at the extensionless
    `/apple-icon`, so it *is* matched by the matcher — asserting it alongside the others would simply be
    false. It passes through the gate rather than being redirected; see *Unauthenticated reachability*. This converts the extension-exclusion accident into a checked property: if someone
@@ -431,11 +449,11 @@ verification cannot be parallelised or mocked.
 | Absolute `start_url` on `PUBLIC_ORIGIN` | Proposed by #254 and the #175 spec. **Ships broken** — the manifest route is build-cached and the variable is runtime-only. See above |
 | Static `src/app/manifest.json` | No type checking, and cannot carry the reasoning for `scope` — the one line that fails invisibly |
 | `next-pwa` / `serwist` | An entire PWA framework to emit one JSON document. Nothing here needs a service-worker build step; `sw.js` already exists |
-| Generating icons at build time | Adds image processing to the Kaniko build, and a `sharp` dependency to the build stage, for assets that change approximately never. ⚠️ **An earlier version of this row also called it "non-deterministic", which was wrong** — resizing a fixed source with a pinned `sharp` is reproducible given identical inputs, and review of this spec was right to challenge it. Dropped rather than substantiated: the cost and dependency-surface arguments carry the decision on their own, and leaving an unsupported claim in a declined-options table invites a future reader to take it as a general fact about image generation |
+| Generating icons at build time | Adds image processing to the Kaniko build, and a `sharp` dependency to the build stage, for assets that change approximately never. The cost and the dependency surface carry the decision on their own. ⚠️ It is **not** non-deterministic, and the row must not say so: resizing a fixed source with a pinned `sharp` is reproducible given identical inputs |
 | Committing the SVG sources | 1.8 MB of base64-wrapped bitmap, not editable in-repo. Would be right for a genuine vector |
 | Upscaling `brand-mark.png` (256) | Unnecessary — the supplied source is 1254px. Recorded because it was the fallback before the export arrived |
 | An install prompt | Owner decision. One known user, one-time act, and the repo has a recorded preference against first-run noise |
-| Padding the mark for the safe zone | Measured unnecessary: furthest **drawn** pixel 460.2px against 501.6px allowed, zero pixels outside. "Drawn" means luminance > 60, **not** opacity — this row said "opaque" until review, contradicting the section immediately above it, which exists to rule an alpha test out |
+| Padding the mark for the safe zone | Measured unnecessary: furthest **drawn** pixel 460.2px against 501.6px allowed, zero pixels outside. "Drawn" means luminance > 60, **not** opacity — an alpha test on this source returns the canvas corner, as the section above shows |
 | A second Apple icon under `public/` | It would be served at `/apple-icon.png`, which nothing links to, while Safari kept fetching `/apple-icon` from the existing convention file. The fix would ship and do nothing — see Icons |
 
 ## Related
