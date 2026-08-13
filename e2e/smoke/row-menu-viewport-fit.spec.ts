@@ -1086,8 +1086,8 @@ test.describe("#253 the row action line is compact at 360px", () => {
      *     not connected — so in that state one entry was neither counted nor
      *     height-measured. That is why the not-connected list was recorded as
      *     having 6 entries when it has 7, and it is provable without opening the
-     *     screenshot: two lists cannot both be 368px tall with every entry at 44px
-     *     if one has six entries and the other seven.
+     *     screenshot: two lists cannot both be the same height with every entry at
+     *     44px if one has six entries and the other seven.
      *  2. NOTHING ASSERTED ON THE RESULT. `rows` was computed, logged and
      *     dropped. The only per-entry bound in the file was `>= 44`, which a
      *     two-line ~62px entry passes comfortably — so the very symptom this
@@ -1189,11 +1189,11 @@ test.describe("#253 the row action line is compact at 360px", () => {
           // belongs to shows the entries but not what they act on. The fit itself
           // is asserted below and holds either way.
           //
-          // 20px rather than something more generous because the list is 368px and
+          // 20px rather than something more generous because the list is 416px and
           // the ▾ sits ~170px into the row: at 120px from the top it flipped.
           //
           // ⚠️ This said "the taller of the two lists is 497px". There is no taller
-          // of the two — both measure 368px, logged below on every run — and 497 is
+          // of the two — both measure 416px, logged below on every run — and 497 is
           // the height of the PRE-#253 not-connected menu, which `strings.ts` and
           // `row-actions.tsx` cite as the shape this issue replaced. The same number
           // was being used with two different meanings in the tree.
@@ -1364,7 +1364,7 @@ test.describe("#253 the row action line is compact at 360px", () => {
      * ⚠️ CSS injection, not a source edit, and that is the whole technique. The
      * `webServer` serves a PREBUILT bundle and is reused between runs, so editing
      * `rowMenuEntry` and re-running proves nothing — measured: adding `max-w-24` to
-     * it left all four measurements at 368px and every entry on one line, because
+     * it left all four measurements unchanged and every entry on one line, because
      * the running server had never seen the change. `addStyleTag` applies to the
      * live document and needs no rebuild.
      */

@@ -3221,8 +3221,9 @@ export function InboxView({
                                     //
                                     // ⚠️ `action.breakNow`, NOT `prompt.breakNow`.
                                     // The two were one key until #253 F1 split them:
-                                    // a menu entry is a command, so this reads
-                                    // "Break into steps" as an imperative, while the
+                                    // a menu entry is a command, so this reads as an
+                                    // imperative that names where it takes you
+                                    // ("Break it down in the editor"), while the
                                     // card's red button keeps "Break into steps
                                     // now?" — a question is the right register on a
                                     // card, and it is the only thing that visually

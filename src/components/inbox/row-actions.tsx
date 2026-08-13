@@ -167,8 +167,8 @@ export function ScheduleControl({
     // NOT-connected menu 497px tall against the connected one's 429px at 360px —
     // the taller list, on the surface this whole issue is about.
     //
-    // ⚠️ Those are the heights of the shape this REPLACED. What ships measures 368px
-    // in both states (7 entries, every one 44px and one line, plain and playful);
+    // ⚠️ Those are the heights of the shape this REPLACED. What ships measures 416px
+    // in both states (8 entries, every one 44px and one line, plain and playful);
     // they differ in width only. See `strings.ts`'s note on the same pair, and
     // `e2e/smoke/row-menu-viewport-fit.spec.ts`, which now asserts it instead of
     // logging it.
@@ -608,8 +608,8 @@ export function RowActions({
       {inline}
       {/* #92 — a Popover, not `absolute right-0`: this popup used to hang past
           the bottom edge from any row low on a phone screen. It was ~288px when
-          #92 measured it; #253's canonical list makes the tallest case 368px
-          (7 entries at 44px plus separators), which is what
+          #92 measured it; #253's canonical list makes the tallest case 416px
+          (8 entries at 44px plus separators), which is what
           `e2e/smoke/row-menu-viewport-fit.spec.ts` measures now. Still
           NOT an ARIA menu (see the doc comment above): Popover.Popup is a
           `dialog`, and `menu` entries stay ordinary buttons/links. Portaled

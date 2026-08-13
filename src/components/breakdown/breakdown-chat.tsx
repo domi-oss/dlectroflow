@@ -27,7 +27,7 @@ import { GoogleAccountHint } from "@/components/integrations/google-account-hint
 import { withFrom } from "@/lib/nav/back";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
 import { t, type StringKey } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -1506,7 +1506,20 @@ export function BreakdownChat({
                       onClick={() => {
                         if (!ejecting.has(s.key)) backToInbox(i);
                       }}
-                      className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap aria-disabled:opacity-50"
+                      // #205 / WCAG 2.5.8 — this was 86.3x22px, BELOW the AA
+                      // floor of 24x24, so unlike the rest of #205's sweep this
+                      // is a conformance fix rather than a house-convention one.
+                      // (#205's body says these controls "already meet" AA; they
+                      // did not, and that sentence is corrected there.)
+                      //
+                      // `justify-start` AFTER `touchTarget`: that constant carries
+                      // `justify-center` and `cn` is `twMerge`, so order decides —
+                      // reversed, this label would centre inside its 44px box.
+                      className={cn(
+                        touchTarget,
+                        "justify-start",
+                        "text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap aria-disabled:opacity-50",
+                      )}
                     >
                       {ejecting.has(s.key)
                         ? t("breakdown.eject.sending", voice)
@@ -1516,7 +1529,14 @@ export function BreakdownChat({
                       title="Remove this step"
                       aria-label="Remove this step"
                       onClick={() => removeStep(i)}
-                      className="text-muted-foreground hover:text-destructive rounded px-1 text-xs"
+                      // #205 / WCAG 2.5.8 — the worst of the pair at 86.3x16px:
+                      // `px-1 text-xs` gave it no vertical padding at all, and it
+                      // DELETES a step. Bare `touchTarget`, no `justify-start`: a
+                      // centred glyph should stay centred in its 44px box.
+                      className={cn(
+                        touchTarget,
+                        "text-muted-foreground hover:text-destructive rounded px-1 text-xs",
+                      )}
                     >
                       ✕
                     </button>

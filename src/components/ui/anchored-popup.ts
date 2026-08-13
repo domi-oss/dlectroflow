@@ -73,7 +73,7 @@ export const ANCHORED_POSITIONER = {
  * shifting: collision avoidance can only move a popup that *fits*, so a popup
  * wider than the viewport (a long translated label, a 320px-wide phone) needs a
  * width cap as well. Deliberately no max-height/overflow counterpart: the tallest
- * popup here is 368px — the Needs-review ▾, 7 entries at 44px plus separators,
+ * popup here is 416px — the Needs-review ▾, 8 entries at 44px plus separators,
  * measured at 360x780 in `e2e/smoke/row-menu-viewport-fit.spec.ts` — against a
  * 780-844px viewport, so flipping handles it. It read "288px" until #253, which is
  * what #92 measured before this issue promoted the list's entries to 44px; the

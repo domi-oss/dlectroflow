@@ -2261,7 +2261,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
       "Send back to review",
       "Add as single-task to-do",
       "Save for later",
-      "Break into steps",
+      "Break it down in the editor",
       "Mark as completed",
       "Add to calendar (.ics)",
       "Delete",
@@ -2701,7 +2701,9 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     // `action.breakNow`, the imperative — the ▾ entry no longer shares the card
     // CTA's question mark (#253 F1 split the key).
     expect(
-      within(popup).getByRole("button", { name: "Break into steps" }),
+      within(popup).getByRole("button", {
+        name: "Break it down in the editor",
+      }),
     ).toBeInTheDocument();
     await user.click(
       within(popup).getByRole("button", { name: "Mark as completed" }),
@@ -2726,8 +2728,8 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const labels = within(popup)
       .getAllByRole("button")
       .map((b) => b.textContent?.trim());
-    expect(labels).toContain("Break into steps");
-    expect(labels.indexOf("Break into steps")).toBeLessThan(
+    expect(labels).toContain("Break it down in the editor");
+    expect(labels.indexOf("Break it down in the editor")).toBeLessThan(
       labels.indexOf("Mark as completed"),
     );
   });
@@ -2760,7 +2762,9 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
       within(popup).getByRole("button", { name: "Mark as completed" }),
     ).toBeInTheDocument();
     expect(
-      within(popup).queryByRole("button", { name: "Break into steps" }),
+      within(popup).queryByRole("button", {
+        name: "Break it down in the editor",
+      }),
     ).toBeNull();
   });
 });
@@ -4395,7 +4399,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       //
       // The navigating entry stays FIRST so behaviour-by-position is preserved: a
       // user who pressed the first entry before this change still gets the editor.
-      "Break into steps",
+      "Break it down in the editor",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4462,7 +4466,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual([
-      "🍿 Break into steps",
+      "🍿 Break it down in the editor",
       "🍿 Break into multi-step to-do",
       "🍽️ Add as single-task to-do",
       "🥫 Save for later",
@@ -4531,7 +4535,9 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     await user.click(within(row).getByRole("button", { name: "All options" }));
     const popup = within(row).getByRole("dialog", { name: "All options" });
     await user.click(
-      within(popup).getByRole("button", { name: "Break into steps" }),
+      within(popup).getByRole("button", {
+        name: "Break it down in the editor",
+      }),
     );
     expect(startBreakdown).toHaveBeenCalledWith("n1");
     expect(push).toHaveBeenCalledWith("/tasks/t7");
@@ -4576,7 +4582,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       ),
     ).toEqual([
       // #253 F1 — the navigating entry leads; the park entry follows it.
-      "Break into steps",
+      "Break it down in the editor",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4629,7 +4635,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .map((b) => b.textContent),
     ).toEqual([
       // #253 F1 — the navigating entry leads; the park entry follows it.
-      "Break into steps",
+      "Break it down in the editor",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",

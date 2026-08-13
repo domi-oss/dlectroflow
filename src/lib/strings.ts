@@ -133,9 +133,21 @@ export const STRINGS = {
   //
   // Carries `action.breakdownFull`'s existing 🍿 rather than inventing a metaphor:
   // the playful column is frozen while #86 decides whether that voice survives.
+  // ⚠️ NOT "Break into steps". That is character-identical to `action.breakdown`,
+  // the SHORT inline CTA on the very same Needs-review row — so the two controls
+  // would answer to one name, which is the exact defect #253 removed when it took
+  // the full "Save for later" `aria-label` off the inline `Save`: an ambiguous
+  // voice-control target, and a row from which no query can pick out either. It also
+  // near-collides with `prompt.breakNow` ("Break into steps now?") on the Multi-step
+  // card, where this same key is the ▾ twin.
+  //
+  // So the entry names the DESTINATION instead — which is the destination-naming rule
+  // applied to a navigating action, the same shape as `action.startFocusTimer`
+  // ("Start visual focus timer"). Imperative, no question mark, and distinct from
+  // both inline siblings in both voices.
   "action.breakNow": {
-    plain: "Break into steps",
-    playful: "🍿 Break into steps",
+    plain: "Break it down in the editor",
+    playful: "🍿 Break it down in the editor",
   },
   "action.addTodoFull": {
     plain: "Add as single-task to-do",
@@ -184,7 +196,7 @@ export const STRINGS = {
   // because they are the measurement the owner's call rests on, and re-labelled
   // because the same "497" was being read elsewhere in the tree as the current
   // height of the taller list. What ships is one 44px entry in both states, and the
-  // two lists now measure the SAME: 7 entries, 368px tall at 360x780, plain and
+  // two lists now measure the SAME: 8 entries, 416px tall at 360x780, plain and
   // playful, no entry wrapping. They differ only in width (235px not-connected,
   // 270px connected). Asserted in `e2e/smoke/row-menu-viewport-fit.spec.ts`, which
   // until #253's review only logged those numbers without checking them.

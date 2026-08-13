@@ -98,8 +98,12 @@ describe("t() function", () => {
     // here BY VALUE because the whole point of the split is that they diverge: the
     // menu entry is an imperative, the card's CTA keeps its question mark. A future
     // "tidy" that re-merges them reds two cases rather than none.
-    ["action.breakNow", "plain", "Break into steps"],
-    ["action.breakNow", "playful", "🍿 Break into steps"],
+    //
+    // It must also stay distinct from `action.breakdown`, the SHORT inline CTA on the
+    // same row — a dedicated case for that sits at the foot of this file, because a
+    // value assertion alone would not notice the two converging.
+    ["action.breakNow", "plain", "Break it down in the editor"],
+    ["action.breakNow", "playful", "🍿 Break it down in the editor"],
     ["action.addTodoFull", "plain", "Add as single-task to-do"],
     ["action.addTodoFull", "playful", "🍽️ Add as single-task to-do"],
     ["action.saveShort", "plain", "Save"],
@@ -789,4 +793,83 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
       expect(hasEmoji(t(key, "plain"))).toBe(false);
     });
   }
+});
+
+/**
+ * #253 F1 — the row's break-up labels must stay distinguishable from each other.
+ *
+ * Three keys name the same underlying act on three surfaces, and two of them sit on
+ * the SAME ROW. `action.breakNow` was briefly "Break into steps", which is
+ * character-identical to `action.breakdown`, the short inline CTA beside it — the
+ * exact defect #253 removed when it took the full "Save for later" `aria-label` off
+ * the inline `Save`: two controls in one row answering to one name, an ambiguous
+ * voice-control target (WCAG 2.5.3's neighbourhood) and a row from which no query can
+ * pick out either. It was caught by an unrelated spec's `/break into steps/i` matching
+ * two elements, which is the same ambiguity a user's voice command would hit.
+ *
+ * A value assertion cannot see convergence — both would still "pass" while being
+ * equal — so the relationship is asserted directly.
+ */
+describe("the break-up labels stay distinct (#253 F1)", () => {
+  const keys = [
+    "action.breakdown",
+    "action.breakNow",
+    "prompt.breakNow",
+  ] as const;
+
+  it.each(["plain", "playful"] as const)(
+    "no two of the three collide in %s voice",
+    (voice) => {
+      const rendered = keys.map((k) => t(k, voice));
+      expect(
+        new Set(rendered).size,
+        `two of ${JSON.stringify(rendered)} are identical`,
+      ).toBe(keys.length);
+    },
+  );
+
+  /**
+   * Prefixes, but only for the pairs that can be on screen TOGETHER.
+   *
+   * ⚠️ A first version of this asserted it across all three and immediately caught a
+   * real relation: `action.breakdown` ("Break into steps") is a prefix of
+   * `prompt.breakNow` ("Break into steps now?"). That is NOT a defect, and the reason
+   * is the whole shape of this test — those two are inline CTAs on different rows in
+   * different buckets (Needs-review, and an awaiting Multi-step card), so no user and
+   * no query ever sees both at once. Ambiguity is a property of a CONTEXT, not of a
+   * string table.
+   *
+   * The two pairs that do co-occur, each on one row:
+   *   • Needs-review row      — inline `action.breakdown` + ▾ `action.breakdownNow`
+   *   • awaiting Multi-step   — inline `prompt.breakNow`  + ▾ `action.breakNow`
+   */
+  it.each([
+    ["the Needs-review row", "action.breakdown"],
+    ["an awaiting Multi-step card", "prompt.breakNow"],
+  ] as const)(
+    "on %s, the ▾ entry is neither equal to nor a prefix of the inline CTA",
+    (_where, inlineKey) => {
+      for (const voice of ["plain", "playful"] as const) {
+        const inline = t(inlineKey, voice);
+        const entry = t("action.breakNow", voice);
+        expect(entry, `equal in ${voice}`).not.toBe(inline);
+        expect(
+          entry.startsWith(inline),
+          `"${inline}" is a prefix of "${entry}" in ${voice} voice`,
+        ).toBe(false);
+        expect(
+          inline.startsWith(entry),
+          `"${entry}" is a prefix of "${inline}" in ${voice} voice`,
+        ).toBe(false);
+      }
+    },
+  );
+
+  it("the menu entry is an imperative and the card's prompt is a question", () => {
+    // The owner's split, pinned so a later pass cannot quietly re-merge the register.
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("prompt.breakNow", voice)).toMatch(/\?$/);
+      expect(t("action.breakNow", voice)).not.toMatch(/\?$/);
+    }
+  });
 });
