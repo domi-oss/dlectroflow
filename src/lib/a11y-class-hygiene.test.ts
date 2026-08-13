@@ -24,10 +24,13 @@ import {
  *    `/login` and `/` all passed their zero-tolerance contrast gates while
  *    failing AA in a state a real user reaches.
  *  * #117's menu-entry focus indicator is invisible to axe for a different
- *    reason: **axe ships no rule for any of WCAG 2.2's focus criteria**, and the
- *    e2e runs ask for 2.0/2.1 tags only. No fixture would have caught it. The
- *    three criteria and their levels are set out at `findWeakFocusIndicators`;
- *    this docblock used to cite the wrong one of them (#258).
+ *    reason: **axe ships no rule for any of WCAG 2.2's focus criteria** — that
+ *    alone is why no fixture would have caught it, and it is measured in
+ *    `a11y-class-hygiene.ts`'s header rather than asserted. The e2e runs also ask
+ *    for 2.0/2.1 tags only, but that is *not* the reason and the header says why:
+ *    those tags still select three rules carrying a 2.2 tag. The three criteria
+ *    and their levels are set out at `findWeakFocusIndicators`; this docblock used
+ *    to cite the wrong one of them (#258).
  *
  * !188 fixed #95 by seeding the state — backdating a library row by 13 hours so
  * the amber existed during the scan. That works, and it is the right tool for a
@@ -628,6 +631,21 @@ describe("findWeakFocusIndicators", () => {
     expect(findings[0].reason).toContain("2.4.13");
     expect(findings[0].reason).toContain("AAA");
     expect(findings[0].reason).toContain("focus-visible:bg-accent");
+    // And it must not let "AAA" be read as "optional", which is #258's own
+    // defect mirrored. 1.4.11 Non-text Contrast is **AA** and, per the W3C's
+    // Understanding note, it governs an author-drawn focus indicator's 3:1
+    // against adjacent colours — the exemption is for a UA-drawn one, and this
+    // branch fires precisely when the author replaced it. So a hue-only
+    // indicator is very likely an AA failure as well; told only "AAA, a bar this
+    // repo chose", a developer allowlists it and ships one.
+    //
+    // The message must still not ASSERT the AA failure: per gap 1 this module
+    // measures no ratio. Naming the criterion and saying the gate cannot read it
+    // leaves the question open, which is the honest position and the one the
+    // docblock takes.
+    expect(findings[0].reason).toContain("1.4.11 Non-text Contrast");
+    expect(findings[0].reason).toContain("which is AA");
+    expect(findings[0].reason).toContain("cannot measure");
   });
 
   it("accepts outline-none paired with a focus ring (the repo's trigger convention)", () => {
@@ -1130,17 +1148,36 @@ describe("WCAG criterion citations (#258)", () => {
       ["// WCAG 2.4.13 Focus Not Obscured (Minimum) is AA"],
       ["// a ring is needed for WCAG 2.4.13 Focus Appearance, which is AA"],
       ["// the shared 44x44 floor, WCAG 2.5.5 Target Size, which is AA"],
-      // Wrapped at 80 columns, both ways round, which a per-line scan misses:
-      // `note-field.tsx` wrapped BEFORE the name and `add-note-button.tsx`
-      // INSIDE it, and the second also needs the comment marker stripped before
-      // the join rather than after. Asserted through `flatten` rather than
-      // against a hand-joined string, so what is proven is the reader and not
-      // the pattern alone — both bugs were in the reader, and a pattern-only
-      // assertion passed straight through them.
+    ]) {
+      expect(faultsIn(...broken), broken.join(" ⏎ ")).not.toEqual([]);
+    }
+
+    // The two 80-column wrap shapes, asserted on the CORRECTION rather than on
+    // "some fault", because `.not.toEqual([])` does not discriminate the reader
+    // from the pattern for one of them. Measured against `origin/main`'s tree,
+    // where eleven welds were live: a per-line scan reports ten of them, and the
+    // two wrapped files fail differently.
+    //
+    //  * `note-field.tsx` wrapped BEFORE the name (`… WCAG 2.4.11` ⏎
+    //    `// Focus Appearance …`). Per-line captures no name, so the file reads
+    //    **clean** — the only one of the eleven that does.
+    //  * `add-note-button.tsx` wrapped INSIDE it (`… WCAG 2.4.11 Focus` ⏎
+    //    `// Appearance …`). Per-line captures `Focus`, so it *is* flagged — with
+    //    the wrong correction, `not "Focus"`, which reads as "rename the
+    //    criterion" when the fix is to renumber it. A control that accepts any
+    //    fault passes straight through that, and did.
+    //
+    // Asserted through `flatten` rather than a hand-joined string, so what is
+    // proven is the reader: the second shape also needs the comment marker
+    // stripped before the join, or the name reads as `Focus Not // Obscured` and
+    // an honest wrapped citation is flagged instead.
+    for (const wrapped of [
       ["// swap, because WCAG 2.4.11", "// Focus Appearance needs a real edge"],
       ["// not a colour swap: WCAG 2.4.11 Focus", "// Appearance is not met"],
     ]) {
-      expect(faultsIn(...broken), broken.join(" ⏎ ")).not.toEqual([]);
+      expect(faultsIn(...wrapped), wrapped.join(" ⏎ ")).toEqual([
+        '2.4.11 is "Focus Not Obscured" (AA), not "Focus Appearance" — "Focus Appearance" is 2.4.13, AAA',
+      ]);
     }
 
     // And the honest citations stay legal, so the guard cannot be satisfied by

@@ -12,14 +12,32 @@
  *    found.
  *  * #117 — a focus indicator that is only a background swap. axe ships **no rule
  *    for any of WCAG 2.2's focus criteria** — not 2.4.7 Focus Visible, not 2.4.11
- *    Focus Not Obscured, not 2.4.13 Focus Appearance — so no amount of seeding
- *    would have caught it. The contrast gate, the guest-surface scans and the axe
- *    baseline are all structurally incapable of seeing it, and
+ *    Focus Not Obscured, not 2.4.13 Focus Appearance, and none for 1.4.11
+ *    Non-text Contrast either — so no amount of seeding would have caught it. The
+ *    contrast gate, the guest-surface scans and the axe baseline are all
+ *    structurally incapable of seeing it.
+ *
+ *    Measured against axe-core 4.12.1 on 2026-08-13: 105 rules, none carrying a
+ *    `wcag247`, `wcag2411`, `wcag2413` or `wcag1411` tag. Re-measure rather than
+ *    trust the sentence — `axe.getRules()` takes one line — because the reason
+ *    this header gave until #258 was measured was **wrong**. It said
  *    `e2e/a11y/axe-helpers.ts` asks for `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`
- *    only, so a 2.2 rule would not run here even if one existed. The criteria and
- *    their levels are set out at {@link findWeakFocusIndicators}; they were read
- *    off the specification for #258, because the citation this header used to
- *    carry was wrong in both the number and the level.
+ *    only, "so a 2.2 rule would not run here even if one existed". Those tags
+ *    select 69 of the 105 rules, three of which do carry a 2.2 tag (`blink`,
+ *    `marquee` and `meta-refresh` are each `wcag2a` as well). The focus criteria
+ *    are unobserved because **no rule exists**, full stop; the tag list is not
+ *    what hides them, and a coverage claim resting on the wrong mechanism is one
+ *    axe upgrade away from being confidently backwards.
+ *
+ *    The tag list does cost exactly one rule, and it is not a focus one:
+ *    `target-size` is the only rule tagged `wcag22aa`, it covers 2.5.8 Target
+ *    Size (Minimum) at AA, and those four tags do not select it. Recorded here
+ *    rather than fixed, because it is a different gap from this module's and the
+ *    same 24x24 floor is cited in `utils.ts`.
+ *
+ *    The criteria and their levels are set out at {@link findWeakFocusIndicators};
+ *    they were read off the specification for #258, because the citation this
+ *    header used to carry was wrong in both the number and the level.
  *
  * Seeding fixtures per state is what !188 did for #95 and it works, but it costs
  * one fixture per state and catches the *instance*, not the class — which is why
@@ -745,19 +763,33 @@ function drawsIndicator(base: string): boolean {
  *    can be argued to satisfy it while being invisible in practice: the swap the
  *    two header menus relied on measured **1.07:1 (light)** and **1.17:1 (dark)**
  *    between the focused and unfocused entry, which is the ratio *2.4.13* puts a
- *    3:1 floor under, and 2.4.13 is AAA. (On those numbers it also fails 1.4.11
- *    Non-text Contrast, which *is* AA and asks 3:1 of the visual information
- *    identifying a state — but that is a measurement, and per gap 1 above this
- *    module is not a photometer, so it cannot assert it.)
+ *    3:1 floor under, and 2.4.13 is AAA. (The same numbers read on 1.4.11
+ *    Non-text Contrast too, which *is* AA and asks 3:1 of the visual information
+ *    identifying a state: for a background-only indicator, the adjacent colour a
+ *    focused entry is measured against *is* its unfocused neighbour, so both
+ *    criteria happen to measure the same pair of pixels here. And 1.4.11's
+ *    exemption is for a focus style the author has not modified, while this
+ *    branch fires only where the author removed the UA outline — so the exemption
+ *    does not apply. It is still a measurement, though, and per gap 1 above this
+ *    module is not a photometer, so it names the criterion and leaves the
+ *    question open instead of asserting a failure.)
  *
  * So the colour-only branch is a house rule that reaches toward 2.4.13, chosen
  * because a categorical "draw a real edge" is enforceable on class strings where
- * a contrast threshold is not. It is not a conformance obligation, and it is
- * described that way in the finding: told they are failing AA, a developer treats
- * it as non-negotiable and looks for the smallest thing that clears it; told AAA,
- * they know it is this project's choice and can argue about it. The same
- * distinction `note-field.tsx` and `row-menu-viewport-fit.spec.ts` had to make
- * for 2.5.5 (Enhanced, AAA) against 2.5.8 (Minimum, AA).
+ * a contrast threshold is not. The *rule* is not a conformance obligation, and
+ * the finding says so: told they are failing AA, a developer treats it as
+ * non-negotiable and looks for the smallest thing that clears it; told AAA, they
+ * know it is this project's choice and can argue about it. The same distinction
+ * `note-field.tsx` and `row-menu-viewport-fit.spec.ts` had to make for 2.5.5
+ * (Enhanced, AAA) against 2.5.8 (Minimum, AA).
+ *
+ * What the finding must not do is let "AAA" be read as "optional", because the
+ * defect it fires on is usually an AA failure as well — just one under a
+ * criterion nothing here can measure. #258's original mistake was a AAA bar
+ * reported as an AA obligation; reporting a likely AA failure as a purely AAA
+ * preference is that mistake with the sign flipped, and it is the one a developer
+ * would make next, having been told the rule is above the floor. So the message
+ * names 1.4.11 and marks it unmeasured.
  *
  * axe implements none of the three, so this is the only automated check in the
  * repo that sees a **killed focus indicator** at all.
@@ -813,7 +845,7 @@ export function findWeakFocusIndicators(
       // it is AA" and "this project asks for more than AA here", and a developer
       // reads one of these at the moment they are deciding which.
       reason: colourOnly
-        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}); a hue change carries no indicator area and no focused/unfocused contrast, so it misses WCAG 2.4.13 Focus Appearance — AAA, a bar this repo holds itself to above its AA floor, because #117's swap measured 1.07:1. Add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
+        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}); a hue change carries no indicator area and no focused/unfocused contrast, so it misses WCAG 2.4.13 Focus Appearance — AAA, a bar this repo holds itself to above its AA floor, because #117's swap measured 1.07:1. An author-drawn indicator that weak is probably below WCAG 1.4.11 Non-text Contrast as well, which is AA and therefore not optional — but that is a ratio this gate cannot measure, so read the AA question as open rather than answered. Add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
         : `\`${killer}\` removes the UA focus outline and nothing replaces it, so the element has no visible focus indicator at all — WCAG 2.4.7 Focus Visible, which is AA`,
     });
   }
