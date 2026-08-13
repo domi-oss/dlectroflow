@@ -129,6 +129,34 @@ export async function maybeAwardTenStepsDay(
  * by completing a step directly. Logs StepDone, extends the streak, and awards
  * the ten-steps-in-a-day badge. Does NOT log SessionFinished (that is the focus
  * timer's own bonus).
+ *
+ * ## Why these three stay in ONE unit (#257, `!339`)
+ *
+ * `!339` split every other multi-payout post-commit block in the app into one
+ * `bestEffort` call per consequence, so that a failing payout cannot cancel the
+ * ones behind it. **This function is the deliberate exception, and the exception
+ * is stated here so that a bundled block is never mistaken for an oversight.**
+ *
+ * The rule that MR follows is *split unless a later consequence reads what an
+ * earlier one wrote*, and this is the only site in the sweep that fails it:
+ * `maybeAwardTenStepsDay` does `rewardEvent.count({ type: StepDone })`, counting
+ * the row `logReward` writes two lines above. Make those two independent and the
+ * count is short by one on the tenth step of the day, so the badge is silently
+ * not awarded — a worse failure than the one splitting would fix, because it is
+ * wrong rather than merely missing.
+ *
+ * **The residual, stated rather than implied.** `touchStreakOnEngagement` sits
+ * between them and is genuinely independent (it reads `Settings` and `Streak`
+ * only), so if it rejects, `maybeAwardTenStepsDay` does not run. That is the
+ * cancellation this class is about, and it is not removed by reordering —
+ * reordering only moves which consequence gets cancelled, because `await`
+ * sequencing is what carries the read-after-write dependency. Removing it
+ * entirely would mean per-payout swallows *inside* a reward primitive, which
+ * `best-effort.ts` rejects by design: the swallow belongs to the caller that
+ * committed the write, and a primitive that never rejects cannot be composed by
+ * a caller that needs to know. Both callers already wrap this whole function in
+ * `bestEffort`, so a fault here is logged and cannot report the write as failed;
+ * what is lost is at most the remainder of one step's payout.
  */
 export async function rewardStepDone(
   workspaceId: string,

@@ -89,10 +89,31 @@ export type BookkeepingTag =
   | "breakdown_badge_failed"
   /** `confirmBreakdown` — the qualifying-engagement streak touch. */
   | "breakdown_streak_touch_failed"
-  /** `completeStep` — `rewardStepDone` (points, streak, ten-steps badge). */
+  /**
+   * `completeStep` — `rewardStepDone` (points, streak, ten-steps badge).
+   *
+   * **The one deliberately BUNDLED site, and the reason is a read-after-write.**
+   * One tag covers three consequences here, which everywhere else in this union
+   * would be the defect: `maybeAwardTenStepsDay` does
+   * `rewardEvent.count({ type: StepDone })` and counts the row `logReward` has
+   * just written, so it cannot be made independent of it — split them and the
+   * count is short by one and the badge is silently not awarded. The rule this
+   * union follows is therefore **split unless a later consequence reads what an
+   * earlier one wrote**, not "always split". See `rewardStepDone`'s own docblock
+   * for the residual this bundling leaves.
+   */
   | "step_done_bookkeeping_failed"
-  /** `markTaskCompleted` — the task-complete points and badge. */
-  | "task_complete_bookkeeping_failed"
+  /**
+   * `markTaskCompleted` — the TaskComplete points.
+   *
+   * Two tags, split for the same reason as `confirmBreakdown`'s three and checked
+   * against the same rule: `awardBadge(TaskComplete)` is a once-ever `findUnique`
+   * + `skipDuplicates` insert that never reads `RewardEvent`, so neither payout
+   * reads what the other wrote.
+   */
+  | "task_complete_points_failed"
+  /** `markTaskCompleted` — the once-ever TaskComplete badge. */
+  | "task_complete_badge_failed"
   /**
    * `completeFocus` — the step payout (points, streak, ten-steps badge).
    *
@@ -177,6 +198,27 @@ export function recordBookkeepingFailure(
  * the `RewardEvent` row `logReward` has just written. A caller that wants two
  * payouts to be independent of each other calls this twice, which is what
  * `completeFocus` does.
+ *
+ * ## ONE CALL PER INDEPENDENT CONSEQUENCE — the rule, and its one exception
+ *
+ * The thunk is sequential, so **two payouts inside one thunk are not independent
+ * of each other**: the first rejection cancels the rest, and the shared tag cannot
+ * say which was lost. Duo review found that shape three times on `!339` — in
+ * `completeFocus`, `confirmBreakdown` and `markTaskCompleted` — and it is worth
+ * naming why it kept recurring: a bundled thunk still satisfies every *aggregate*
+ * measure of the fix. One call, one tag, no duplicate tags. The only measure that
+ * sees it is **independent consequences per thunk**, counted per call site.
+ *
+ * So the rule for a caller is: **split unless a later consequence reads what an
+ * earlier one wrote.** Not "always split" — the read-after-write case must stay in
+ * one unit, because splitting it produces a wrong answer rather than a missing one.
+ *
+ * As of `!339` this file's sweep stands at **nine calls across five sites, one
+ * consequence each, except `step_done_bookkeeping_failed`** — `rewardStepDone`,
+ * the single deliberate exception, which bundles three because
+ * `maybeAwardTenStepsDay` counts `logReward`'s row. Its docblock in `rewards.ts`
+ * records the dependency and the residual. Any other bundled thunk in this app is
+ * a bug, not a decision.
  */
 export async function bestEffort<T>(
   tag: BookkeepingTag,

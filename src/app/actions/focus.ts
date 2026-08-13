@@ -211,6 +211,20 @@ async function closeSession(
  * idempotent, so the next completion earns it; the points for this one are lost.
  * Google is patched either way — it is best-effort already and for the same
  * reason.
+ *
+ * ## TWO calls, not one thunk (Duo review, `!339`, third round)
+ *
+ * The two payouts were bundled in a single `bestEffort` thunk, which is the same
+ * defect this MR fixes in `confirmBreakdown` and `completeFocus`: a thunk is
+ * sequential, so a `logReward` rejection **cancelled the `awardBadge` behind it**
+ * and the shared tag could not say which of the two had been lost. So the residual
+ * above was wrong in the bundled version — one fault cost BOTH payouts, not one.
+ *
+ * Checked against the rule rather than split reflexively: `awardBadge` is a
+ * once-ever `findUnique` + `skipDuplicates` insert and never reads `RewardEvent`,
+ * so neither payout reads what the other wrote and both are safe to run alone.
+ * The site that fails that test is `rewardStepDone`, which stays bundled — its
+ * docblock records why.
  */
 async function markTaskCompleted(
   workspaceId: string,
@@ -226,13 +240,11 @@ async function markTaskCompleted(
     where: { taskId, workspaceId },
     data: { completedAt: new Date() },
   });
-  await bestEffort(
-    "task_complete_bookkeeping_failed",
-    workspaceId,
-    async () => {
-      await logReward(workspaceId, RewardType.TaskComplete);
-      await awardBadge(workspaceId, BadgeKey.TaskComplete);
-    },
+  await bestEffort("task_complete_points_failed", workspaceId, () =>
+    logReward(workspaceId, RewardType.TaskComplete),
+  );
+  await bestEffort("task_complete_badge_failed", workspaceId, () =>
+    awardBadge(workspaceId, BadgeKey.TaskComplete),
   );
   // #195 — a task can carry its OWN Google id, from having been scheduled while
   // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates

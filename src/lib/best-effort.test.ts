@@ -84,7 +84,7 @@ describe("bestEffort", () => {
   // inside it, say — is the same failure and must not escape either.
   it("catches a thunk that throws before returning a promise", async () => {
     await expect(
-      bestEffort("task_complete_bookkeeping_failed", "ws-1", () => {
+      bestEffort("task_complete_points_failed", "ws-1", () => {
         throw new Error(BOOM);
       }),
     ).resolves.toBeNull();

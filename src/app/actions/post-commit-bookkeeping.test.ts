@@ -370,11 +370,49 @@ describe("completeStep — a payout that fails after the step committed", () => 
   it("survives the task-complete payout failing, and still patches Google", async () => {
     logRewardMock.mockRejectedValueOnce(new Error(BOOM));
     await expect(complete()).resolves.toBeUndefined();
-    expect(loggedTag()).toBe("task_complete_bookkeeping_failed");
+    expect(loggedTag()).toBe("task_complete_points_failed");
     // #195 — the task-grain patch runs last and is what closes a Google task
     // belonging to a to-do that was scheduled while it was still stepless.
     expect(completeGoogleTaskForTaskMock).toHaveBeenCalledTimes(1);
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  /**
+   * ── `markTaskCompleted`'s two payouts are independent too (Duo, 3rd round) ──
+   *
+   * The same defect class as `confirmBreakdown`, found a third time and in the
+   * one place the sweep that "passed" could not see: the two payouts were bundled
+   * in ONE thunk under one tag, so a `logReward` fault silently cost the
+   * TaskComplete badge as well, with no way to tell which had failed.
+   *
+   * Splitting is correct here by the rule, checked rather than assumed:
+   * `awardBadge(TaskComplete)` is a once-ever `findUnique` + `skipDuplicates`
+   * insert that never reads `RewardEvent`, so nothing here reads what the other
+   * wrote. Contrast `rewardStepDone`, which stays bundled — see its docblock.
+   */
+  it("still awards the badge when the task-complete points fail", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(awardBadgeMock).toHaveBeenCalledWith(WS, BadgeKey.TaskComplete);
+  });
+
+  it("still logs the points when the task-complete badge fails", async () => {
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("task_complete_badge_failed");
+    expect(logRewardMock).toHaveBeenCalledWith(WS, RewardType.TaskComplete);
+  });
+
+  it("emits two DIFFERENT tags when both task-complete payouts fail", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+
+    expect(loggedTags()).toEqual([
+      "task_complete_points_failed",
+      "task_complete_badge_failed",
+    ]);
+    expect(new Set(loggedTags()).size).toBe(2);
   });
 
   it("CONTROL: the task's own Done write failing still rejects", async () => {
