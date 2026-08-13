@@ -649,6 +649,38 @@ describe("findWeakFocusIndicators", () => {
     expect(findings[0].reason).toContain("cannot measure");
   });
 
+  it("states no measured ratio, because the gate measures none (Duo, !340)", () => {
+    // This `reason` is returned for EVERY colour-only violation, so anything in
+    // it specific to one historical site is a claim about a finding the gate
+    // never looked at. The wording before this test ended "because #117's swap
+    // measured 1.07:1" — for a new violation in an unrelated file that figure is
+    // inherited, unmeasurable by this module, and unfalsifiable by the person
+    // reading it while trying to fix their own code.
+    //
+    // #258 was a criterion number that did not match what was measured. A
+    // measurement that does not match what was examined is the same defect one
+    // level down, and harder to catch, because a wrong number at least looks
+    // like a number somebody could check. Raised by Duo review on !340.
+    //
+    // Asserted on the WHOLE string, not by substring. The wrap fixtures further
+    // down this file are the reason: a control that only checks the parts it
+    // remembers to name lets a ratio creep back in beside them.
+    const findings = findWeakFocusIndicators(
+      `const x = <button className="rounded outline-none focus-visible:bg-muted" />;`,
+      "some-unrelated-component.tsx",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).not.toContain("#117");
+    expect(findings[0].reason).not.toContain("1.07");
+    // No ratio of any kind. Thresholds live in the docblock with the criteria
+    // they belong to; in a per-finding message a bare "3:1" reads as something
+    // this gate compared against, and it compared against nothing.
+    expect(findings[0].reason).not.toMatch(/\d+(\.\d+)?\s*:\s*1\b/);
+    expect(findings[0].reason).toBe(
+      "`outline-none` removes the UA focus outline and the only focus treatment left is a colour swap (focus-visible:bg-muted); a hue change carries no indicator area and no focused/unfocused contrast, so it engages WCAG 2.4.13 Focus Appearance, which is AAA, and WCAG 1.4.11 Non-text Contrast, which is AA and therefore not optional. This gate cannot measure a contrast ratio, so whether either threshold is met here is unknown and a human has to check. Add `focus-visible:inset-ring-2 focus-visible:inset-ring-ring`",
+    );
+  });
+
   it("accepts outline-none paired with a focus ring (the repo's trigger convention)", () => {
     expect(
       findWeakFocusIndicators(

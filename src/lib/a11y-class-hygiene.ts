@@ -789,9 +789,10 @@ function drawsIndicator(base: string): boolean {
  * So the colour-only branch is a house rule that reaches toward 2.4.13, chosen
  * because a categorical "draw a real edge" is enforceable on class strings where
  * a contrast threshold is not. The *rule* is not a conformance obligation, and
- * the finding says so: told they are failing AA, a developer treats it as
- * non-negotiable and looks for the smallest thing that clears it; told AAA, they
- * know it is this project's choice and can argue about it. The same distinction
+ * the finding carries both levels so a developer can tell which is which: told
+ * they are failing AA they treat it as non-negotiable and look for the smallest
+ * thing that clears it; told AAA they know it is this project's choice and can
+ * argue about it. The same distinction
  * `note-field.tsx` and `row-menu-viewport-fit.spec.ts` had to make for 2.5.5
  * (Enhanced, AAA) against 2.5.8 (Minimum, AA).
  *
@@ -801,7 +802,26 @@ function drawsIndicator(base: string): boolean {
  * reported as an AA obligation; reporting a likely AA failure as a purely AAA
  * preference is that mistake with the sign flipped, and it is the one a developer
  * would make next, having been told the rule is above the floor. So the message
- * names 1.4.11 and marks it unmeasured.
+ * names 1.4.11 as well, at AA, and says the ratio is unmeasured here.
+ *
+ * ── Why the finding quotes no ratio ─────────────────────────────────────────
+ * The 1.07:1 and 1.17:1 above belong to #117's two menus and stay here, where the
+ * case they were measured on is attached. They are **not** in the message, which
+ * is one string returned for every colour-only violation the gate will ever
+ * report: a figure from one site, restated for a finding in an unrelated file, is
+ * a measurement nobody took, and nothing in the sentence shows the reader it was
+ * inherited. Duo review caught that on !340 — the wording ended "because #117's
+ * swap measured 1.07:1".
+ *
+ * It is #258's defect one level down, and the more dangerous half of it: a wrong
+ * criterion number still looks like something a reader could go and check, while
+ * an inherited ratio reads as evidence. Since this module measures no contrast at
+ * all (gap 1), **no** ratio in a per-finding message can be about that finding —
+ * not even a threshold, because a bare "3:1" beside a violation reads as a
+ * comparison the gate performed, and it performed none. The message states only
+ * what the scanner knows: the outline is gone, the replacement is a colour, which
+ * two criteria that engages, and that the measuring is a human's job.
+ * `a11y-class-hygiene.test.ts` pins the whole string rather than substrings of it.
  *
  * axe implements none of the three, so this is the only automated check in the
  * repo that sees a **killed focus indicator** at all.
@@ -856,8 +876,13 @@ export function findWeakFocusIndicators(
       // in the message on purpose (#258): it is the difference between "fix this,
       // it is AA" and "this project asks for more than AA here", and a developer
       // reads one of these at the moment they are deciding which.
+      //
+      // What is deliberately NOT here is any ratio. This string is returned for
+      // every colour-only violation, so a figure measured at one site is a claim
+      // about findings nobody examined — see the docblock, and the control in
+      // `a11y-class-hygiene.test.ts` that pins the whole string.
       reason: colourOnly
-        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}); a hue change carries no indicator area and no focused/unfocused contrast, so it misses WCAG 2.4.13 Focus Appearance — AAA, a bar this repo holds itself to above its AA floor, because #117's swap measured 1.07:1. An author-drawn indicator that weak is probably below WCAG 1.4.11 Non-text Contrast as well, which is AA and therefore not optional — but that is a ratio this gate cannot measure, so read the AA question as open rather than answered. Add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
+        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}); a hue change carries no indicator area and no focused/unfocused contrast, so it engages WCAG 2.4.13 Focus Appearance, which is AAA, and WCAG 1.4.11 Non-text Contrast, which is AA and therefore not optional. This gate cannot measure a contrast ratio, so whether either threshold is met here is unknown and a human has to check. Add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
         : `\`${killer}\` removes the UA focus outline and nothing replaces it, so the element has no visible focus indicator at all — WCAG 2.4.7 Focus Visible, which is AA`,
     });
   }
