@@ -934,7 +934,11 @@ test.describe("#253 the row action line is compact at 360px", () => {
         ).toBeVisible();
       }
 
-      for (const entry of await popup.getByRole("button").all()) {
+      // `button, a`, not `getByRole("button")`: two `rowMenuEntry` entries render
+      // as `<a>` (the Schedule slot is a `<Link>` when Google is not connected),
+      // and a role-keyed query left them unmeasured — so the entries most likely
+      // to be long were the ones this loop could not see.
+      for (const entry of await popup.locator("button, a").all()) {
         const h = await entry.evaluate(
           (n: HTMLElement) => n.getBoundingClientRect().height,
         );
@@ -1062,32 +1066,88 @@ test.describe("#253 the row action line is compact at 360px", () => {
     }
 
     /**
-     * The entries in document order with their rendered heights, so the shot is
-     * captioned by the run rather than by whatever its author remembered — and so
-     * the log says which labels WRAP.
+     * The entries in document order with their rendered heights and LINE COUNTS,
+     * so the shot is captioned by the run rather than by whatever its author
+     * remembered — and so a wrapped label is a value a test can assert on.
      *
      * The wrapping matters and is not a nit: `popupSurface` is a flex column with
      * no width of its own, so the widest entry sets the popup's width and every
      * narrower one gets it for free. Take the widest entry away — which is what a
      * workspace with no Google connection does, since "Schedule to calendar (send
      * to Google Tasks)" is that entry — and the column narrows onto the next
-     * longest, which then wraps to two lines. So the list is TALLER without Google
-     * than with it, which is the opposite of what an entry count predicts.
+     * longest, which could then wrap. `rowMenuEntry` carries no `whitespace-nowrap`
+     * and no `truncate`, so nothing prevents it.
+     *
+     * ⚠️ Two corrections to how this used to work, both of which let a real
+     * regression through:
+     *
+     *  1. `getByRole("button")` MISSED THE LINK ENTRIES. Two `rowMenuEntry`
+     *     entries render as `<a>` — the Schedule slot is a `<Link>` when Google is
+     *     not connected — so in that state one entry was neither counted nor
+     *     height-measured. That is why the not-connected list was recorded as
+     *     having 6 entries when it has 7, and it is provable without opening the
+     *     screenshot: two lists cannot both be 368px tall with every entry at 44px
+     *     if one has six entries and the other seven.
+     *  2. NOTHING ASSERTED ON THE RESULT. `rows` was computed, logged and
+     *     dropped. The only per-entry bound in the file was `>= 44`, which a
+     *     two-line ~62px entry passes comfortably — so the very symptom this
+     *     issue exists to remove was measured on every run and never checked.
+     *
+     * Lines are counted from the distinct tops of the text's own client rects
+     * rather than from the box height, deliberately: `min-h-11` pins the box to
+     * 44px whatever the text does, so any height-over-line-height arithmetic reads
+     * two lines for correct single-line markup.
      */
     async function entryRows(
       popup: Locator,
-    ): Promise<Array<{ label: string; height: number }>> {
-      const entries = await popup.getByRole("button").all();
+    ): Promise<Array<{ label: string; height: number; lines: number }>> {
+      // `button, a` — see correction 1 above.
+      const entries = await popup.locator("button, a").all();
       return Promise.all(
         entries.map(async (e) => ({
           label: (await e.textContent())?.trim() ?? "",
-          height: Math.round(
-            await e.evaluate(
-              (n: HTMLElement) => n.getBoundingClientRect().height,
-            ),
-          ),
+          ...(await e.evaluate((n: HTMLElement) => {
+            const range = document.createRange();
+            range.selectNodeContents(n);
+            const tops = new Set(
+              Array.from(range.getClientRects())
+                .filter((r) => r.width > 0 && r.height > 0)
+                .map((r) => Math.round(r.top)),
+            );
+            return {
+              height: Math.round(n.getBoundingClientRect().height),
+              lines: Math.max(1, tops.size),
+            };
+          })),
         })),
       );
+    }
+
+    /**
+     * Every entry is one line and no taller than a single-line 44px target.
+     *
+     * `lines` is the precise statement and the height bound is the belt-and-braces
+     * one: an entry that wraps grows past the `min-h-11` floor, so either check
+     * catches it, and 48px leaves room for a sub-pixel layout without leaving room
+     * for a second 20px line.
+     */
+    function expectNoWrappedEntries(
+      rows: Array<{ label: string; height: number; lines: number }>,
+      what: string,
+    ) {
+      expect(rows.length, `${what}: no entries were measured`).toBeGreaterThan(
+        0,
+      );
+      for (const r of rows) {
+        expect(
+          r.lines,
+          `${what}: "${r.label}" wrapped onto ${r.lines} lines (${r.height}px)`,
+        ).toBe(1);
+        expect(
+          r.height,
+          `${what}: "${r.label}" is ${r.height}px tall`,
+        ).toBeLessThanOrEqual(48);
+      }
     }
 
     for (const google of [false, true] as const) {
@@ -1166,6 +1226,12 @@ test.describe("#253 the row action line is compact at 360px", () => {
           // supported viewport.
           expectInsideViewport(box, `▾ list at 360px (${suffix})`);
 
+          // And the entries themselves are single-line. This is the check the
+          // measurement above was collected for and never fed: a compact row that
+          // reaches its actions through a list whose labels wrap has moved the
+          // height problem rather than solved it, which is the whole of #253.
+          expectNoWrappedEntries(rows, `▾ list at 360px (${suffix})`);
+
           // No horizontal scroll bought the vertical fit — the longest label
           // ("Schedule to calendar (send to Google Tasks)") is in this list when
           // Google is connected, and `popupSurface`'s width cap plus the
@@ -1186,6 +1252,177 @@ test.describe("#253 the row action line is compact at 360px", () => {
         }
       });
     }
+
+    /**
+     * ── Settles the claim the two shots above were only ever logging ───────────
+     *
+     * The tree asserted, in prose, that the not-connected list is TALLER than the
+     * connected one because removing the longest entry narrows the column and the
+     * next-longest label then wraps. That claim is load-bearing: it is the stated
+     * justification for dropping `#128`'s OAuth caveat from the row entry
+     * (`strings.ts`, same wording in `row-actions.tsx`), i.e. it names the symptom
+     * this issue exists to remove. It was never asserted anywhere — the two
+     * screenshot tests computed the numbers and `console.log`ged them.
+     *
+     * One test rather than a comparison stitched across the loop's two runs,
+     * because the two states have to be measured against each other and a
+     * cross-test module variable would depend on execution order to mean anything.
+     *
+     * PLAYFUL voice, which nothing else in the suite renders a ▾ list in. Playful
+     * labels carry emoji and are the longer of the two variants, so this is the
+     * worst case for a width-driven wrap — measuring only `plain` would leave the
+     * state most likely to wrap unmeasured, which is the same gap as measuring
+     * only the entries that happen to be `<button>`.
+     */
+    test("neither Google state's ▾ list wraps at 360px, in playful voice", async ({
+      page,
+    }) => {
+      const prisma = new PrismaClient();
+      const marker = `${COMPACT_MARKER} wrap probe`;
+      const heights: Record<string, number> = {};
+      try {
+        await prisma.workspace.upsert({
+          where: { id: OWNER_WS_ID },
+          create: { id: OWNER_WS_ID, kind: "user" },
+          update: {},
+        });
+        await prisma.brainDumpItem.create({
+          data: { text: marker, status: "inbox", workspaceId: OWNER_WS_ID },
+        });
+        await prisma.settings.updateMany({
+          where: { workspaceId: OWNER_WS_ID },
+          data: { welcomeDismissedAt: new Date(), voice: "playful" },
+        });
+
+        for (const google of [false, true] as const) {
+          const suffix = google ? "connected" : "not-connected";
+          if (google) {
+            await seedConnectedGoogle(prisma, OWNER_USER_ID, "e2e-wrap-token");
+          }
+          await page.goto("/");
+          await waitForShell(page);
+          const { popup } = await openSeededMenu(page, marker);
+          const rows = await entryRows(popup);
+          const box = await measure(popup);
+          heights[suffix] = box.bottom - box.top;
+
+          console.log(
+            `[#253] playful ▾ (${suffix}) at ${box.vw}×${box.vh}: ` +
+              `${rows.length} entries, ${heights[suffix]}px tall, ` +
+              `${box.right - box.left}px wide\n` +
+              rows
+                .map(
+                  (r, i) =>
+                    `  ${i + 1}. ${r.height}px  ${r.lines} line(s)  ${r.label}`,
+                )
+                .join("\n"),
+          );
+
+          expectNoWrappedEntries(rows, `playful ▾ (${suffix}) at 360px`);
+          expectInsideViewport(box, `playful ▾ (${suffix}) at 360px`);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+          ).toBeLessThanOrEqual(NARROW.width);
+        }
+
+        // With no entry wrapping in either state, the taller list is simply the one
+        // with more entries — and the not-connected state has the SAME count, since
+        // its Schedule slot is a `<Link>` rather than being absent. So the two
+        // heights must agree. Asserted rather than described, because "not-connected
+        // is taller" was described for three iterations while being false.
+        expect(
+          heights["not-connected"],
+          `not-connected ${heights["not-connected"]}px vs connected ${heights["connected"]}px`,
+        ).toBe(heights["connected"]);
+      } finally {
+        await clearGoogleTokens(prisma, OWNER_USER_ID);
+        await prisma.settings.updateMany({
+          where: { workspaceId: OWNER_WS_ID },
+          data: { welcomeDismissedAt: null, voice: "plain" },
+        });
+        await prisma.brainDumpItem.deleteMany({
+          where: { workspaceId: OWNER_WS_ID, text: { startsWith: marker } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    /**
+     * Proves `entryRows`' line counter can report a wrap at all.
+     *
+     * Needed because every assertion above it is a ZERO — "no entry wrapped" — and
+     * a detector that can only ever return 1 would satisfy all of them while seeing
+     * nothing. This repo has the rule written down for its file-parsing guards (a
+     * pure module plus a test on synthetic input, so the parser can be shown to
+     * fail); the equivalent for a layout probe is to force the layout it looks for.
+     *
+     * ⚠️ CSS injection, not a source edit, and that is the whole technique. The
+     * `webServer` serves a PREBUILT bundle and is reused between runs, so editing
+     * `rowMenuEntry` and re-running proves nothing — measured: adding `max-w-24` to
+     * it left all four measurements at 368px and every entry on one line, because
+     * the running server had never seen the change. `addStyleTag` applies to the
+     * live document and needs no rebuild.
+     */
+    test("the wrap detector reports a wrap when one is forced", async ({
+      page,
+    }) => {
+      const prisma = new PrismaClient();
+      const marker = `${COMPACT_MARKER} detector control`;
+      try {
+        await prisma.workspace.upsert({
+          where: { id: OWNER_WS_ID },
+          create: { id: OWNER_WS_ID, kind: "user" },
+          update: {},
+        });
+        await prisma.brainDumpItem.create({
+          data: { text: marker, status: "inbox", workspaceId: OWNER_WS_ID },
+        });
+        await prisma.settings.updateMany({
+          where: { workspaceId: OWNER_WS_ID },
+          data: { welcomeDismissedAt: new Date() },
+        });
+
+        await page.goto("/");
+        await waitForShell(page);
+        // Narrow every entry far below its longest label. `!important` because
+        // `rowMenuEntry`'s own `w-full` would otherwise win on specificity order.
+        await page.addStyleTag({
+          content:
+            "[data-row-menu] button, [data-row-menu] a { max-width: 88px !important; }",
+        });
+        const { popup } = await openSeededMenu(page, marker);
+        const rows = await entryRows(popup);
+
+        const wrapped = rows.filter((r) => r.lines > 1);
+        console.log(
+          `[#253] detector control: ${wrapped.length}/${rows.length} entries wrapped\n` +
+            rows
+              .map((r) => `  ${r.height}px  ${r.lines} line(s)  ${r.label}`)
+              .join("\n"),
+        );
+
+        // The detector sees multi-line entries…
+        expect(
+          wrapped.length,
+          "no entry wrapped even at max-width 88px — the line counter is blind",
+        ).toBeGreaterThan(0);
+        // …and the assertion built on it rejects them, rather than passing on a
+        // number it never looked at.
+        expect(() =>
+          expectNoWrappedEntries(rows, "forced-wrap control"),
+        ).toThrow(/wrapped onto/);
+      } finally {
+        await prisma.settings.updateMany({
+          where: { workspaceId: OWNER_WS_ID },
+          data: { welcomeDismissedAt: null },
+        });
+        await prisma.brainDumpItem.deleteMany({
+          where: { workspaceId: OWNER_WS_ID, text: { startsWith: marker } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
     /**
      * The LIBRARY row's ▾, same treatment and same measurement discipline.
      *
@@ -1253,6 +1490,7 @@ test.describe("#253 the row action line is compact at 360px", () => {
         await page.screenshot({ path: `${SHOTS}/library-single-task-360.png` });
 
         expectInsideViewport(box, "library ▾ list at 360px");
+        expectNoWrappedEntries(rows, "library ▾ list at 360px");
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth),
         ).toBeLessThanOrEqual(NARROW.width);
