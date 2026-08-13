@@ -56,12 +56,30 @@
 -- Plain `CREATE UNIQUE INDEX`, not `CONCURRENTLY`. Both halves of that were
 -- MEASURED on Postgres 16 by #245's migration, which found a `ShareLock` rather
 -- than ACCESS EXCLUSIVE, and found `CONCURRENTLY` unavailable at all because
--- Prisma wraps every migration file in a transaction (SQLSTATE 25001). Cited
--- here as that migration's measurement, not re-measured for this one.
+-- Prisma wraps every migration file in a transaction (SQLSTATE 25001).
 --
--- The cost is smaller here regardless: the index is being built over a column
--- that is NULL in every row, on a table whose writers are the old pods still
--- serving while migrations run at container start.
+-- ⚠️ That figure was taken against `Step`, a DIFFERENT table, and borrowing one
+-- without checking the direction it travels in is a real weakness — raised in
+-- review of !334, and correctly. A `ShareLock` does block writes for the whole
+-- build, and the scan-and-build cost does scale with row count, so a figure from
+-- a bigger table would say nothing useful about this one.
+--
+-- **Checked rather than assumed, on 2026-08-13: `BrainDumpItem` is smaller than
+-- `Step` on BOTH row count and total relation size.** So the borrowed
+-- measurement bounds this build from ABOVE — it is conservative, not optimistic,
+-- which is the opposite of what the shape of the citation suggests. Read-only
+-- counts against the live database, by the maintainer; the comparison is the
+-- whole argument, so the absolute sizes are deliberately not recorded here.
+--
+-- ⚠️ **That is a relative claim and it can invert as the app grows.** Captures
+-- accumulate per person while steps only exist for to-dos that were broken down,
+-- so this is the pair most likely to cross over. Re-check before borrowing this
+-- reasoning for a later migration, and do not read the date above as permanent.
+--
+-- The cost is smaller here for a second, order-independent reason: the index is
+-- being built over a column that is NULL in every row, so there is no
+-- duplicate-checking work to do at all — and the writers contending for the lock
+-- are the old pods still serving while migrations run at container start.
 
 -- 1. The column. Nullable — see above; the NULL is load-bearing twice over.
 ALTER TABLE "BrainDumpItem" ADD COLUMN     "clientKey" TEXT;
