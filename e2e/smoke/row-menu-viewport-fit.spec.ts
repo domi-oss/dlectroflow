@@ -1508,3 +1508,259 @@ test.describe("#253 the row action line is compact at 360px", () => {
     });
   });
 });
+
+// ── #205 — the two surfaces that carried NO `touchTarget` at all ─────────────
+//
+// Folded into this MR because #205 rides this spec file and cannot run in a
+// sibling worktree without colliding with it. Its scope box asks for the result to
+// be checked at 390px and for THIS spec to be extended rather than a parallel one
+// added, so that is what this is.
+//
+// The unit specs (`welcome-card.test.tsx`, `library-multistep.test.tsx`) assert the
+// CLASSES, because jsdom computes no layout. This is the half that can see pixels,
+// and it is the half that matters for a `min-w-11` on a control whose label is
+// short enough that the floor is what sets its width.
+//
+// 44x44 is **2.5.5 Target Size (Enhanced), AAA**; **2.5.8 (Minimum) is the AA one,
+// at 24x24**, which `py-1` already met. A house convention, not a conformance fix
+// — the same wording `breakdown/note-field.tsx` records having had to correct.
+test.describe("#205 the last two sub-44px surfaces at 390px", () => {
+  test.use({ viewport: MOBILE });
+
+  const M205 = "target-205";
+
+  /** Every control's measured box, so a failure names the control and its size. */
+  async function measureControls(
+    scope: Locator,
+    selector: string,
+  ): Promise<Array<{ label: string; w: number; h: number }>> {
+    const controls = await scope.locator(selector).all();
+    return Promise.all(
+      controls.map(async (c) =>
+        c.evaluate((n: HTMLElement) => {
+          const b = n.getBoundingClientRect();
+          return {
+            label: n.getAttribute("aria-label") ?? n.textContent?.trim() ?? "",
+            w: Math.round(b.width),
+            h: Math.round(b.height),
+          };
+        }),
+      ),
+    );
+  }
+
+  function expect44(
+    controls: Array<{ label: string; w: number; h: number }>,
+    what: string,
+    expected: number,
+  ) {
+    // Guard the guard: an empty list satisfies a `for` loop silently, and the count
+    // is the thing that catches a surface which stopped rendering a control.
+    expect(controls.length, `${what}: control count`).toBe(expected);
+    for (const c of controls) {
+      expect(
+        c.h,
+        `${what}: "${c.label}" is ${c.h}px tall`,
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        c.w,
+        `${what}: "${c.label}" is ${c.w}px wide`,
+      ).toBeGreaterThanOrEqual(44);
+    }
+  }
+
+  /**
+   * The first-run welcome card — the worst of the set to leave short, because on
+   * first run these three are the only controls on the screen bar the capture box.
+   *
+   * THREE buttons, not the "2" #205's table records: that is the count of `<button`
+   * occurrences in the source, and the voice pair comes out of a `.map`.
+   */
+  test("the welcome card's three buttons are 44px, and its inline links are not", async ({
+    page,
+  }) => {
+    const prisma = new PrismaClient();
+    try {
+      await prisma.workspace.upsert({
+        where: { id: OWNER_WS_ID },
+        create: { id: OWNER_WS_ID, kind: "user" },
+        update: {},
+      });
+      // The card shows until the workspace dismisses it, so un-dismiss for the run.
+      await prisma.settings.updateMany({
+        where: { workspaceId: OWNER_WS_ID },
+        data: { welcomeDismissedAt: null },
+      });
+
+      await page.goto("/");
+      await waitForShell(page);
+
+      const card = page.getByRole("region", { name: "Welcome" });
+      await expect(card).toBeVisible();
+
+      const buttons = await measureControls(card, "button");
+      console.log(
+        `[#205] welcome card at 390px:\n` +
+          buttons.map((b) => `  ${b.w}x${b.h}  ${b.label}`).join("\n"),
+      );
+      expect44(buttons, "welcome card", 3);
+
+      // The three inline body links stay inline — both criteria carve an explicit
+      // exception for a link inside a sentence, and squaring them would break the
+      // line box of the paragraph they read as part of. Asserted so that a later
+      // "size everything" pass has to argue with a test.
+      const links = await measureControls(card, "a");
+      expect(links.length, "welcome card inline links").toBe(3);
+      for (const l of links) {
+        expect(l.h, `"${l.label}" was squared up to ${l.h}px`).toBeLessThan(44);
+      }
+
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(MOBILE.width);
+    } finally {
+      await prisma.settings.updateMany({
+        where: { workspaceId: OWNER_WS_ID },
+        data: { welcomeDismissedAt: new Date() },
+      });
+      await prisma.$disconnect();
+    }
+  });
+
+  /**
+   * The Library Multi-step hub's header controls, in BOTH states — select mode
+   * replaces "Select" and hides "Open task", so a check of the resting header alone
+   * leaves two of the four unmeasured.
+   *
+   * "Open task" is a `<Link>`, which is why the selector is `button, a`: #205's
+   * table counts `<button>` and cannot see it, yet it is a bordered pill at the same
+   * `py-1` as the toggle beside it.
+   */
+  test("the Multi-step hub's header controls are 44px in both states", async ({
+    page,
+  }) => {
+    const prisma = new PrismaClient();
+    try {
+      await prisma.workspace.upsert({
+        where: { id: OWNER_WS_ID },
+        create: { id: OWNER_WS_ID, kind: "user" },
+        update: {},
+      });
+      await prisma.settings.updateMany({
+        where: { workspaceId: OWNER_WS_ID },
+        data: { welcomeDismissedAt: new Date() },
+      });
+      // A task with TWO steps → the Multi-step tab, which is the `LibraryMultistep`
+      // renderer. One step would not distinguish it from a single-task row.
+      const task = await prisma.task.create({
+        data: { title: `${M205} multi`, workspaceId: OWNER_WS_ID },
+      });
+      // `total` and `estMinutes` are both non-null on `Step`, and `total` is the
+      // count the collapsed row renders as "n/2 done". No `workspaceId` here —
+      // `Step` is scoped through its `Task`, which is the tenancy edge, so it is
+      // not enrolled in the workspaceId harness the way `BrainDumpItem` is.
+      await prisma.step.createMany({
+        data: [
+          {
+            taskId: task.id,
+            order: 1,
+            total: 2,
+            text: "first",
+            estMinutes: 10,
+          },
+          {
+            taskId: task.id,
+            order: 2,
+            total: 2,
+            text: "second",
+            estMinutes: 5,
+          },
+        ],
+      });
+      await prisma.brainDumpItem.create({
+        data: {
+          text: `${M205} multi`,
+          status: "triaged",
+          triagedAt: new Date(),
+          breakdownRequestedAt: new Date(),
+          workspaceId: OWNER_WS_ID,
+          taskId: task.id,
+        },
+      });
+
+      await page.goto("/library?tab=sorted");
+      await waitForShell(page);
+
+      // Addressed BY NAME rather than by a container. The hub's header is an
+      // unmarked `<div className="flex items-center justify-between">`, and a
+      // `locator("div").filter({ has: … })` for it resolves to an ancestor — the
+      // first attempt measured the app header (dlectroflow, Focus Timer, dark mode,
+      // Account, Menu) and failed on a 24x24 wordmark that has nothing to do with
+      // this issue. Naming each control also puts its label in the failure output,
+      // and the named set IS the count guard: `getByRole` throws if one is missing.
+      const named = (page_: Page, names: Array<string | RegExp>) =>
+        names.map((n) =>
+          typeof n === "string" && n === "Open task"
+            ? page_.getByRole("link", { name: n })
+            : page_.getByRole("button", { name: n }),
+        );
+
+      async function measureNamed(
+        locators: Locator[],
+      ): Promise<Array<{ label: string; w: number; h: number }>> {
+        return Promise.all(
+          locators.map(async (l) => {
+            await expect(l).toBeVisible();
+            return l.evaluate((n: HTMLElement) => {
+              const b = n.getBoundingClientRect();
+              return {
+                label:
+                  n.getAttribute("aria-label") ?? n.textContent?.trim() ?? "",
+                w: Math.round(b.width),
+                h: Math.round(b.height),
+              };
+            });
+          }),
+        );
+      }
+
+      // Open task (a `<Link>`) + the expand/collapse toggle + Select.
+      const resting = await measureNamed(
+        named(page, ["Open task", /^(Collapse|Expand) all$/, /^Select$/]),
+      );
+      console.log(
+        `[#205] Multi-step header (resting) at 390px:\n` +
+          resting.map((c) => `  ${c.w}x${c.h}  ${c.label}`).join("\n"),
+      );
+      expect44(resting, "Multi-step header at rest", 3);
+
+      await page.getByRole("button", { name: /^Select$/ }).click();
+      // The toggle stays (it renders in BOTH states); Select is replaced by
+      // Select all + Cancel, and Open task is hidden.
+      const selecting = await measureNamed(
+        named(page, [/^(Collapse|Expand) all$/, /^Select all$/, /^Cancel$/]),
+      );
+      console.log(
+        `[#205] Multi-step header (select mode) at 390px:\n` +
+          selecting.map((c) => `  ${c.w}x${c.h}  ${c.label}`).join("\n"),
+      );
+      expect44(selecting, "Multi-step header in select mode", 3);
+      // Proves the state actually changed, so the three above are a different set
+      // from the three already measured rather than the same header re-read.
+      await expect(page.getByRole("link", { name: "Open task" })).toBeHidden();
+      await expect(page.getByRole("button", { name: /^Select$/ })).toBeHidden();
+
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(MOBILE.width);
+    } finally {
+      await prisma.brainDumpItem.deleteMany({
+        where: { workspaceId: OWNER_WS_ID, text: { startsWith: M205 } },
+      });
+      await prisma.task.deleteMany({
+        where: { workspaceId: OWNER_WS_ID, title: { startsWith: M205 } },
+      });
+      await prisma.$disconnect();
+    }
+  });
+});
