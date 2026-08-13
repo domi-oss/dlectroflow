@@ -7,6 +7,7 @@ import {
   waitForShell,
   expandAllSections,
   THEMES,
+  ROW_MENU_ADD_TODO,
 } from "./helpers";
 import {
   scanColorContrast,
@@ -322,7 +323,9 @@ for (const theme of THEMES) {
 
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
-      await row.getByRole("button", { name: "Add to-do" }).click();
+      // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+      await row.getByRole("button", { name: "All options" }).click();
+      await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
       const todoRow = page
         .locator('[data-bucket="singleTask"]')
@@ -363,9 +366,8 @@ for (const theme of THEMES) {
     // foreground, src/components/inbox/inbox-view.tsx) only renders once an
     // item sits in the Multi-step bucket with 0 steps ("awaitingBreakdown" —
     // see inbox-view.tsx's `awaitingBreakdown = item.stepsTotal === 0`).
-    // Drive the real UI path (capture → All options → Move to… → Multi-step
-    // to-dos) instead of seeding DB state, so this scan exercises the exact
-    // rendered DOM the dark-mode AA fix targets — in dark mode, white text on
+    // Drive the real UI path instead of seeding DB state, so this scan exercises the
+    // exact rendered DOM the dark-mode AA fix targets — in dark mode, white text on
     // --destructive was 3.52:1 (fails AA-normal 4.5:1); the fix swaps in the
     // --destructive-foreground token (near-black in dark, white in light).
     // We deliberately do NOT click the CTA itself — that starts the AI
@@ -379,11 +381,27 @@ for (const theme of THEMES) {
       await waitForShell(page);
       await captureItem(page, label);
 
+      // ⚠️ #253 — two hops rather than one, and the reason is a real behavioural
+      // difference rather than a longer path for its own sake. The nested "Move to…"
+      // picker is gone, so `requestBreakdown` — the write that PARKS a row in
+      // Multi-step with this CTA instead of navigating into the editor — is reached
+      // from a SINGLE-TASK row's ▾. On a Needs-review row the same label runs
+      // `startBreakdown`, which opens the editor and would never render the CTA at
+      // all. So: capture → Add as single-task to-do → Add as multi-step to-do.
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
       await row.getByRole("button", { name: "All options" }).click();
-      await row.getByRole("button", { name: "Move to…" }).click();
-      await row.getByRole("menuitem", { name: /Multi-step/ }).click();
+      await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
+
+      const singleTaskRow = page
+        .locator('[data-bucket="singleTask"]')
+        .getByRole("listitem")
+        .filter({ hasText: label });
+      await expect(singleTaskRow).toBeVisible();
+      await singleTaskRow.getByRole("button", { name: "All options" }).click();
+      await singleTaskRow
+        .getByRole("button", { name: "Add as multi-step to-do" })
+        .click();
 
       const multiStepRow = page
         .locator('[data-bucket="multiStep"]')

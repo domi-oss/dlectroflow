@@ -310,6 +310,38 @@ describe("BreakdownChat — the pick-your-account hint (#128)", () => {
     expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
   });
 
+  /**
+   * ⚠️ The THIRD connect control in this file, and the one that shipped without the
+   * caveat while the two above it carried it — found while #253 audited every connect
+   * entry point in the tree, because it moved the inbox row's control out of that set
+   * and had to show the obligation still held everywhere else.
+   *
+   * It is reached mid-flow rather than from a resting "not connected" state: a push
+   * fails with `reconnect_required` and the error branch offers Reconnect. That is
+   * precisely when someone re-picks an account, and therefore precisely when a managed
+   * account gets chosen again and refused with nothing for us to report — the failure
+   * #128 exists for. `google.connected` is TRUE in this fixture, which is why neither
+   * spec above could see it.
+   */
+  it("describes the Reconnect link in the push-failure branch too (the gap #253 found)", async () => {
+    pushStepsToGoogleTasksMock.mockResolvedValue({
+      ok: false,
+      reason: "reconnect_required",
+    });
+    await renderChat({
+      google: { configured: true, connected: true, needsReconnect: false },
+    });
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: /send to google tasks/i }),
+    );
+    const link = await screen.findByRole("link", {
+      name: /reconnect google/i,
+    });
+    expect(link).toHaveAttribute("href", "/api/google/oauth/start");
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
   it("says nothing about accounts once connected", async () => {
     await renderChat({
       google: { configured: true, connected: true, needsReconnect: false },

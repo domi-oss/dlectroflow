@@ -38,40 +38,266 @@ export const STRINGS = {
   "action.stillNeeded": { plain: "Still need it", playful: "Still want it" },
   "action.delete": { plain: "Delete", playful: "Delete" },
   "action.cancel": { plain: "Cancel", playful: "Cancel" },
-  // Single canonical "✓ complete" label — deliberately IDENTICAL across voices
+  // Single canonical "complete" label — deliberately IDENTICAL across voices
   // (like "focus.timer.completeStep" below) so the inbox row, task-step, and
   // focus-lane Complete affordances render as the exact same button everywhere
   // instead of drifting between a bare word and a bare glyph (owner report).
-  "action.complete": { plain: "✓ Complete", playful: "✓ Complete" },
+  //
+  // #253 dropped the leading "✓ ". This key is the label of a PERMANENTLY
+  // VISIBLE row control on every bucket of the Inbox, both in-flight Library
+  // tabs, the task-step rows and both focus lanes, so its width is paid on
+  // every row of every list — and at 360px the row action line was wrapping to
+  // three bands. The glyph was decoration on an already-unambiguous verb: it
+  // named no state (the button is only rendered on a row that is NOT complete)
+  // and it carried no information the word did not. A tick as transient
+  // acceptance feedback after the press is a separate, optional idea and is
+  // deliberately not built here.
+  //
+  // ⚠️ Nine surfaces read this, and one of them is not `CompleteButton`:
+  // `library/select-action-bar.tsx` calls `t("action.complete")` directly for
+  // its bulk-complete button. Any future edit to this line is a strings change
+  // with consumers, not a component tweak.
+  "action.complete": { plain: "Complete", playful: "Complete" },
   "action.reopen": { plain: "Reopen", playful: "Reopen" },
   "action.reopenSelected": {
     plain: "Reopen selected",
     playful: "Reopen selected",
   },
   "action.reopenAll": { plain: "Reopen all", playful: "Reopen all" },
+  // NO component consumer since #253 removed the nested "Move to…" picker from every
+  // row ▾ and left `MoveToMenu` as the inline 📥, whose accessible name is the
+  // literal "Move to" rather than this key. The canonical lists name their
+  // destinations directly instead — see `action.breakdownFull`,
+  // `action.addTodoFull`, `action.saveForLater`, `action.completeFull` and
+  // `action.sendToReview`, which are the five buckets of `ACTION_FOR_BUCKET`.
+  //
+  // Kept, on the precedent the first one set: `t()` is a public surface a
+  // self-hoster's voice override can reach, so pinning the pair is still worth
+  // something, and deleting a key is the breaking half of the change.
+  //
+  // This issue leaves FOUR keys in that state, not the three this comment used to
+  // claim: `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
+  // `task-steps.tsx` lost its `Edit step title` entry) and this one. Re-derive
+  // rather than trust the list — a key is orphaned when
+  // `git grep -n '"<key>"' -- src e2e` matches only `strings.ts` and
+  // `strings.test.ts`.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
   // in the ▾ dropdown. The button variants above stay short; these are the
-  // dropdown's full-length mirrors (+ a short "Save" for the button).
+  // dropdown's full-length twins (+ a short "Save" for the button).
+  //
+  // #253 settled what "full descriptive wording" means, because "descriptive" was
+  // letting each label describe whatever its author found salient: **an action is
+  // named after the STATE IT PRODUCES, in the same words the destination bucket
+  // uses.** So the two triage entries name the bucket the row lands in —
+  // `section.multiStep` is "Multi-step to-dos" and `section.singleTask` is
+  // "Single-task to-dos" — and `action.schedule` names where the row is actually
+  // sent rather than the verb for sending it.
+  //
+  // ⚠️ `action.completeFull` is deliberately NOT touched by that rule, and it is
+  // the case that shows the rule is about agreement rather than about rewording:
+  // `section.completed` reads "Completed", so "Mark as completed" already agrees
+  // with its destination. A drafted "Mark as complete" would have broken the one
+  // thing the rename exists to create.
+  //
+  // Scope: #253 renames only the ▾ entries it renders. The same rule applied
+  // across the library rows, the bulk bar, the focus surfaces and the task working
+  // view is **#259**, and the playful column is frozen while **#86** decides
+  // whether that voice survives at all — so a rename here carries the existing
+  // emoji onto the new words and invents no new metaphor.
+  // The PARK entry: `moveItemToBucket(id, "multiStep")` → `requestBreakdown`. Names
+  // the bucket the row lands in, per the rule above, and it lands there for good if
+  // the user never breaks it down — `bucketOfItem` keeps an item in Multi-step on
+  // `breakdownRequestedAt` alone and NOTHING reaps that stamp (no TTL, no job, no
+  // nag; it clears only on an explicit move out). An unbroken-down Multi-step task
+  // is a legitimate permanent resting state, which is why this is a real
+  // destination and not a staging step.
+  //
+  // ⚠️ "**Add** as multi-step to-do", not "**Break into** multi-step to-do" — the
+  // owner's call from the review app, and it does two things. It parallels
+  // `action.addTodoFull` ("Add as single-task to-do") directly beneath it in the
+  // list, so the two park-into-a-bucket actions share one construction; and it drops
+  // the "Break" prefix, which now belongs to the NAVIGATING entry alone. Before, the
+  // parking entry and the navigating entry both opened with "Break" and were too
+  // close to tell apart at a glance — the entry that parks read like the entry that
+  // moves you.
+  //
+  // The KEY still says `breakdownFull` and its value no longer does. Deliberate:
+  // `t()` is a public surface a self-hoster's voice override reaches by key, so
+  // renaming it is the breaking half of the change for no user-visible gain. Read
+  // the value, not the key.
+  //
+  // Keeps its own 🍿 rather than borrowing `action.addTodoFull`'s 🍽️: the playful
+  // column is frozen while #86 decides whether that voice survives, so a rename
+  // carries the existing emoji onto the new words. It also means the two "Add as …"
+  // entries diverge at character 1 in playful, which is stronger than plain manages.
   "action.breakdownFull": {
-    plain: "Break into smaller steps",
-    playful: "🍿 Snack-size into smaller steps",
+    plain: "Add as multi-step to-do",
+    playful: "🍿 Add as multi-step to-do",
+  },
+  // ⚠️ The NAVIGATING twin, and it is a separate key from `prompt.breakNow` on
+  // purpose — they used to be one, and #253 F1 split them.
+  //
+  // `prompt.breakNow` keeps its question mark ("Break into steps now?") because it
+  // is the inline red CTA **on a card**, where a question is the right register and
+  // where it is the only thing that visually distinguishes an unbroken-down card.
+  // **A MENU ENTRY IS A COMMAND, NOT A PROMPT**, so the ▾ reads as an imperative.
+  // Owner's call on both halves.
+  //
+  // Used by two renderers for the same act — `startBreakdown`, which creates the
+  // Task and navigates to the breakdown screen: the Needs-review row's ▾ (where F1
+  // added the park entry beside it) and the awaiting-breakdown Multi-step row's ▾
+  // (the twin of that card's red CTA).
+  //
+  // Carries `action.breakdownFull`'s existing 🍿 rather than inventing a metaphor:
+  // the playful column is frozen while #86 decides whether that voice survives.
+  // ⚠️ NOT "Break into steps". That is character-identical to `action.breakdown`,
+  // the SHORT inline CTA on the very same Needs-review row — so the two controls
+  // would answer to one name, which is the exact defect #253 removed when it took
+  // the full "Save for later" `aria-label` off the inline `Save`: an ambiguous
+  // voice-control target, and a row from which no query can pick out either. It also
+  // near-collides with `prompt.breakNow` ("Break into steps now?") on the Multi-step
+  // card, where this same key is the ▾ twin.
+  //
+  // So the entry names the DESTINATION instead — which is the destination-naming rule
+  // applied to a navigating action, the same shape as `action.startFocusTimer`
+  // ("Start visual focus timer"). Imperative, no question mark, and distinct from
+  // both inline siblings in both voices.
+  //
+  // ⚠️ "Break down in the editor", not "Break **it** down in the editor" — owner's
+  // call. Every other entry in this list is verb-first with no pronoun (`Add as
+  // single-task to-do`, `Save for later`, `Mark as completed`, `Add to calendar`), so
+  // the pronoun made this one read as a sentence fragment among imperatives. Shorter
+  // too, and the shortening was re-checked against every sibling on the row for
+  // equality, prefix and containment in both voices — see the guard at the foot of
+  // `strings.test.ts`, which is there because the FIRST attempt at this label was
+  // character-identical to `action.breakdown`.
+  "action.breakNow": {
+    plain: "Break down in the editor",
+    playful: "🍿 Break down in the editor",
   },
   "action.addTodoFull": {
-    plain: "Add as single task to do",
-    playful: "🍽️ Add as single task to do",
+    plain: "Add as single-task to-do",
+    playful: "🍽️ Add as single-task to-do",
   },
   "action.saveShort": { plain: "Save", playful: "🥫 Save" },
   "action.completeFull": {
     plain: "Mark as completed",
     playful: "✅ Mark as completed",
   },
+  // NO component consumer since #253 dropped the ▾ list's "Edit task title"
+  // entry: it fired the identical `setEditingId` as the permanently-visible ✎
+  // pencil on the row's title line, whose accessible name ("Edit <the row's
+  // title>") names the row and is therefore strictly clearer. Kept, on the
+  // precedent `action.addTodo` set in this same issue — `t()` is a public surface
+  // a self-hoster's voice override can reach, so pinning the pair is still worth
+  // something, and deleting a key is the breaking half of the change.
   "action.editTitle": { plain: "Edit task title", playful: "Edit task title" },
-  "action.schedule": { plain: "Schedule", playful: "🗓️ Schedule" },
+  // Names the destination, not the verb — and the parenthetical is the literal
+  // mechanism, verified rather than assumed: `lib/google.ts` posts to
+  // `https://tasks.googleapis.com/tasks/v1`, into the list whose title contains
+  // "reclaim" (`RECLAIM_LIST_MATCH`), and Reclaim is what turns those tasks into
+  // calendar time. "Schedule" alone was the one row action nobody could predict
+  // the effect of, which is the whole complaint behind #253's menu.
+  //
+  // ⚠️ Two other surfaces render a Schedule label that does NOT come from here:
+  // `row-actions.tsx`'s `icon` variant (`iconLabel`) and its `label` default, both
+  // the literal "Schedule", reached from the task working view's bordered pill.
+  // They are left short on purpose — #253 renames only what it renders, and
+  // aligning the rest is #259's sweep.
+  "action.schedule": {
+    plain: "Schedule to calendar (send to Google Tasks)",
+    playful: "🗓️ Schedule to calendar (send to Google Tasks)",
+  },
+  // The same slot when the Google path is not usable yet. Both name the
+  // destination and then say, in brackets, why it cannot happen — which is the
+  // destination-naming rule applied to an unavailable action, and the reason these
+  // are entries at all rather than a connect link (#253, owner's call):
+  //
+  // The row's ▾ used to render an inline `Connect Google →` plus #128's
+  // three-line "prefer a personal account" caveat. Measured at 360px BEFORE this
+  // issue, that made the NOT-connected menu taller than the connected one (497px
+  // against 429px), on the surface the whole issue is about.
+  //
+  // ⚠️ Those two numbers describe the shape that was REPLACED, not what ships. Kept
+  // because they are the measurement the owner's call rests on, and re-labelled
+  // because the same "497" was being read elsewhere in the tree as the current
+  // height of the taller list. What ships is one 44px entry in both states, and the
+  // two lists now measure the SAME: 8 entries, 416px tall at 360x780, plain and
+  // playful, no entry wrapping. They differ only in width (235px not-connected,
+  // 270px connected). Asserted in `e2e/smoke/row-menu-viewport-fit.spec.ts`, which
+  // until #253's review only logged those numbers without checking them.
+  //
+  // As a navigation entry the row stops being a
+  // connect control, so the caveat consolidates at the controls that do connect —
+  // where #128 put it first and where the click that Google can refuse actually is.
+  //
+  // Those surfaces, re-derivable rather than counted:
+  // `grep -rn 'GoogleAccountHint\|GOOGLE_ACCOUNT_HINT' src --include=*.tsx`. Today
+  // that is `settings/integrations-panel.tsx`, `breakdown/breakdown-chat.tsx`
+  // (three states), `breakdown/task-schedule.tsx`, and `row-actions.tsx`'s `icon`
+  // variant — which renders the string directly as a `title`/`aria-describedby`
+  // rather than through the component, and is therefore the one a
+  // component-keyed grep misses.
+  //
+  // ⚠️ Deliberately not a number, on this file's own precedent further down
+  // ("phrased without a count on purpose — this said 'all four' while five…").
+  // This list previously named three files, omitted `task-schedule.tsx`, and
+  // `google-account-hint.tsx` still says "all four connect surfaces" while the
+  // component alone has five call sites.
+  //
+  // `reconnect` gets the same treatment rather than staying an inline link, and
+  // that is deliberate: leave one of the two as a connect control and the row is
+  // still a connect control, so #128's caveat has to stay for that state alone —
+  // which is the tall menu returning in the state nobody looked at.
+  "action.scheduleNotConnected": {
+    plain: "Schedule to calendar (not connected)",
+    playful: "🗓️ Schedule to calendar (not connected)",
+  },
+  "action.scheduleReconnect": {
+    plain: "Schedule to calendar (reconnect needed)",
+    playful: "🗓️ Schedule to calendar (reconnect needed)",
+  },
   "action.addToCalendar": {
     plain: "Add to calendar (.ics)",
     playful: "📅 Add to calendar (.ics)",
+  },
+  // The ▾ entry that opens a row's focus timer, on an ITEM row — the inbox's
+  // multi-step and single-task lists and the Library's in-flight tabs.
+  //
+  // A key rather than the three separate literals #253 found: the inbox hard-coded
+  // "Start visual focus timer" twice and `library-rows.tsx` reached for
+  // `step.startFocusTimer` ("Start focus timer"), a STEP-grain key naming an
+  // action on an item. One destination, three spellings, which is #259's whole
+  // subject. The plain value is the inbox's existing wording, so this de-duplicates
+  // without changing what anybody reads.
+  //
+  // ⚠️ `step.startFocusTimer` / `step.resumeFocusTimer` deliberately survive for
+  // `task-steps.tsx`, where the row IS a step and the resumable variant is real.
+  // Whether the two grains should converge on one phrase is **#259**'s call, not
+  // this issue's.
+  "action.startFocusTimer": {
+    plain: "Start visual focus timer",
+    playful: "🍽️ Start visual focus timer",
+  },
+  // #253 — "put this row back in Needs review", at ITEM grain.
+  //
+  // The one destination the canonical ▾ entries did not already cover when the
+  // nested `Move to…` picker was removed: `ACTION_FOR_BUCKET` maps five buckets and
+  // the entries cover four of them (`Add as multi-step to-do` → multiStep,
+  // `Add as single-task to-do` → singleTask, `Save for later` → savedLater,
+  // `Mark as completed` → completed), leaving `needsReview → moveToReview` reachable
+  // only through the picker on three of the four renderers.
+  //
+  // Named after the destination in the destination's own words — `section.needsReview`
+  // reads "Needs review" — per the rule this issue settled. Deliberately the same
+  // wording and the same playful emoji as `step.sendToReview`, its step-grain twin:
+  // two grains, one phrase, because it is one act. Whether the two keys should merge
+  // is #259's call.
+  "action.sendToReview": {
+    plain: "Send back to review",
+    playful: "🥫 Send back to review",
   },
 
   // ── Step rows (TaskSteps working view, #25) ────────────────────────────────
@@ -533,11 +759,19 @@ export const STRINGS = {
   },
 
   // ── Focus timer redesign (MR ②) — timer page, hint, settings group ──────────
-  // ✓ / ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
+  // ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
   // at the top). Numbers are composed in JSX around these static units.
+  //
+  // #253 detick'd this alongside `action.complete`. It is that key's sibling —
+  // the same act, one grain down — and the two are reachable one tap apart (a
+  // step row's inline Complete, then the focus timer that step opens), so a
+  // tick on one and not the other reads as two different controls. Removing
+  // both also lands `focus.timer.completeStep` and `step.complete` on the same
+  // plain-voice string, which is what "the same button everywhere" was always
+  // meant to mean.
   "focus.timer.completeStep": {
-    plain: "✓ Complete step",
-    playful: "✓ Complete step",
+    plain: "Complete step",
+    playful: "Complete step",
   },
   "focus.timer.of": { plain: "of", playful: "of" },
   "focus.timer.steps": { plain: "steps", playful: "steps" },

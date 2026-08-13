@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { captureItem, needsReviewRow } from "../helpers";
+import { captureItem, needsReviewRow, ROW_MENU_ADD_TODO } from "../helpers";
 
 /**
  * The .ics schedule path, end to end in a production build (#104).
@@ -10,10 +10,14 @@ import { captureItem, needsReviewRow } from "../helpers";
  * connected, and no row in this project has a stored token: schedule-menu.spec.ts
  * seeds the owner's credential for its own file and hands it back, and
  * member-google.spec.ts does the same for the member's in the other project. So
- * every Google control here resolves to `"connect"` and renders as a
- * "Connect Google →" link (row-actions.tsx), which is what keeps the ▾ menu
- * lookup below stable. !200 corrected the previous version of this note, which
- * attributed that to a missing GOOGLE_CLIENT_ID.
+ * every Google control here resolves to `"connect"`, which #253 renders as a single
+ * `Schedule to calendar (not connected)` entry LINKING INTO
+ * `/settings#settings-integrations` — it used to be an inline "Connect Google →"
+ * link plus #128's three-line caveat, and dropping that is what makes the
+ * not-connected ▾ list shorter than the connected one rather than taller. The .ics
+ * entry beside it is unaffected, which is what keeps the ▾ lookup below stable.
+ * !200 corrected an earlier version of this note, which attributed the `"connect"`
+ * resolution to a missing GOOGLE_CLIENT_ID.
  *
  * The suite runs as the OWNER, and an owner still LEADS with the Google control
  * (`leadSchedulingMethod`) — so the .ics entry is the one in the row's ▾ "All
@@ -31,10 +35,12 @@ test("scheduling a to-do downloads an .ics with a focus link and busy time", asy
   await captureItem(page, label);
 
   // The .ics handler needs a linked Task (`icsProps` bails without one), and a
-  // fresh capture has none — "Add to-do" is what creates it.
+  // fresh capture has none — `ROW_MENU_ADD_TODO` is what creates it.
   const row = needsReviewRow(page, label);
   await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Add to-do" }).click();
+  // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+  await row.getByRole("button", { name: "All options" }).click();
+  await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
   const todoRow = page
     .locator('[data-bucket="singleTask"]')
