@@ -613,13 +613,15 @@ while still consuming the origin-wide byte cap forever.
   is removed, because the privacy notice's retention promise — *"until saved, or until the user clears
   it"* — is **false** for an entry where neither trigger can ever fire. Storage limitation is not optional.
 - ⚠️ **The collapsed row carries the STATE, not only the count** — see immediately below. Without this the
-  rule repairs two of the four things it was written to repair and silently leaves the other two.
+  rule repairs the last of the four failures it lists and silently leaves the first three.
 
-⚠️ **The rule above fixes Discard and the invisible orphan, and as written it does NOT fix the two copy
-failures in the same list — which makes this section contradict itself.** Found checking the document
+⚠️ **The rule above fixes Discard and the never-matching entry, and as written it does NOT fix the three
+copy failures in its own list — which makes this section contradict itself.** Found checking the document
 against itself rather than raised in review, and it is the sharper half of the defect this section already
-records once: the list of what a bare match-or-hide filter breaks has four entries, the rule was written
-against the last two, and the first three are about **copy that only exists on a full entry row**.
+records once. The list of what a bare match-or-hide filter breaks has **four** entries: the `403` copy, the
+*"sign in and these will save"* sentence, `blockedUnder` going dead, and Discard being out of reach. **Only
+the fourth is about a control**; the first three are about **copy that exists only on a full entry row**,
+and the rule gave those entries no row.
 
 **Trace the `409` and it is unreachable even while the page is open, not merely after a reload.** A `409`
 means the *resolved* workspace disagreed with the capture's declared `workspaceId` — and the route resolves
