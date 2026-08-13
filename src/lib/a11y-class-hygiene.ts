@@ -11,11 +11,15 @@
  *    #99 before them, and a ninth (`task-schedule.tsx`) that neither issue had
  *    found.
  *  * #117 — a focus indicator that is only a background swap. axe ships **no rule
- *    for any of WCAG 2.2's focus criteria** — not 2.4.7 Focus Visible, not 2.4.11
- *    Focus Not Obscured, not 2.4.13 Focus Appearance, and none for 1.4.11
- *    Non-text Contrast either — so no amount of seeding would have caught it. The
- *    contrast gate, the guest-surface scans and the axe baseline are all
- *    structurally incapable of seeing it.
+ *    for any focus criterion at all** — not 2.4.7 Focus Visible, which is AA and
+ *    has been since WCAG 2.0, and not 2.4.11 Focus Not Obscured or 2.4.13 Focus
+ *    Appearance, both new in 2.2; nor one for 1.4.11 Non-text Contrast. So no
+ *    amount of seeding would have caught it. The contrast gate, the guest-surface
+ *    scans and the axe baseline are all structurally incapable of seeing it.
+ *
+ *    2.4.7 is called out as 2.0 deliberately: a rule for it would carry `wcag2aa`
+ *    and *would* run under the tags below, so the gap there is axe's alone. Only
+ *    the two 2.2 criteria have two reasons to be invisible.
  *
  *    Measured against axe-core 4.12.1 on 2026-08-13: 105 rules, none carrying a
  *    `wcag247`, `wcag2411`, `wcag2413` or `wcag1411` tag. **No rule exists** is
