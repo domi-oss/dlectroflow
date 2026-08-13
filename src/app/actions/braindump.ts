@@ -60,6 +60,41 @@ const LIBRARY_PATH = "/library";
  * gating the revalidation on it is exactly the behaviour this action had before
  * the extraction — not a narrowing of it. A revalidation is a consequence of a
  * write, the same reading `ensureFocusStep` takes of its own.
+ *
+ * ## ⚠️ Sweeping this file for unguarded post-commit payouts: follow the call
+ *
+ * #257 is the rule that bookkeeping running AFTER a committed write must not be
+ * able to report the write as failed, and this file is the largest remaining
+ * source of that shape — so it gets swept, repeatedly, by whoever picks the
+ * follow-up up. **The method is the part worth writing down, because the obvious
+ * one is wrong here and wrong in the direction that costs work.**
+ *
+ * `grep "try {"` across this file returns **zero**. That is true and it is
+ * misleading: it makes THIS function read as an unguarded site, when the guard is
+ * simply in the callee — `writeCapture` wraps `touchStreakOnEngagement` itself and
+ * emits `capture_streak_touch_failed` (`src/lib/capture-write.ts`). A sweep that
+ * stops at the `await` therefore reports a false positive here, and a sweep run
+ * against `main` reports **seven** sites in this file where this branch has
+ * **six** — the difference is exactly this line, because on `main` the same
+ * function still calls `touchStreakOnEngagement` inline and unguarded. Both counts
+ * are honest about the tree they were taken on, which is precisely why a count is
+ * not a substitute for following the call.
+ *
+ * **Acting on that false positive is not harmless.** Wrapping this `writeCapture`
+ * call in a second best-effort would swallow a second time over a guard that
+ * already exists, and — worse — collapse the three-valued
+ * `CaptureOutcome` the next line branches on into `T | null`. `created`,
+ * `duplicate` and `empty` mean different things to a caller and only one of them
+ * revalidates; a wrapper that answers `null` for a failure it invented makes
+ * `outcome === "created"` false for a capture that was written. That is the
+ * original bug — a saved capture reported as not saved — reintroduced by the fix
+ * for it.
+ *
+ * So: for each `await` of a reward, badge, streak or sync helper that follows a
+ * committed write, **open the callee** and check whether the guard is already
+ * there. The sites in this file that genuinely still need one are waiting on
+ * #257's shared `bestEffort` wrapper rather than on a decision; they are not swept
+ * here because that helper's tag union is still moving.
  */
 export async function createBrainDumpItem(text: string) {
   const workspaceId = await currentWorkspaceId();
