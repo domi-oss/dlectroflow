@@ -3163,6 +3163,8 @@ export function InboxView({
                                         {t("action.startFocusTimer", voice)}
                                       </button>
                                     ) : null,
+                                    // The inline red CTA's twin, in the awaiting
+                                    // state only — that is the state it names.
                                     awaitingBreakdown ? (
                                       <button
                                         key="break-now-m"
@@ -3174,22 +3176,38 @@ export function InboxView({
                                       >
                                         {t("prompt.breakNow", voice)}
                                       </button>
-                                    ) : (
-                                      <button
-                                        key="complete-m"
-                                        type="button"
-                                        className={rowMenuEntry()}
-                                        onClick={() =>
-                                          run(
-                                            () => completeItem(item.id),
-                                            { id: item.id, field: "done" },
-                                            item.text,
-                                          )
-                                        }
-                                      >
-                                        {t("action.completeFull", voice)}
-                                      </button>
-                                    ),
+                                    ) : null,
+                                    // ⚠️ UNCONDITIONAL, and it used to be the else
+                                    // branch of the ternary above. Everything else
+                                    // this state suppresses is suppressed for a
+                                    // reason to do with steps — `view-list-m` and
+                                    // `focus-list-m` have nothing to point at, and
+                                    // the inline cluster collapses to the single red
+                                    // CTA. Complete was the fourth casualty and the
+                                    // only one with no such reason.
+                                    //
+                                    // With the nested picker gone (it offered
+                                    // `completed` from this row) that left an
+                                    // awaiting row with NO route to complete: not in
+                                    // the ▾, not inline. Reachable in one ordinary
+                                    // sequence — drag an item into Multi-step, then
+                                    // realise you already did it — and the only way
+                                    // out was to request a breakdown you do not want
+                                    // in order to reach a Complete you do.
+                                    <button
+                                      key="complete-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        run(
+                                          () => completeItem(item.id),
+                                          { id: item.id, field: "done" },
+                                          item.text,
+                                        )
+                                      }
+                                    >
+                                      {t("action.completeFull", voice)}
+                                    </button>,
                                   ],
                                   [
                                     schedule ? (

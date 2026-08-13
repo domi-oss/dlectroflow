@@ -2541,6 +2541,108 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     );
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
   });
+
+  /**
+   * #253 — an awaiting-breakdown row must still be completable.
+   *
+   * This state nulls out three of its own controls: `view-list-m` and
+   * `focus-list-m` have nothing to point at with no steps yet, and the inline
+   * cluster collapses to the single red `Break into steps now?` CTA. Group 2's
+   * entry was written as `awaitingBreakdown ? break-now-m : complete-m`, so
+   * `Mark as completed` was the fourth casualty — and unlike the other three it
+   * has nothing to do with whether steps exist.
+   *
+   * With the nested picker gone (it used to offer `completed` from this row) that
+   * left the state with NO route to complete: not in the ▾, not inline. The
+   * reachable sequence is ordinary — drag an item into Multi-step, then realise
+   * you have already done it — and the way out was to break it into steps you do
+   * not want in order to reach a Complete you do.
+   *
+   * `break-now-m` stays first: it is the primary CTA for the state, and the twin
+   * of the inline red button. Complete is added beside it, not in place of it.
+   */
+  it("an awaiting-breakdown row can still be completed from the ▾", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[awaiting()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    // Scoped to the popup, because the inline red CTA carries the SAME label and
+    // an unscoped query matches both — which is the whole reason this state was
+    // able to lose its Complete unnoticed.
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    // Both entries are present in this state — the CTA twin AND Complete.
+    expect(
+      within(popup).getByRole("button", { name: "Break into steps now?" }),
+    ).toBeInTheDocument();
+    await user.click(
+      within(popup).getByRole("button", { name: "Mark as completed" }),
+    );
+    expect(completeItem).toHaveBeenCalledWith("aw1");
+  });
+
+  it("the CTA twin is still the FIRST of the two, not displaced by Complete", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[awaiting()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    const labels = within(popup)
+      .getAllByRole("button")
+      .map((b) => b.textContent?.trim());
+    expect(labels).toContain("Break into steps now?");
+    expect(labels.indexOf("Break into steps now?")).toBeLessThan(
+      labels.indexOf("Mark as completed"),
+    );
+  });
+
+  it("a row WITH steps still shows Complete and no CTA twin", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "st1",
+            text: "has a plan",
+            status: "triaged",
+            breakdownRequestedAt: new Date(),
+            stepsTotal: 3,
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("has a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    // Guard the guard: proves the fix did not simply render both entries in both
+    // states, which would pass the two specs above while breaking this one.
+    expect(
+      within(popup).getByRole("button", { name: "Mark as completed" }),
+    ).toBeInTheDocument();
+    expect(
+      within(popup).queryByRole("button", { name: "Break into steps now?" }),
+    ).toBeNull();
+  });
 });
 
 describe("InboxView — ✎ edit title", () => {
