@@ -78,8 +78,20 @@ export type BookkeepingTag =
   | "step_done_bookkeeping_failed"
   /** `markTaskCompleted` — the task-complete points and badge. */
   | "task_complete_bookkeeping_failed"
-  /** `completeFocus` — `rewardStepDone` and the session-finished bonus. */
-  | "focus_session_bookkeeping_failed"
+  /**
+   * `completeFocus` — the step payout (points, streak, ten-steps badge).
+   *
+   * Two tags rather than one for this site, because its two payouts are two
+   * `bestEffort` calls rather than one wrapped block: they were split so that a
+   * failure in either is independent of the other, and a shared tag would make
+   * that independence invisible to the only reader that matters. An alert
+   * filtered on one tag must be able to say WHICH payout was lost without
+   * parsing `message` — see the call site, and the rule at the head of this
+   * union.
+   */
+  | "focus_step_reward_failed"
+  /** `completeFocus` — the session-finished bonus, independent of the above. */
+  | "focus_session_bonus_failed"
   /** `beginFocus` — the once-ever FirstFocus badge. */
   | "first_focus_badge_failed";
 

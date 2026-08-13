@@ -135,6 +135,20 @@ const loggedLine = () =>
     message: string;
   };
 
+/**
+ * The tags of EVERY line logged, in call order — for a site whose payouts are
+ * split into separate `bestEffort` calls and must therefore be distinguishable
+ * from each other. The index-0 helpers above cannot see a second line at all.
+ *
+ * `calls` is annotated rather than inferred: `errorLog` is typed as the general
+ * `ReturnType<typeof vi.spyOn>`, so its call tuples come through as implicit
+ * `any` and `noImplicitAny` rejects the callback parameter.
+ */
+const loggedTags = () =>
+  (errorLog.mock.calls as unknown[][]).map(
+    (call) => (JSON.parse(String(call[0])) as { tag: string }).tag,
+  );
+
 beforeEach(() => {
   vi.clearAllMocks();
   errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -259,11 +273,16 @@ describe("completeStep — a payout that fails after the step committed", () => 
    * it is in this sweep rather than deferred.
    *
    * `completeStep` guards on `if (!step || step.done) return`, so once the step
-   * write has landed a retry returns before reaching `markTaskCompleted`.
-   * A `rewardStepDone` that propagated therefore left the task **Active with
-   * zero open steps, permanently** — no later press can finish it, because every
-   * later press early-returns. Swallowing the payout is what lets the state write
-   * behind it run.
+   * write has landed a retry of THIS action returns before reaching
+   * `markTaskCompleted`. A `rewardStepDone` that propagated therefore left the
+   * task **Active with zero open steps**, with the three revalidations unrun — so
+   * the tab that pressed it goes on showing the step open.
+   *
+   * **"Permanently" is withdrawn** (`!339` review): `completeItem` and
+   * `completeFocus` both still reach a `TaskStatus.Done` write from that state, so
+   * the damage is a wrong render plus a lost `task_complete` payout that only an
+   * unobvious different press repairs — not an unrecoverable row. The docblock on
+   * `completeStep` carries the full argument and the one case with no inbox route.
    */
   it("still finishes the task, so a done step cannot leave it Active", async () => {
     rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
@@ -350,15 +369,74 @@ describe("completeFocus — a payout that fails after the session closed", () =>
     });
     logRewardMock.mockRejectedValueOnce(new Error(BOOM));
     await expect(finish()).resolves.toMatchObject({ ok: true, streak: 3 });
-    expect(loggedTag()).toBe("focus_session_bookkeeping_failed");
+    expect(loggedTag()).toBe("focus_session_bonus_failed");
   });
 
   it("says so in the log, with a greppable tag and the workspace", async () => {
     rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
     await finish();
     expect(errorLog).toHaveBeenCalledTimes(1);
-    expect(loggedLine().tag).toBe("focus_session_bookkeeping_failed");
+    expect(loggedLine().tag).toBe("focus_step_reward_failed");
     expect(loggedLine().workspaceId).toBe(WS);
+  });
+
+  /**
+   * ── The two payouts carry DIFFERENT tags (Duo review, `!339`) ─────────────
+   *
+   * These two calls were deliberately split so a failure in one is independent
+   * of the other, and `best-effort.ts` states the invariant that makes the split
+   * legible: **"the tag is the entire value of the log line"**. One tag on both
+   * sites throws that away at the only place anyone reads it — a log or an alert
+   * filtered on the tag cannot say WHICH of the two independent consequences was
+   * lost without parsing the free-text `message`, so the split buys the code
+   * independence the operator cannot see.
+   *
+   * Asserting the **exact tag per site** is the whole point. The two tests above
+   * used to assert one shared literal, which is how a suite passes an
+   * implementation whose log lines are indistinguishable: a check that only says
+   * "a line was logged" is satisfied by one tag used twice.
+   */
+  it("emits two DIFFERENT tags when both payouts fail in one call", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(finish()).resolves.toMatchObject({ ok: true, streak: null });
+
+    const tags = loggedTags();
+    // Ordered, because the order is the call order and a reader of the log needs
+    // it: the step payout runs first, the session bonus second.
+    expect(tags).toEqual([
+      "focus_step_reward_failed",
+      "focus_session_bonus_failed",
+    ]);
+    // The property the shared tag lost, asserted as a property rather than as
+    // two literals — this is what an alert filtered on one tag relies on.
+    expect(new Set(tags).size).toBe(2);
+  });
+
+  /**
+   * The recovery route that makes `completeStep`'s "permanently stuck" reading
+   * wrong, pinned rather than asserted in prose (`!339` review).
+   *
+   * `openCount === 0` IS the state a `completeStep` whose payout threw leaves
+   * behind: the step is done, the task is still Active. Neither this action's
+   * `sessionCheck` nor `beginFocus`'s guard filters on `step.done`, so the state
+   * is still reachable from a session — and when it is reached, this branch writes
+   * the `Done` that `completeStep` never got to. Worth a test of its own because
+   * the file's other `completeFocus` cases run with one step still open, so none
+   * of them enters this branch at all.
+   */
+  it("finishes the task when no open steps remain, even if the payout failed", async () => {
+    // `step.count` is the ONLY thing that gates the branch. `step.findFirst` is
+    // deliberately left on its default: this action calls it twice (the ownership
+    // check, then the next-step lookup), so a `…Once` here would land on the
+    // first and silently skip the step's own `done` write instead.
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+
+    await expect(finish()).resolves.toMatchObject({ ok: true, streak: null });
+    expect(prismaMock.task.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: TaskStatus.Done } }),
+    );
   });
 
   it("CONTROL: closing the session failing still rejects", async () => {

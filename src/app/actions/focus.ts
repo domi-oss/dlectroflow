@@ -271,12 +271,27 @@ async function markTaskCompleted(
  *
  * The step write commits on its own, and the guard at the top is
  * `if (!step || step.done) return` — so once that write has landed, **every later
- * press returns before reaching anything below it**. A `rewardStepDone` that
- * propagated therefore did not merely report a false failure: it aborted the
- * request in front of `markTaskCompleted`, leaving the task **Active with zero
- * open steps and no press that could ever finish it**, plus the three
- * revalidations unrun. Swallowing the payout is what lets the state write behind
- * it run, which is why this site is in #257's sweep rather than filed as a nit.
+ * press of THIS action returns before reaching anything below it**. A
+ * `rewardStepDone` that propagated therefore did not merely report a false
+ * failure: it aborted the request in front of `markTaskCompleted`, leaving the
+ * task **Active with zero open steps**, plus the three revalidations unrun — so
+ * the person's own tab goes on rendering the step as open, and the task page
+ * shows every step ticked beside a task that is not complete.
+ *
+ * **Not permanent, and the earlier claim that it was is withdrawn** (`!339`
+ * review): `completeStep` is not the only writer of `TaskStatus.Done`. Two other
+ * presses still reach one — `completeItem` (`braindump.ts`) sets it
+ * unconditionally inside its transaction once it takes the completion, and its
+ * own guard (`if (!item || item.completedAt) return`) does NOT bar the way here,
+ * because the `BrainDumpItem.completedAt` stamp is written by `markTaskCompleted`
+ * and that is precisely what did not run; and `completeFocus` reaches
+ * `markTaskCompleted` whenever `openCount === 0`, which is what the stuck state
+ * is. So the honest severity is a **silently wrong render plus a lost
+ * `task_complete` payout, recoverable only by a different press than the obvious
+ * one** — and for a task with no linked `BrainDumpItem` (`taskId` is nullable, so
+ * a task can have none) the inbox route does not exist at all. That is still
+ * worth fixing here rather than filing as a nit, but it is not unrecoverable.
+ * Swallowing the payout is what lets the state write behind it run.
  *
  * The residual is the `step_done` points, the ten-steps-in-a-day badge check and
  * this engagement's streak credit for the day — see `src/lib/best-effort.ts` and
@@ -589,12 +604,17 @@ export async function completeFocus(
   // back). A failed step payout must not silently cost it, and a failed bonus
   // must not hide a streak that did advance. The residual is at most one of the
   // two, never both from one fault.
-  const streak = await bestEffort(
-    "focus_session_bookkeeping_failed",
-    workspaceId,
-    () => rewardStepDone(workspaceId),
+  //
+  // TWO TAGS for the same reason (Duo review, `!339`). The split above buys
+  // independence in the code; a shared tag would keep it out of the one place an
+  // operator looks, because `best-effort.ts` makes the tag the entire value of
+  // the line. One literal on both calls means a log filtered on it cannot say
+  // which of the two consequences was lost without parsing free text — so the
+  // step payout and the bonus are named separately.
+  const streak = await bestEffort("focus_step_reward_failed", workspaceId, () =>
+    rewardStepDone(workspaceId),
   );
-  await bestEffort("focus_session_bookkeeping_failed", workspaceId, () =>
+  await bestEffort("focus_session_bonus_failed", workspaceId, () =>
     logReward(workspaceId, RewardType.SessionFinished),
   );
 
