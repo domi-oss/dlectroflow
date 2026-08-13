@@ -171,3 +171,126 @@ describe("MoveToMenu", () => {
     expect(host.querySelectorAll("div")).toHaveLength(0);
   });
 });
+
+/**
+ * #253 — `Single-task to-dos` is suppressed for an item that HAS steps, because it
+ * is not a destination such an item can reach.
+ *
+ * This is the SAME defect hidden on the Multi-step row's ▾ in the same MR, on a
+ * second surface — one sweep rather than two issues. `moveItemToBucket(id,
+ * "singleTask")` dispatches `triage`, which clears `breakdownRequestedAt` but leaves
+ * the steps; `bucketOfItem` returns `multiStep` for any triaged item with
+ * `stepsTotal > 1`. So the row does not move, while `movedAnnouncement` tells a
+ * screen-reader user it landed in Single-task.
+ *
+ * ── The reachability path, traced link by link before this guard was written ──
+ *
+ * The menu only renders on the idle Saved row and the Done row, so a steps-bearing
+ * item has to GET to one of those. It can:
+ *
+ *  1. A Multi-step row (`stepsTotal > 1`) offers `Send back to review`.
+ *  2. `moveToReview` writes `status: Inbox`, `triagedAt: null`, `snoozedUntil: null`,
+ *     `breakdownRequestedAt: null` — and touches **neither the Task nor its steps**,
+ *     so `stepsTotal` (`task?.steps.length`) survives.
+ *  3. `bucketOfItem` → `needsReview` (Inbox, not snoozed, not completed).
+ *  4. That row offers `Save for later` → `snooze` → `snoozedUntil` in the future.
+ *     (Step 2 clearing the snooze does not break the chain; this re-sets it.)
+ *  5. `bucketOfItem` → `savedLater`, still `stepsTotal > 1`.
+ *  6. The idle Saved row renders this menu **unconditionally** — no steps check —
+ *     and `BUCKET_ORDER` minus `savedLater` includes `singleTask`.
+ *  7. Press it → `triage` → `status: Triaged`, `snoozedUntil` NOT cleared.
+ *  8. `bucketOfItem` → `multiStep`. The announcement said Single-task.
+ *
+ * Four deliberate steps, so unlikely rather than unreachable — and every link was
+ * read rather than assumed, because a guard against a state nothing can enter is
+ * worse than no guard.
+ *
+ * `stepsTotal === 1` is deliberately NOT suppressed: `bucket.ts` states that "a
+ * one-step task IS a single to-do (its step exists so ▶ Focus has a target); only 2+
+ * steps make it multi-step", so for that item the move genuinely works. The
+ * threshold here is the same `> 1` the bucket split uses, and not `>= 1`.
+ */
+describe("MoveToMenu — Single-task is suppressed for a steps-bearing item (#253)", () => {
+  const targets = async () =>
+    (await screen.findAllByRole("menuitem")).map((el) => el.textContent);
+
+  it("omits Single-task when the item has 2+ steps", async () => {
+    render(
+      <MoveToMenu
+        currentBucket="savedLater"
+        stepsTotal={3}
+        voice="plain"
+        onMove={vi.fn()}
+      />,
+    );
+    await openMenu("Move to");
+    expect(
+      screen.queryByRole("menuitem", { name: /Single-task/ }),
+      "a steps-bearing item was offered a bucket it cannot reach",
+    ).not.toBeInTheDocument();
+    // The other three are untouched — the suppression is one target, not a rewrite
+    // of the list. Asserted as an exact set so a broader filter reds here.
+    expect(await targets()).toEqual([
+      "Needs review",
+      "Multi-step to-dos",
+      "Completed",
+    ]);
+  });
+
+  it("keeps Single-task for a stepless item, where the move works", async () => {
+    render(
+      <MoveToMenu
+        currentBucket="savedLater"
+        stepsTotal={0}
+        voice="plain"
+        onMove={vi.fn()}
+      />,
+    );
+    await openMenu("Move to");
+    expect(
+      await screen.findByRole("menuitem", { name: /Single-task/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps it for a ONE-step item too — that is a single to-do by definition", async () => {
+    render(
+      <MoveToMenu
+        currentBucket="savedLater"
+        stepsTotal={1}
+        voice="plain"
+        onMove={vi.fn()}
+      />,
+    );
+    await openMenu("Move to");
+    expect(
+      await screen.findByRole("menuitem", { name: /Single-task/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("defaults to offering it when the caller says nothing about steps", async () => {
+    // Back-compatible: the prop is optional, and its absence must not silently
+    // suppress a legitimate destination.
+    render(
+      <MoveToMenu currentBucket="savedLater" voice="plain" onMove={vi.fn()} />,
+    );
+    await openMenu("Move to");
+    expect(
+      await screen.findByRole("menuitem", { name: /Single-task/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("still dispatches the targets it does offer", async () => {
+    const onMove = vi.fn();
+    render(
+      <MoveToMenu
+        currentBucket="savedLater"
+        stepsTotal={3}
+        voice="plain"
+        onMove={onMove}
+      />,
+    );
+    await openMenu("Move to");
+    await userEvent.click(screen.getByRole("menuitem", { name: /Multi-step/ }));
+    expect(onMove).toHaveBeenCalledWith("multiStep");
+  });
+});

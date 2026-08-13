@@ -5639,3 +5639,142 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     expect(editor).toHaveValue("water the plants{}");
   });
 });
+
+/**
+ * #253 — the `stepsTotal` suppression is actually WIRED on both rows that render
+ * `MoveToMenu`. The prop existing is not the fix; a prop no caller passes is inert,
+ * which is the shape #213 was written against and which this MR deleted three other
+ * props for.
+ *
+ * Both rows can hold a steps-bearing item, and the Done row is the MORE reachable of
+ * the two:
+ *
+ *  • **Done row — two presses.** Complete a multi-step task; it lands here with its
+ *    steps intact. `dropPlan` sets `reopenFirst` for a completed source, and
+ *    `reopenItem` guarantees ≥1 not-done step, so after the reopen the item is
+ *    triaged with `stepsTotal > 1` → `bucketOfItem` returns `multiStep`, never
+ *    `singleTask`.
+ *  • **Saved row — four presses.** Send a Multi-step row back to review (which
+ *    retains the Task and its steps), then Save for later.
+ */
+describe("InboxView — MoveToMenu's Single-task suppression is wired (#253)", () => {
+  const openMoveMenu = async (
+    row: HTMLElement,
+    user: ReturnType<typeof userEvent.setup>,
+  ) => {
+    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    return screen.findByRole("menu");
+  };
+
+  it("the idle SAVED row hides Single-task for a steps-bearing item", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "sv-steps",
+            text: "saved multi",
+            snoozedUntil: new Date(Date.now() + 60 * 60_000),
+            taskId: "tsv",
+            stepsTotal: 3,
+            stepsDone: 0,
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("saved multi").closest("li")!;
+    await openMoveMenu(row, user);
+    expect(
+      screen.queryByRole("menuitem", { name: /Single-task/ }),
+    ).not.toBeInTheDocument();
+    // Control on the same surface: the other targets still render, so this is a
+    // suppression rather than a menu that failed to open.
+    expect(
+      await screen.findByRole("menuitem", { name: /Multi-step/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("the idle SAVED row still offers it for a stepless item", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "sv-plain",
+            text: "saved plain",
+            snoozedUntil: new Date(Date.now() + 60 * 60_000),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("saved plain").closest("li")!;
+    await openMoveMenu(row, user);
+    expect(
+      await screen.findByRole("menuitem", { name: /Single-task/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("the DONE row hides Single-task for a completed multi-step task", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "dn-steps",
+            text: "finished multi",
+            status: "triaged",
+            completedAt: new Date(),
+            taskId: "tdn",
+            stepsTotal: 3,
+            stepsDone: 3,
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("finished multi").closest("li")!;
+    await openMoveMenu(row, user);
+    expect(
+      screen.queryByRole("menuitem", { name: /Single-task/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("menuitem", { name: /Needs review/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("the DONE row still offers it for a completed single to-do", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "dn-plain",
+            text: "finished plain",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("finished plain").closest("li")!;
+    await openMoveMenu(row, user);
+    expect(
+      await screen.findByRole("menuitem", { name: /Single-task/ }),
+    ).toBeInTheDocument();
+  });
+});

@@ -3829,6 +3829,12 @@ export function InboxView({
                                 <MoveToMenu
                                   describedById={moveInstructionsId}
                                   currentBucket={bucketOfItem(item, now)}
+                                  // #253 — suppresses the Single-task target for an
+                                  // item carrying 2+ steps, which `triage` cannot
+                                  // move there. A saved item CAN carry steps: it
+                                  // arrives via Send back to review, which retains
+                                  // the Task, then Save for later.
+                                  stepsTotal={item.stepsTotal}
                                   voice={voice}
                                   onMove={(target) =>
                                     moveItemToBucket(item.id, target)
@@ -3954,6 +3960,15 @@ export function InboxView({
                           <MoveToMenu
                             describedById={moveInstructionsId}
                             currentBucket={bucketOfItem(item, now)}
+                            // #253 — same suppression, and this row is the MORE
+                            // reachable of the two: completing a multi-step task
+                            // puts it here with its steps intact, so Single-task is
+                            // two presses away rather than four. `dropPlan` sets
+                            // `reopenFirst` for a completed source, and `reopenItem`
+                            // guarantees ≥1 not-done step — so after the reopen the
+                            // item is triaged with `stepsTotal > 1` and lands in
+                            // Multi-step, never Single-task.
+                            stepsTotal={item.stepsTotal}
                             voice={voice}
                             onMove={(target) =>
                               moveItemToBucket(item.id, target)

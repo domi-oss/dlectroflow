@@ -57,11 +57,21 @@ import {
  */
 export function MoveToMenu({
   currentBucket,
+  stepsTotal,
   voice,
   onMove,
   describedById,
 }: {
   currentBucket: BucketId;
+  /** #253 — the item's step count, used only to suppress `singleTask`, which an
+   * item with 2+ steps cannot reach. Optional and defaulting to "offer it": absent,
+   * it must not silently remove a legitimate destination.
+   *
+   * A number rather than a `hasSteps` boolean because the threshold is a fact about
+   * the bucket split and belongs beside it — `bucket.ts` puts a ONE-step task in
+   * Single-task ("its step exists so ▶ Focus has a target; only 2+ steps make it
+   * multi-step"), so the test is `> 1` and a boolean would have hidden which. */
+  stepsTotal?: number;
   voice: Voice;
   onMove: (target: BucketId) => void;
   /** #163 — id of the board's shared move-instructions node. Since
@@ -72,7 +82,23 @@ export function MoveToMenu({
   describedById?: string;
 }) {
   const host = useRef<HTMLSpanElement>(null);
-  const targets = BUCKET_ORDER.filter((b) => b !== currentBucket);
+  // #253 — a destination the item provably cannot reach is not offered.
+  //
+  // `moveItemToBucket(id, "singleTask")` dispatches `triage`, which clears
+  // `breakdownRequestedAt` but leaves the steps — and `bucketOfItem` returns
+  // `multiStep` for ANY triaged item with `stepsTotal > 1`. So the row would not
+  // move while `movedAnnouncement` announced that it had, which is the same defect
+  // the Multi-step row's ▾ hides by gating its own Single-task entry on
+  // `awaitingBreakdown`. One sweep across both surfaces, not two.
+  //
+  // Reachable, and traced link by link in `move-to-menu.test.tsx` rather than
+  // assumed: this menu renders only on the idle Saved row and the Done row, and
+  // `moveToReview` retains the Task and its steps, so a multi-step item can be sent
+  // back to review, saved for later, and arrive here still carrying them.
+  const targets = BUCKET_ORDER.filter(
+    (b) =>
+      b !== currentBucket && !(b === "singleTask" && (stepsTotal ?? 0) > 1),
+  );
 
   return (
     <span ref={host} className="relative">
