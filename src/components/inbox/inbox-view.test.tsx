@@ -2178,6 +2178,124 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
       within(row).queryByRole("button", { name: "Start visual focus timer" }),
     ).not.toBeInTheDocument();
   });
+
+  /**
+   * #253 — `Add as single-task to-do` is hidden on a Multi-step row that HAS steps,
+   * and kept on one awaiting a breakdown. Asserted as two exact ordered lists rather
+   * than a presence check, because the claim is conditional and a presence check
+   * cannot see which state it is in.
+   *
+   * On a steps-bearing row the entry never worked. It dispatches
+   * `moveItemToBucket(id, "singleTask")` → `triage`, which clears
+   * `breakdownRequestedAt` — but `bucketItems` keeps the row in Multi-step on
+   * `stepsTotal > 1` alone (`bucket.ts`), so the row does not move. It was a dead
+   * option that still fired `movedAnnouncement`, telling a screen-reader user the
+   * item had moved to Single-task when it had not.
+   *
+   * On an awaiting row (`stepsTotal === 0`) it is the whole point: `awaitsBreakdown`
+   * is `stepsTotal === 0 && breakdownRequestedAt != null`, so clearing the stamp does
+   * move the row out. Gate too broadly and the second case below reds.
+   */
+  it("a steps-bearing Multi-step row's ▾ omits the dead Single-task entry", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeMultiStep()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    expect(
+      within(popup)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([
+      "Send back to review",
+      "Save for later",
+      "View multi-step task list",
+      "Start visual focus timer",
+      "Mark as completed",
+      "Add to calendar (.ics)",
+      "Delete",
+    ]);
+    expect(
+      within(popup).queryByRole("button", {
+        name: "Add as single-task to-do",
+      }),
+      "the dead Single-task entry is back on a steps-bearing row",
+    ).toBeNull();
+  });
+
+  it("an awaiting-breakdown Multi-step row KEEPS it, because there it works", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "aw2",
+            text: "needs a plan",
+            status: "triaged",
+            breakdownRequestedAt: new Date(),
+            stepsTotal: 0,
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    expect(
+      within(popup)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([
+      "Send back to review",
+      "Add as single-task to-do",
+      "Save for later",
+      "Break into steps",
+      "Mark as completed",
+      "Add to calendar (.ics)",
+      "Delete",
+    ]);
+  });
+
+  it("the kept entry still dispatches the move that works", async () => {
+    const { triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "aw3",
+            text: "needs a plan",
+            status: "triaged",
+            breakdownRequestedAt: new Date(),
+            stepsTotal: 0,
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    await user.click(
+      within(popup).getByRole("button", { name: "Add as single-task to-do" }),
+    );
+    expect(triageBrainDumpItem).toHaveBeenCalledWith("aw3");
+  });
 });
 
 describe("InboxView — tap multi-step row body to expand (v6)", () => {
@@ -2580,8 +2698,10 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     // able to lose its Complete unnoticed.
     const popup = within(row).getByRole("dialog", { name: "All options" });
     // Both entries are present in this state — the CTA twin AND Complete.
+    // `action.breakNow`, the imperative — the ▾ entry no longer shares the card
+    // CTA's question mark (#253 F1 split the key).
     expect(
-      within(popup).getByRole("button", { name: "Break into steps now?" }),
+      within(popup).getByRole("button", { name: "Break into steps" }),
     ).toBeInTheDocument();
     await user.click(
       within(popup).getByRole("button", { name: "Mark as completed" }),
@@ -2606,8 +2726,8 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const labels = within(popup)
       .getAllByRole("button")
       .map((b) => b.textContent?.trim());
-    expect(labels).toContain("Break into steps now?");
-    expect(labels.indexOf("Break into steps now?")).toBeLessThan(
+    expect(labels).toContain("Break into steps");
+    expect(labels.indexOf("Break into steps")).toBeLessThan(
       labels.indexOf("Mark as completed"),
     );
   });
@@ -2640,7 +2760,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
       within(popup).getByRole("button", { name: "Mark as completed" }),
     ).toBeInTheDocument();
     expect(
-      within(popup).queryByRole("button", { name: "Break into steps now?" }),
+      within(popup).queryByRole("button", { name: "Break into steps" }),
     ).toBeNull();
   });
 });
@@ -4265,6 +4385,17 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual([
+      // #253 F1 — TWO break-up entries, because they are genuinely different acts
+      // and this row previously offered neither honestly. `Break into steps`
+      // navigates into the editor (`startBreakdown`); `Break into multi-step to-do`
+      // PARKS the item in that bucket (`moveItemToBucket(…, "multiStep")` →
+      // `requestBreakdown`), which is a legitimate permanent resting state —
+      // `bucketOfItem` keeps an item there on `breakdownRequestedAt` alone and
+      // nothing reaps that stamp.
+      //
+      // The navigating entry stays FIRST so behaviour-by-position is preserved: a
+      // user who pressed the first entry before this change still gets the editor.
+      "Break into steps",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4296,6 +4427,115 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     expect(
       within(row).getAllByRole("button", { name: "Edit capture me" }),
     ).toHaveLength(1);
+  });
+
+  /**
+   * The same exact list in PLAYFUL voice, because a label can be renamed in one
+   * voice and left behind in the other — and nothing in this suite rendered a ▾ list
+   * in playful at all until #253's review, so the longer of the two variants was
+   * entirely unmeasured.
+   *
+   * `Delete` is deliberately identical across voices (`action.delete`), as is
+   * `Add to calendar (.ics)`'s 📅. The two break-up entries share 🍿 on purpose: the
+   * playful column is frozen while #86 decides whether that voice survives, so a new
+   * key carries the existing emoji onto new words and invents no new metaphor.
+   */
+  it("the ▾ list keeps the same order and completeness in playful voice", async () => {
+    const user = userEvent.setup();
+    render(
+      <VoiceProvider voice="playful">
+        <InboxView
+          now={Date.now()}
+          initialItems={[makeItem({ id: "n1", text: "capture me" })]}
+          settings={settings}
+          google={{ configured: true, connected: true, needsReconnect: false }}
+          welcomeVisible={false}
+          resumeStep={null}
+        />
+      </VoiceProvider>,
+    );
+    const row = screen.getByText("capture me").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    expect(
+      within(popup)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual([
+      "🍿 Break into steps",
+      "🍿 Break into multi-step to-do",
+      "🍽️ Add as single-task to-do",
+      "🥫 Save for later",
+      "✅ Mark as completed",
+      "🗓️ Schedule to calendar (send to Google Tasks)",
+      "📅 Add to calendar (.ics)",
+      "Delete",
+    ]);
+    // The card's inline prompt keeps its question mark and its own wording. Pinned
+    // here because the ▾ entry and that CTA shared ONE key until this change, and
+    // the whole point of splitting them is that they now diverge.
+    expect(within(popup).queryByText("🍿 Snack-size it now?")).toBeNull();
+  });
+
+  /**
+   * The two break-up entries must dispatch DIFFERENT writes. Same-label,
+   * same-destination entries were the defect; two distinctly-labelled entries that
+   * both call `startBreakdown` would be the same defect with better copy.
+   */
+  it("the two break-up entries dispatch different writes", async () => {
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const { requestBreakdown } = await import("@/app/actions/braindump");
+    (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t7");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeItem({ id: "n1", text: "capture me" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("capture me").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+
+    // The PARK entry: through `moveItemToBucket`, so `dropPlan`'s
+    // `ACTION_FOR_BUCKET.multiStep` picks `requestBreakdown` — byte-identical to the
+    // drag path, no navigation.
+    await user.click(
+      within(popup).getByRole("button", {
+        name: "Break into multi-step to-do",
+      }),
+    );
+    expect(requestBreakdown).toHaveBeenCalledWith("n1");
+    expect(startBreakdown).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("the navigating entry opens the editor and does not park", async () => {
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const { requestBreakdown } = await import("@/app/actions/braindump");
+    (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t7");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeItem({ id: "n1", text: "capture me" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("capture me").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const popup = within(row).getByRole("dialog", { name: "All options" });
+    await user.click(
+      within(popup).getByRole("button", { name: "Break into steps" }),
+    );
+    expect(startBreakdown).toHaveBeenCalledWith("n1");
+    expect(push).toHaveBeenCalledWith("/tasks/t7");
+    expect(requestBreakdown).not.toHaveBeenCalled();
   });
 
   /**
@@ -4335,6 +4575,8 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
           : el.textContent,
       ),
     ).toEqual([
+      // #253 F1 — the navigating entry leads; the park entry follows it.
+      "Break into steps",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4347,7 +4589,8 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     ]);
     // Decoration, not content: nothing here has a role, so the seven buttons above
     // are still the whole list as far as AT and the 44px guard are concerned.
-    expect(within(popup).getAllByRole("button")).toHaveLength(7);
+    // 8 since #253 F1 added the park entry beside the navigating one.
+    expect(within(popup).getAllByRole("button")).toHaveLength(8);
     // Scoped to the popup's own children — belt-and-braces now that the nested
     // picker and its `aria-hidden` disclosure chevron have gone: a group rule is a
     // direct child of the popup, an entry's own decoration is not.
@@ -4385,6 +4628,8 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual([
+      // #253 F1 — the navigating entry leads; the park entry follows it.
+      "Break into steps",
       "Break into multi-step to-do",
       "Add as single-task to-do",
       "Save for later",
@@ -4421,7 +4666,8 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const entries = within(
       within(row).getByRole("dialog", { name: "All options" }),
     ).getAllByRole("button");
-    expect(entries).toHaveLength(7);
+    // 8 since #253 F1 added the park entry beside the navigating one.
+    expect(entries).toHaveLength(8);
     for (const entry of entries) {
       expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
     }

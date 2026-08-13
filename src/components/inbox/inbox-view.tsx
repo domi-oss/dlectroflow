@@ -2802,6 +2802,9 @@ export function InboxView({
                           voice={voice}
                           now={now}
                           onBreakdown={() => breakdown(item.id, item.text)}
+                          onMoveToMultiStep={() =>
+                            moveItemToBucket(item.id, "multiStep")
+                          }
                           onKeep={() =>
                             run(
                               () => keepAsTask(item.id),
@@ -3131,16 +3134,42 @@ export function InboxView({
                                     // names; `keepAsTask` additionally materialises the
                                     // `Task`. Unifying the two is #259/#213 territory,
                                     // not a menu-layout change.
-                                    <button
-                                      key="single-m"
-                                      type="button"
-                                      className={rowMenuEntry()}
-                                      onClick={() =>
-                                        moveItemToBucket(item.id, "singleTask")
-                                      }
-                                    >
-                                      {t("action.addTodoFull", voice)}
-                                    </button>,
+                                    //
+                                    // ⚠️⚠️ AWAITING ROWS ONLY, and this is a bug fix
+                                    // rather than a layout choice. On a row that HAS
+                                    // steps this entry never worked: `triage` clears
+                                    // `breakdownRequestedAt`, but `bucketItems` keeps
+                                    // the row in Multi-step on `stepsTotal > 1` alone
+                                    // (`bucket.ts`), so the row does not move — while
+                                    // `moveItemToBucket` still fired
+                                    // `movedAnnouncement`, telling a screen-reader
+                                    // user it had landed in Single-task. A dead
+                                    // option that lied about its own outcome, against
+                                    // that function's stated invariant.
+                                    //
+                                    // On an awaiting row it is the whole point:
+                                    // `awaitsBreakdown` is `stepsTotal === 0 &&
+                                    // breakdownRequestedAt != null`, so clearing the
+                                    // stamp genuinely moves the row out. Hence the
+                                    // gate is `awaitingBreakdown`, not `true` and not
+                                    // `stepsTotal === 0` — the latter would also catch
+                                    // a stepless row with no stamp, which is not in
+                                    // this bucket at all.
+                                    awaitingBreakdown ? (
+                                      <button
+                                        key="single-m"
+                                        type="button"
+                                        className={rowMenuEntry()}
+                                        onClick={() =>
+                                          moveItemToBucket(
+                                            item.id,
+                                            "singleTask",
+                                          )
+                                        }
+                                      >
+                                        {t("action.addTodoFull", voice)}
+                                      </button>
+                                    ) : null,
                                     <button
                                       key="save-m"
                                       type="button"
@@ -3189,6 +3218,18 @@ export function InboxView({
                                     ) : null,
                                     // The inline red CTA's twin, in the awaiting
                                     // state only — that is the state it names.
+                                    //
+                                    // ⚠️ `action.breakNow`, NOT `prompt.breakNow`.
+                                    // The two were one key until #253 F1 split them:
+                                    // a menu entry is a command, so this reads
+                                    // "Break into steps" as an imperative, while the
+                                    // card's red button keeps "Break into steps
+                                    // now?" — a question is the right register on a
+                                    // card, and it is the only thing that visually
+                                    // marks an unbroken-down one. Owner's call on
+                                    // both halves. Same key as the Needs-review
+                                    // row's navigating entry, because it is the same
+                                    // act: `startBreakdown`, into the editor.
                                     awaitingBreakdown ? (
                                       <button
                                         key="break-now-m"
@@ -3198,7 +3239,7 @@ export function InboxView({
                                           breakdown(item.id, item.text)
                                         }
                                       >
-                                        {t("prompt.breakNow", voice)}
+                                        {t("action.breakNow", voice)}
                                       </button>
                                     ) : null,
                                     // ⚠️ UNCONDITIONAL, and it used to be the else
@@ -4319,6 +4360,7 @@ function ItemRow({
   now,
   isDragging,
   onBreakdown,
+  onMoveToMultiStep,
   onKeep,
   onSaveForLater,
   onComplete,
@@ -4343,7 +4385,29 @@ function ItemRow({
   voice: Voice;
   now: number;
   isDragging?: boolean;
+  /** `startBreakdown` — creates the Task and NAVIGATES to the breakdown screen.
+   * Labelled `action.breakNow` ("Break into steps"), an imperative because a menu
+   * entry is a command; the card's inline red CTA keeps the question mark. */
   onBreakdown: () => void;
+  /** #253 F1 — PARK the item in Multi-step without navigating, through
+   * `moveItemToBucket(id, "multiStep")` and nothing else, so `dropPlan`, the no-op
+   * guard, the `{ field: "move" }` retry grain and `movedAnnouncement` stay
+   * byte-identical to the drag path.
+   *
+   * This row previously had **no** route to Multi-step at all. Its
+   * `action.breakdownFull` entry was wired to `onBreakdown`, and `startBreakdown`
+   * writes `Triaged` + `triagedAt` and never `breakdownRequestedAt` — so
+   * `bucketOfItem` landed the item in **singleTask** while the label named
+   * Multi-step. With this row's 📥 deleted by #253, a pointer drag was the only
+   * honest route, and `drag-announce.ts` states in the repo's own words that the
+   * menu is not a fallback for dragging but *is* the keyboard and
+   * assistive-technology path (WCAG 2.1.1, 2.5.7) — so this was an accessibility
+   * gap, not a cosmetic one.
+   *
+   * Both entries are offered because they are different acts, not two spellings of
+   * one: parking rests the item in Multi-step indefinitely (nothing reaps
+   * `breakdownRequestedAt`), breaking down now opens the editor. */
+  onMoveToMultiStep: () => void;
   onKeep: () => void;
   /** "Save for later" — a direct MOVE to the Saved bucket, dispatched through
    * the same `moveItemToBucket` path drag and MoveToMenu use. #253 removed this
@@ -4614,9 +4678,25 @@ function ItemRow({
                and the library bulk bar all still write it. */
             menu={groupedRowMenu([
               [
+                // #253 F1 — the two break-up entries. FIRST is the navigating one,
+                // deliberately: it is what this slot did before F1, so
+                // behaviour-by-position is preserved and a user who reached for the
+                // first entry still lands in the editor. Only its LABEL changed
+                // (`action.breakdownFull` → `action.breakNow`), because the old one
+                // named a bucket this action does not produce.
                 <button
-                  key="breakdown-m"
+                  key="break-now-m"
                   onClick={onBreakdown}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.breakNow", voice)}
+                </button>,
+                // SECOND is the park, which this row did not have at all. Same label
+                // as the Single-task row's Multi-step entry, since both land the
+                // item in the same bucket by the same dispatcher.
+                <button
+                  key="multi-m"
+                  onClick={onMoveToMultiStep}
                   className={rowMenuEntry()}
                 >
                   {t("action.breakdownFull", voice)}

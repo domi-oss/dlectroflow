@@ -77,6 +77,7 @@ describe("t() function", () => {
     ["bucket.empty", "plain", "Nothing here yet"],
     ["action.moveTo", "plain", "Move to…"],
     ["prompt.breakNow", "plain", "Break into steps now?"],
+    ["prompt.breakNow", "playful", "🍿 Snack-size it now?"],
     ["action.reviewNow", "plain", "Review now"],
     ["action.reviewNow", "playful", "🥫 Review now"],
     // v6 dropdown full-labels + short button.
@@ -93,6 +94,12 @@ describe("t() function", () => {
     // playful variant with it (#86) — same emoji, new words.
     ["action.breakdownFull", "plain", "Break into multi-step to-do"],
     ["action.breakdownFull", "playful", "🍿 Break into multi-step to-do"],
+    // #253 F1 — the navigating twin, split off `prompt.breakNow`. Both are pinned
+    // here BY VALUE because the whole point of the split is that they diverge: the
+    // menu entry is an imperative, the card's CTA keeps its question mark. A future
+    // "tidy" that re-merges them reds two cases rather than none.
+    ["action.breakNow", "plain", "Break into steps"],
+    ["action.breakNow", "playful", "🍿 Break into steps"],
     ["action.addTodoFull", "plain", "Add as single-task to-do"],
     ["action.addTodoFull", "playful", "🍽️ Add as single-task to-do"],
     ["action.saveShort", "plain", "Save"],
@@ -658,6 +665,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.cancel",
     "action.moveTo",
     "action.breakdownFull",
+    "action.breakNow",
     "action.addTodoFull",
     "action.saveShort",
     "action.completeFull",

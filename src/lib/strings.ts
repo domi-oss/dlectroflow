@@ -106,9 +106,36 @@ export const STRINGS = {
   // view is **#259**, and the playful column is frozen while **#86** decides
   // whether that voice survives at all — so a rename here carries the existing
   // emoji onto the new words and invents no new metaphor.
+  // The PARK entry: `moveItemToBucket(id, "multiStep")` → `requestBreakdown`. Names
+  // the bucket the row lands in, per the rule above, and it lands there for good if
+  // the user never breaks it down — `bucketOfItem` keeps an item in Multi-step on
+  // `breakdownRequestedAt` alone and NOTHING reaps that stamp (no TTL, no job, no
+  // nag; it clears only on an explicit move out). An unbroken-down Multi-step task
+  // is a legitimate permanent resting state, which is why this is a real
+  // destination and not a staging step.
   "action.breakdownFull": {
     plain: "Break into multi-step to-do",
     playful: "🍿 Break into multi-step to-do",
+  },
+  // ⚠️ The NAVIGATING twin, and it is a separate key from `prompt.breakNow` on
+  // purpose — they used to be one, and #253 F1 split them.
+  //
+  // `prompt.breakNow` keeps its question mark ("Break into steps now?") because it
+  // is the inline red CTA **on a card**, where a question is the right register and
+  // where it is the only thing that visually distinguishes an unbroken-down card.
+  // **A MENU ENTRY IS A COMMAND, NOT A PROMPT**, so the ▾ reads as an imperative.
+  // Owner's call on both halves.
+  //
+  // Used by two renderers for the same act — `startBreakdown`, which creates the
+  // Task and navigates to the breakdown screen: the Needs-review row's ▾ (where F1
+  // added the park entry beside it) and the awaiting-breakdown Multi-step row's ▾
+  // (the twin of that card's red CTA).
+  //
+  // Carries `action.breakdownFull`'s existing 🍿 rather than inventing a metaphor:
+  // the playful column is frozen while #86 decides whether that voice survives.
+  "action.breakNow": {
+    plain: "Break into steps",
+    playful: "🍿 Break into steps",
   },
   "action.addTodoFull": {
     plain: "Add as single-task to-do",
