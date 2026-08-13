@@ -1,9 +1,16 @@
 # Offline capture — a persisted brain-dump queue (#175)
 
-**Status:** design, owner-approved 2026-08-11
+**Status:** design, owner-approved 2026-08-11 · **amended under review through 2026-08-12**
 **Issue:** #175 · inherits the residual from #210 (!290) · sequenced behind #251 and #253
 **Milestone:** v0.6.0
 **Primary target:** Android Chrome on a phone, owner-stated
+
+⚠️ **Two dates, and the second one is why this line is not just "approved".** Review of this spec flagged
+that the approval date sat *earlier* than an owner decision recorded inside the document — the cap split
+under *"A shared browser"*, dated 2026-08-12 — which read as a document approved before a decision it
+contains. Both dates are real and neither is a typo: the design was approved on the 11th and then amended
+across a day of review, taking one further owner decision on the way. **The approval covers the design as
+amended**; the header now says so rather than leaving a reader to reconcile the two.
 
 ## Goal
 
@@ -80,13 +87,18 @@ blurred together. They are labelled from here on.**
   **!334 — _"offline capture queue — server half (module, migration, route)"_** — and **this document's own
   MR merges ahead of it**: **!332 — _"design the persisted offline brain-dump capture queue"_**. The three
   artefacts and their order are set out in _Sequencing_ below.
-- **Not implemented anywhere yet** — ⚠️ **`blockedUnder`.** Verified at `fd768ff`, the sibling branch's
-  head: the identifier appears nowhere in `src/`. `QueuedCapture` there carries `blockedBy` and nothing
-  else, so every statement in this document about the `blockedUnder` comparison — the withdrawn sign-in
-  offer, the *"these can't be saved to this account any more"* sentence, the worker's inability to compute
-  it — describes **design, not code**. It is called out because this list exists precisely to flag claims
-  a reader cannot check, and it omitted the one field that needed it: `blockedUnder` is the only member of
-  the type that is not on the branch, so it was the only entry the list was for.
+- **Not implemented anywhere yet** — ⚠️ **`blockedUnder` and `unresolvableSince`.** Re-verified at
+  `5836275`, the sibling branch's head **as of 2026-08-13**: neither identifier appears anywhere in `src/`,
+  while `blockedBy` appears 39 times across the module and its test. `QueuedCapture` there carries
+  `blockedBy` and nothing else, so every statement in this document about the `blockedUnder` comparison —
+  the withdrawn sign-in offer, the *"these can't be saved to this account any more"* sentence, the worker's
+  inability to compute it — and every statement about orphan expiry describe **design, not code**. They are
+  called out because this list exists precisely to flag claims a reader cannot check, and its first version
+  omitted the one field that needed it. ⚠️ **The earlier version of this bullet pinned the check to
+  `fd768ff` and called that "the sibling branch's head", which it no longer is** — a *ref* is durable
+  evidence and a *role* like "the head" expires the next time anyone pushes, which is the same defect as
+  the rotted line numbers this table was converted to symbols to escape. The absence holds at both commits;
+  the ref is named with a date from here on, and the role is not claimed.
 
 **So for a window after this document lands, its most concrete statements describe code a reader on `main`
 cannot find**, which is the mirror image of the dangling-reference problem the merge order exists to
@@ -244,8 +256,42 @@ type QueuedCapture = {
    * it has already watched them do it.
    */
   blockedUnder?: string;
+  /**
+   * ms epoch. The first time a client observed this entry's `workspaceId` NOT
+   * matching the live session's workspace. Cleared the moment it matches again.
+   *
+   * ⚠️ This is the reference timestamp orphan expiry needs, and review of this
+   * spec was right that the type had no field for it: the rule under "A shared
+   * browser" removes an entry whose workspace has been unresolvable for longer
+   * than the guest TTL, and "for longer than" cannot be evaluated against a
+   * queue that records no such instant. Without this field the rule is
+   * unimplementable, and the privacy notice's retention promise stays false for
+   * exactly the entries it was added to cover.
+   *
+   * `capturedAt` cannot serve. It answers "when was this typed", which is a
+   * different question with a different answer: an entry queued weeks ago under
+   * a workspace that resolved fine until yesterday is not an orphan, and one
+   * queued a minute ago into an already-purged sandbox is on its way to being
+   * one. Reusing it would also contradict `capturedAt`'s own rule above — the
+   * age display and nothing else.
+   */
+  unresolvableSince?: number;
 };
 ```
+
+**`unresolvableSince` is a client observation, and both of its bounds are stated because neither is
+obvious.** It is written and read by the same device, so the cross-device clock skew that disqualifies
+`capturedAt` from ordering does not apply here — there is only ever one clock in the comparison. A user
+who moves their own device clock can lengthen or shorten the window, and that is acceptable: expiry is a
+**storage-limitation backstop, not a security boundary**, and nothing is protected by the exact instant.
+
+⚠️ **And the threshold cannot be "the guest TTL", because the browser cannot read it.** Verified on `main`:
+the TTL is `GUEST_SANDBOX_TTL_HOURS`, a **server** environment variable defaulting to 24 hours
+(`src/lib/purge.ts`, and `src/proxy.ts` for the cookie), and this repo has **no `NEXT_PUBLIC_*` variables
+at all** — the only occurrence of that prefix anywhere is a comment in `settings/page.tsx` explaining why a
+client component cannot read a non-public env var. So the client holds its own constant, which must be
+**at least** the server default, and erring long is the safe direction: a generous window only delays
+reclaiming bytes, while a short one deletes a capture whose workspace was going to resolve again.
 
 **`blockedBy` is a persisted field, and both of its values are needed.** An
 earlier draft of this document had neither — it declared the type without it while
@@ -323,15 +369,24 @@ three were**, which review of this spec was right to call out: (3) says outright
    passes **37 of the 39** tests `src/lib/capture-queue.test.ts` held **at `2136f51`**, including all 31
    that predate this work, and fails only the two resurrection cases. ⚠️ **The commit is part of the
    measurement, not decoration.** This read *"37 of 39 tests"* against a reproduction recipe naming only
-   the branch, and the number was true at exactly one commit: that file is up to **66** tests at the
-   branch head (`fd768ff`), so anyone following the recipe as written gets a different denominator and
-   concludes the document is wrong. The recipe is therefore: `git checkout 2136f51` on
+   the branch, and the number was true at exactly one commit: that file holds **67** tests at `5836275`,
+   the branch's head on 2026-08-13, so anyone following the recipe as written gets a different denominator
+   and concludes the document is wrong. The recipe is therefore: `git checkout 2136f51` on
    `feat/175-capture-queue-server` (!334) and replace `applyOutcome`'s delta with a union.
+   ⚠️ **The comparison figure said "66 tests at the branch head (`fd768ff`)" and was wrong twice over** —
+   the count is **67**, not 66, and `fd768ff` stopped being the head. Both are now pinned to a dated ref,
+   because a number whose only job is to warn that numbers rot is the worst possible place to carry a stale
+   one. **The denominator that matters, 39 at `2136f51`, re-verified and unchanged.**
    ⚠️ **Sibling-branch evidence, and the label matters** — review of this spec correctly pointed out that
    a test count cited as evidence cannot be checked from a docs-only MR, and an unverifiable number reads
    as stronger than a described mechanism, which is the same trap as a citation to a file nobody opens.
    **The delta-vs-union argument above stands without either figure**; they are corroboration.
-3. **No tombstones and no per-entry timestamps are needed** — which follows from (2). "Deliberately
+3. **The merge needs no tombstones and consults no timestamp** — which follows from (2). ⚠️ **This said
+   "no per-entry timestamps are needed", which was already untrue of the type it describes and is now
+   untrue twice: `capturedAt` and `unresolvableSince` are both per-entry timestamps.** The claim being made
+   is narrower and is the only one (2) supports — **reconciliation reads neither of them**. Each exists for
+   a job outside the merge (the age display, and orphan expiry), and the merge is a set operation on
+   `clientKey` that would behave identically if both were absent. "Deliberately
    removed" never has to be *inferred*, because the only entry ever added is the one `enqueue` was handed,
    and the tab doing the removing removes from a read it took itself. A capture another tab flushed is
    simply absent, so the filter and the map are no-ops on it.
@@ -552,9 +607,51 @@ while still consuming the origin-wide byte cap forever.
   not. It confirms against the **count and the origin** instead, and says plainly that the text cannot be
   shown.
 - **Nothing is deleted on sign-out.** Matching entries survive and flush when their owner returns.
-- **Orphans expire.** A stored entry whose workspace has been unresolvable for longer than the guest TTL is
-  removed, because the privacy notice's retention promise — *"until saved, or until the user clears it"* —
-  is **false** for an entry where neither trigger can ever fire. Storage limitation is not optional.
+- **Orphans expire**, measured from **`unresolvableSince`** on the entry — see the field's docblock above
+  for why `capturedAt` cannot answer this and why the threshold is a client constant rather than the
+  server's own guest TTL. A stored entry whose workspace has been unresolvable for longer than that window
+  is removed, because the privacy notice's retention promise — *"until saved, or until the user clears
+  it"* — is **false** for an entry where neither trigger can ever fire. Storage limitation is not optional.
+- ⚠️ **The collapsed row carries the STATE, not only the count** — see immediately below. Without this the
+  rule repairs two of the four things it was written to repair and silently leaves the other two.
+
+⚠️ **The rule above fixes Discard and the invisible orphan, and as written it does NOT fix the two copy
+failures in the same list — which makes this section contradict itself.** Found checking the document
+against itself rather than raised in review, and it is the sharper half of the defect this section already
+records once: the list of what a bare match-or-hide filter breaks has four entries, the rule was written
+against the last two, and the first three are about **copy that only exists on a full entry row**.
+
+**Trace the `409` and it is unreachable even while the page is open, not merely after a reload.** A `409`
+means the *resolved* workspace disagreed with the capture's declared `workspaceId` — and the route resolves
+from the same cookie the foreground app does, so at the instant that refusal is recorded the live workspace
+**already** differs from the entry's. The entry is therefore non-matching in the very render that is
+supposed to show *"Your session expired. Sign in and these will save."* Under the rule as written it shows
+*"N captures from an earlier sign-in are still held in this browser"* — true, and useless, because it names
+no remedy at the one moment there is one. `blockedUnder` goes with it: its comparison only ever changes
+which sentence a full row shows, and there is no full row. The `403` fares slightly better and still not
+well — the tab that receives it resolved the owner's workspace at page load, so the entry matches and the
+sentence renders **in session**; on the next boot the cookie is gone, the entry stops matching, and the
+*restored* refusal has nowhere to render, which collides with this document's own rule that a restored
+refusal is static text **on the entry**.
+
+**So the collapsed representation carries the refusal state, and it can do so without revealing anything.**
+None of the refusal sentences contains user-typed text — they name a session, an account and a remedy — so
+showing one above a count discloses strictly less than the count already does:
+
+- **Non-matching entries are grouped by `blockedBy` state, not by workspace**, and each group is one
+  collapsed row carrying its own sentence from the wording table plus its count. Grouping by workspace would
+  leak how many distinct prior sessions this browser has held; grouping by state leaks nothing the sentence
+  does not already say.
+- **`blockedUnder` is compared for a collapsed group exactly as it would be for a full row**, so the
+  withdrawn-sign-in sentence is reachable. That is what stops the field being the dead code this section
+  predicted.
+- **Unmarked non-matching entries keep the neutral sentence** — *"N captures from an earlier sign-in are
+  still held in this browser"* — because there is no refusal to report and no remedy to offer.
+- **Each group carries its own discard-without-revealing control.** The release valve follows the row, and a
+  user whose remedy has just been withdrawn is the one who most needs it in reach.
+
+**The words themselves stay hidden in every one of those states.** That is the property the section exists
+for and none of this touches it: the count, the state and the remedy are shown; the text is not.
 
 **The two caps split, and the split follows the purposes this document already gave them.** The **item cap
 counts per workspace**, because its stated job is keeping the strip legible and the wait comprehensible —
@@ -769,9 +866,29 @@ The route therefore carries the house pattern, which the repo already has and do
 - **allow a missing `Origin`**, deliberately, for non-browser clients — POST-only plus `SameSite=lax`
   still bound it.
 
-Copied from `src/app/api/auth/logout/route.ts`, which carries the same three rules under a CWE-352
-comment, and cited there so the two cannot drift apart the way `focus-timer.tsx` and the inbox notice
-already did once.
+⚠️ **The citation for that pattern is `src/app/api/auth/logout/route.ts`, and it carries TWO of those three
+rules, not all three.** Review of this spec asked the path to be double-checked and the check paid: the file
+exists on `main`, it does carry the CWE-352 comment, and rules 2 and 3 are verbatim its own — *"Reject when
+the Origin header is present but doesn't match our origin. A missing Origin is allowed (non-browser
+clients); POST-only + SameSite=lax still bound it."* **Rule 1 is where it differs, and it is the rule the
+next section spends thirty lines on:** logout computes `allowedOrigin` as **`requestOrigin(req)`**, which
+pins `PUBLIC_ORIGIN` in production — precisely the comparand this design forbids.
+
+**That is not a defect in logout, and the reason is the mechanical difference between the two paths.**
+`/api/auth/` **is** in `CANONICAL_ORIGIN_PREFIXES` (`src/lib/auth/gate.ts`), and `isCanonicalOriginPath`
+matches on a segment boundary, so `POST /api/auth/logout` arriving on any other hostname is **307-redirected
+onto the canonical host by `src/proxy.ts` before it ever reaches the handler** — 307 rather than 308
+deliberately, per that call site's own comment. The handler therefore only ever runs on the one host
+`PUBLIC_ORIGIN` names, which is exactly the condition that makes `requestOrigin` the right comparand there.
+**`/api/braindump` is not in `CANONICAL_ORIGIN_PREFIXES`** — stated again in the next section, and this is
+the sentence that joins the two facts — so it is served on whichever hostname the browser used, and
+`requestOrigin` is the wrong comparand for the same reason it is the right one next door.
+
+**So copy rules 2 and 3 from that file and rule 1 from the section below**, and cite it both ways at the
+call site so the two cannot drift apart the way `focus-timer.tsx` and the inbox notice already did once.
+Copying all three unexamined is how `!334` came to implement `requestOrigin`, which is the regression the
+next section exists to describe: the citation was accurate about the file and silent about the one rule that
+does not transfer.
 
 #### ⚠️ The allowed origin is NOT `PUBLIC_ORIGIN` — production serves more than one host on purpose
 
@@ -898,9 +1015,12 @@ fresh `409` from one already shown to be unfixable, since that comparison is des
 available only to the foreground app. **It cannot, and it must not try.** Resolving a session means reading
 a cookie and a workspace the worker has no access to, so:
 
-- **The `blockedUnder` comparison is the foreground's alone.** It runs at render time out of state the app
-  is already holding — that is the property that made it better than a `signInTried` flag in the first
-  place, and it does not survive being moved into a worker.
+- **The `blockedUnder` comparison is the foreground's alone**, and so is **`unresolvableSince`**, for the
+  same reason: both are written from the live session's resolved workspace, which the worker has none of. It
+  runs at render time out of state the app is already holding — that is the property that made it better
+  than a `signInTried` flag in the first place, and it does not survive being moved into a worker. **Neither
+  field needs to be mirrored**: the worker never expires anything and never chooses copy, so mirroring them
+  would add a second at-rest copy of data with no reader.
 - **The worker's input is the persisted `blockedBy` on the mirrored entry**, written by a foreground tab —
   and ⚠️ **`account-revoked` is the ONLY value it treats as terminal.**
 
@@ -1161,6 +1281,14 @@ it. It says what is true, and each state gets its own sentence because each has 
 | **storage refuses the write** (`QuotaExceededError`) | *"This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe."* — no wait offered, because nothing queued here would free the space |
 | **the origin check refused the request** (`400`, CSRF) | *"Something blocked this from reaching the server, so it's still waiting here. Nothing is lost — it'll try again."* — no sign-in offered and no account mentioned, because the user did nothing wrong and nothing about their account is implicated |
 
+⚠️ **Which row renders where is decided by the scoping rule, not by this table, and reading the table alone
+gets the two `409` rows wrong.** Both of them describe entries the live session **cannot** resolve — that is
+what a `409` is — so under *"A shared browser"* they never appear on a full entry row. **They are the
+sentence a collapsed state group carries**, above a count and with no text shown. The `403` row appears both
+ways: on a full row in the session that received it, and on a collapsed group after the next boot deletes
+the cookie. The five cap-family and `400` rows are about the capture the user just pressed Enter on, which
+is by construction in the live workspace, so they are always full-strip.
+
 **Why `409` needs two sentences and not one: a purged guest sandbox makes the sign-in promise false.**
 A guest workspace is a real workspace **with a TTL**. If it is purged, signing in does not restore it —
 a fresh guest sandbox gets a **new** `workspaceId`, so the queued capture's declared `workspaceId` can
@@ -1291,9 +1419,15 @@ So the refusal copy has two homes and only one of them is a live region:
   refusal is also why the capture bar's submission failed, associated with the **input** through
   `aria-describedby` (**WCAG 3.3.1 Error Identification**, which wants the error available *with the
   field*, not only announced once and gone). Readable on demand, at any time, by anyone navigating the
-  strip.
+  strip. ⚠️ **"With the entry" means with the collapsed state group when the entry is not revealed** — a
+  restored `409` or `403` belongs to a workspace the live session cannot resolve, so under *"A shared
+  browser"* there is no full row to hang the text on. The group's row is that row, and it takes the
+  `aria-describedby` association too. Without this the association is specified only for the entries that
+  never need it, since a capture in the live workspace has no restored refusal to describe.
 - **The assertive region carries transitions only** — a refusal arriving while this page is open. It is
-  filled by a flush outcome and never by a mount.
+  filled by a flush outcome and never by a mount. This is the one place a `409` is announced as it happens:
+  the entry is already non-matching when the refusal lands, so the transition is heard even though the
+  words are not shown.
 
 **The polite region takes the same rule and needs it less.** A restored count is not an interruption
 either, but a screen reader reading *"3 waiting to save"* once on load is at worst noise rather than a
@@ -1345,12 +1479,24 @@ land here, and both cover things no other check in the repo can see:
   swap is what `a11y-class-hygiene` additionally rejects, and that reach is toward **2.4.13 at AAA** — a
   bar this project has chosen to hold, which is worth knowing is a choice rather than a requirement.
 
-  ⚠️ **The same mislabel is in the repo's own control**, not just here — `src/lib/a11y-class-hygiene.ts`
-  names *"WCAG 2.4.11 Focus Appearance"* in five places including *"is AA in WCAG 2.2"*, and `CLAUDE.md`
-  repeats it. **That is a compensating control misnaming the criterion it enforces**, which matters because
-  it is read precisely when somebody is deciding whether a change is compliant, and it reports the wrong
-  level. Filed separately — it is the repo's control, not this design's, and correcting it here would make
-  a docs-only MR touch `src/`.
+  ⚠️ **The same mislabel is in the repo's own control**, not just here. In `src/lib/a11y-class-hygiene.ts`
+  the name *"Focus Appearance"* is attached to the number 2.4.11 in **three** places — the module docblock,
+  the docblock over `findWeakFocusIndicators` (the file's Rule D), and one of the two `reason` strings that
+  rule emits — and that middle one also asserts the level: *"WCAG 2.4.11 Focus Appearance is **AA in WCAG
+  2.2**"*. `CLAUDE.md` carries the same wrong number, describing the gate as *"the only check in the repo
+  that can see WCAG 2.4.11"*. **That is a compensating control misnaming the criterion it enforces**, which
+  matters because it is read precisely when somebody is deciding whether a change is compliant — and the
+  `reason` string is the worst of the three, because it is what a failing pipeline puts in front of an
+  author. **Tracked as #258 — _"a11y-class-hygiene names the wrong WCAG criterion, and reports the wrong
+  level"_**; it is the repo's control, not this design's, and correcting it here would make a docs-only MR
+  touch `src/`.
+
+  ⚠️ **This bullet said the mislabel was "in five places", and re-verifying the citation rather than
+  restating it showed the count matched neither reading of the file**: the *phrase* occurs three times and
+  the bare *number* six. So the sites are enumerated above instead — **an enumeration of what and where
+  survives an edit to the file; a count is stale as soon as anyone touches it**, which is the rule this
+  document already applies to its own refusal states and to the test denominators in *"Two tabs on one
+  storage key"*.
 
 #### Target size, the disabled Retry, and the announcements that do not repeat
 
@@ -1424,8 +1570,15 @@ Required in **MR 2**, the MR that first writes user text to storage (see _Sequen
 - a companion sentence in the "your data lives on servers in the UK" section, saying a capture that
   cannot reach the server is held in this browser until it saves, and that it is sent to the same
   servers as any other capture
-- `df-capture-queue` added to the storage list, with its retention (until saved, or until the user
-  clears it)
+- `df-capture-queue` added to the storage list, with its retention — **three triggers, not two: until it
+  saves, until the user clears it, or until it can no longer be saved to any account this browser can
+  reach.** ⚠️ **This bullet said "until saved, or until the user clears it", and the orphan-expiry rule
+  under *"A shared browser"* declares that exact two-trigger sentence false** — it is the sentence that rule
+  quotes and refutes, because for an entry whose workspace can never resolve again neither trigger can ever
+  fire. Left as it was, this list required MR 2 to write a promise this document had already shown to be
+  untrue, on the page UK GDPR Art. 13 makes load-bearing. **The third trigger is the one the orphan rule
+  adds**, and the notice has to carry it for the same reason the rule exists: storage limitation is not
+  optional, and a retention statement with a gap in it is worse than a longer one
 - ⚠️ **the IndexedDB mirror named too, and this list omitted it.** Found in review of this spec. The mirror
   is not an implementation detail of the `localStorage` key — it is a **second at-rest copy of the same
   user-typed text**, in a different store, written on a different schedule, and deleted on a different
@@ -1454,13 +1607,16 @@ TDD, failing test first, in this order:
      `QuotaExceededError`** — because a single "the capture was refused" assertion passes a collapsed
      implementation, and each of the four carries a different sentence. The storage one asserts the two
      things it must not do as well as the refusal: **nothing already queued is evicted**, and the copy
-     offers no wait. ⚠️ **Why they are distinct states is argued once, in the byte-condition table above
-     and the storage section beneath it; it is deliberately not restated here.** Review of this spec
-     flagged that reasoning as appearing in three places, which is a drift trap: the copy for these states
-     has already been corrected twice, and three copies of the argument is how one of them ends up
-     describing a rule the other two no longer follow. ⚠️ **This item said "three", which was correct
-     until `QuotaExceededError` acquired a specification and a sentence** — it was listed as a test on the
-     line above with neither.
+     offers no wait. ⚠️ **Why they are distinct states is argued in exactly one place — the byte-condition
+     table above — and is deliberately not restated here.** Review of this spec flagged that reasoning as
+     appearing in three places, which is a drift trap: the copy for these states has already been corrected
+     twice, and three copies of the argument is how one of them ends up describing a rule the other two no
+     longer follow. ⚠️ **This item said "argued once, in the byte-condition table above *and* the storage
+     section beneath it", which names two places in a sentence claiming one** — the same defect it exists to
+     warn about, one level up. The storage section does not re-argue the rule; it **applies** it to a
+     fourth state, which is what the table's closing sentence tells every later state to do. ⚠️ **This item
+     also said "three", which was correct until `QuotaExceededError` acquired a specification and a
+     sentence** — it was listed as a test on the line above with neither.
    - The 20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with
      the words still in the field**, which is the assertion that stops the cap becoming silent eviction
      in a later refactor.
@@ -1478,11 +1634,21 @@ TDD, failing test first, in this order:
      guest and `409`s, and a plain last-write-wins therefore re-offers a sign-in to a revoked account on
      the *second* flush, every time.
    - **The strip is scoped to the live workspace, and the caps split.** A queue holding entries for two
-     workspaces renders only the current one's — asserted with a **non-empty** other-workspace set present,
-     so a filter that returns nothing cannot pass. The **item** cap counts per workspace (20 of A's entries
-     do not block B's first capture); the **byte** cap counts every entry in the key (A's bulk *does*
-     refuse B, with the room-not-ownership copy). Both directions, because getting the split backwards
-     passes any test that only checks "a cap fired".
+     workspaces renders **no text** for the other one's — asserted with a **non-empty** other-workspace set
+     present, so a filter that returns nothing cannot pass. The **item** cap counts per workspace (20 of A's
+     entries do not block B's first capture); the **byte** cap counts every entry in the key (A's bulk
+     *does* refuse B, with the room-not-ownership copy). Both directions, because getting the split
+     backwards passes any test that only checks "a cap fired".
+   - **The collapsed state groups, which is where the two `409` sentences actually live.** A non-matching
+     entry marked `session-expired` produces a collapsed row carrying **that sentence and a count**, and a
+     second assertion that the entry's **text is absent from the DOM** — the whole property, and the one a
+     "render the sentence" implementation can pass while leaking the words. Then: a group whose
+     `blockedUnder` equals the live workspace **offers the sign-in**, one whose `blockedUnder` differs
+     **withdraws it**, an `account-revoked` group carries the `403` sentence, and unmarked non-matching
+     entries carry the neutral *"from an earlier sign-in"* row. **Grouping is by state, never by workspace** —
+     asserted with two non-matching workspaces sharing one state, which must produce **one** row, because
+     one row per workspace would leak how many prior sessions the browser has held. Each group's own
+     discard-without-revealing control is asserted with it.
    - **`clientKey` generation, per tier.** Tier 1 and 2 exercised where `crypto` is present; tier 3 driven
      by removing `crypto` from the global, asserting the `clk-` prefix, the padded widths, and — the one
      that matters — that **two calls in the same millisecond differ**. A collision silently makes a distinct
@@ -1497,7 +1663,10 @@ TDD, failing test first, in this order:
    - **`isQueuedCapture` validates `blockedBy`, with a passing control.** A stored entry carrying a value
      outside the union is rejected; entries carrying **each** valid value, and entries carrying none, are
      kept. The kept cases are the point — a guard that rejected everything would satisfy a test that only
-     asserted rejection, and this is the field that selects the user-facing sentence.
+     asserted rejection, and this is the field that selects the user-facing sentence. **`unresolvableSince`
+     takes the same treatment** for the same reason one step along: a stored value that is not a finite
+     number makes the expiry comparison silently `NaN`, and `NaN` compares false, so a corrupt entry would
+     become permanent rather than loud.
    - **`blockedUnder` is asserted as a comparison, not a flag:** a `409` sets
      `blockedBy: "session-expired"` plus `blockedUnder` = the live session's workspace, and offers a
      sign-in; a later `409` arriving while the live session resolves to a *different* workspace
@@ -1505,6 +1674,13 @@ TDD, failing test first, in this order:
      still made when the live workspace is unchanged** — without that, an implementation that withdraws
      the sign-in immediately passes, and a user whose session merely expired is told their words can
      never be saved. A test that only checks "a 409 keeps the capture" passes both bugs.
+   - **Orphan expiry, with the clearing arm as the control.** `unresolvableSince` is **set** the first
+     time a read finds the entry's workspace not matching the live one, is **not moved** by a later read
+     that still does not match — an implementation that rewrites it on every read never expires
+     anything — and is **cleared** when the workspace matches again. Then: an entry past the window is
+     removed, and an entry inside it is **kept**. The kept case is the assertion that matters, because
+     an expiry that fires early destroys unsaved words, which is the one thing this feature exists to
+     prevent. Drive it with a fake clock, never a real wait.
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
