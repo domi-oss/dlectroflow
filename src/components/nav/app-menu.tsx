@@ -27,8 +27,10 @@ const DESTINATIONS = [
 // be as easy to diff as possible — account-menu.tsx hoists its own the same way.
 //
 // #117 — the focus indicator is an INSET RING, not just the background swap
-// this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
-// does not implement it, so nothing in the suite was ever going to catch this:
+// this used to rely on. A swap this faint leaves no indicator anybody can see, so
+// it fails 2.4.7 Focus Visible (AA) in practice, and the ring is what clears
+// 2.4.13 Focus Appearance (AAA) as well. axe implements no rule for either, so
+// nothing in the suite was ever going to catch this:
 // --muted against --background is 1.07:1 in light and 1.17:1 in dark, against
 // the 3:1 an indicator needs. --ring reads 5.09:1 on the popup surface and
 // 4.75:1 on the focused --muted in light, 8.83:1 / 7.55:1 in dark.

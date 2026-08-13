@@ -270,8 +270,9 @@ test.describe("#252 header quick access — behaviour", () => {
     const link = focusLink(page);
     await link.focus();
     await expect(link).toBeFocused();
-    // WCAG 2.4.11 — the UA outline is removed (`outline-none`), so the ring has
-    // to paint. axe cannot see this; a computed style can.
+    // WCAG 2.4.7 Focus Visible — the UA outline is removed (`outline-none`), so
+    // the ring has to paint. axe cannot see this; a computed style can. (Cited as
+    // 2.4.11 until #258, which is Focus Not Obscured and a different question.)
     const shadow = await link.evaluate((el) => getComputedStyle(el).boxShadow);
     expect(shadow, "the focused shortcut draws no ring").not.toBe("none");
 

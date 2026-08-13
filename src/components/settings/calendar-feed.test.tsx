@@ -227,7 +227,7 @@ describe("turning the feed off is confirmed too (#154)", () => {
 });
 
 describe("accessibility of the controls (#154)", () => {
-  it("draws a focus RING rather than swapping a background (WCAG 2.4.11)", () => {
+  it("draws a focus RING rather than swapping a background (WCAG 2.4.7)", () => {
     // #109 / #117 — the class of failure the automated gates structurally
     // cannot see, so it is asserted here instead.
     render(<CalendarFeed url={URL_A} />);

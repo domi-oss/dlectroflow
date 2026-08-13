@@ -154,8 +154,10 @@ export function ShoppingSummaryCard({
             if (landed) router.refresh();
           });
         }}
-        // 44px minimum target (WCAG 2.5.5) and a ring rather than a background
-        // swap for the focus indicator (WCAG 2.4.11, which axe cannot see — #117).
+        // A 44x44 target — the app's own floor, 2.5.5 Target Size (Enhanced,
+        // AAA), above the AA 24x24 of 2.5.8 — and a ring rather than a background
+        // swap for the focus indicator (2.4.7 Focus Visible, AA, which axe cannot
+        // see either — #117, #258).
         // The 50% dim is the tree's one busy affordance — `disabled:opacity-50` on
         // the row actions, `aria-disabled:opacity-50` on the Retry CTA; the variant
         // differs only because the mechanism does. WCAG 1.4.3 exempts an inactive
