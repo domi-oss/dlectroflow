@@ -111,9 +111,12 @@ export function AddNoteButton({
         // of the icon-plus-label case fixed on !278, where the box was wider than
         // its content and centring pushed the pair off the left edge.
         touchTarget,
-        // `focus-visible:ring-2` and not a colour swap: WCAG 2.4.11 Focus
-        // Appearance is not satisfied by a change of hue alone, and axe cannot
-        // see 2.4.11 at all (see a11y-class-hygiene.ts).
+        // `focus-visible:ring-2` and not a colour swap: a change of hue alone
+        // leaves no indicator to see (2.4.7 Focus Visible, AA) and carries
+        // neither the area nor the focused/unfocused contrast of 2.4.13 Focus
+        // Appearance (AAA, the stronger bar this repo chooses). axe implements no
+        // rule for either — see a11y-class-hygiene.ts, and #258 for why the
+        // citation that used to be here named neither of them.
         "border-input text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring focus-visible:ring-offset-background shrink-0 rounded-md border px-2 text-sm whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50",
         className,
       )}

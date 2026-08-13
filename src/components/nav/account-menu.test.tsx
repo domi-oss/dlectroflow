@@ -222,10 +222,12 @@ describe("AccountMenu — what it must not publish", () => {
 });
 
 /**
- * #117 — WCAG 2.4.11 Focus Appearance. axe does not implement it, so no gate in
- * the repo could see that these entries' only focus treatment was
- * `focus-visible:bg-accent` — 1.09:1 against the popup surface in light, 1.24:1
- * in dark, where an indicator needs 3:1.
+ * #117 — a focus indicator faint enough that there is effectively none: **2.4.7
+ * Focus Visible (AA)**, with the ring also clearing **2.4.13 Focus Appearance
+ * (AAA)**. axe implements no rule for either, so no gate in the repo could see
+ * that these entries' only focus treatment was `focus-visible:bg-accent` —
+ * 1.09:1 against the popup surface in light, 1.24:1 in dark, where 1.4.11
+ * Non-text Contrast (AA) asks 3:1 of the information identifying the state.
  *
  * The pairing with app-menu.tsx is the point of the issue, not a coincidence:
  * #117 was declined inside !192 because patching one of two popups that open

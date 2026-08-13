@@ -356,8 +356,8 @@ export function LibraryDoneDelete({
           both themes and the one inbox-view.tsx, shopping-list.tsx and
           focus-timer.tsx already use — not a raw palette shade, which is what
           a11y-class-hygiene's Rule A exists to stop. Neither control sets
-          `outline-none`, so the UA focus ring draws and WCAG 2.4.11 is satisfied
-          without a bespoke indicator. */}
+          `outline-none`, so the UA focus ring draws and WCAG 2.4.7 Focus Visible
+          is satisfied without a bespoke indicator. */}
       {failure && (
         <>
           <div

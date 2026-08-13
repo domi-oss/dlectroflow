@@ -339,8 +339,12 @@ export function NoteField({
         // would have made a future reader think dropping it was a regression
         // against AA.
         //
-        // `focus-visible:ring-2` rather than a colour swap, because WCAG 2.4.11
-        // Focus Appearance is not satisfied by a change of hue alone.
+        // `focus-visible:ring-2` rather than a colour swap, because a change of
+        // hue alone leaves no indicator to see (2.4.7 Focus Visible, AA) and
+        // carries none of 2.4.13 Focus Appearance's area or focused/unfocused
+        // contrast (AAA — the same voluntary-versus-required distinction this
+        // comment makes for target size four lines up, which it then got wrong for
+        // focus in the very next breath. #258).
         //
         // `justify-start text-left` AFTER `touchTarget`, not before: `cn` is
         // `twMerge`, so the later `justify-start` is what displaces the

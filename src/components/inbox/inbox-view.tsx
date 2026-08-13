@@ -2613,8 +2613,8 @@ export function InboxView({
           both themes and the one the capture notice, focus-timer.tsx and
           shopping-list.tsx already use — not a raw palette shade, which is what
           dropped a confirmation below 4.5:1 in #40. Neither control sets
-          `outline-none`, so the UA focus ring draws and WCAG 2.4.11 is satisfied
-          without a bespoke indicator. */}
+          `outline-none`, so the UA focus ring draws and WCAG 2.4.7 Focus Visible
+          is satisfied without a bespoke indicator. */}
       {writeFailure && (
         <>
           <div
@@ -2632,8 +2632,9 @@ export function InboxView({
               // No `outline-none` here, and `a11y-class-hygiene` is why the first
               // draft had one and this does not: the moment an element can hold
               // focus, suppressing the UA outline leaves it with no visible focus
-              // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
-              // is the whole reason it exists — axe cannot see 2.4.11.
+              // indicator at all — WCAG 2.4.7 Focus Visible, which is AA. The gate
+              // caught it, which is the whole reason it exists: axe implements no
+              // rule for 2.4.7.
               tabIndex={-1}
               className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
             >
