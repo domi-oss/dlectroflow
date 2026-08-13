@@ -539,6 +539,12 @@ describe("POST /api/braindump — a request that could never be a capture", () =
     ["a non-string text", { text: { toString: "nope" } }],
     ["a missing workspaceId", { workspaceId: undefined }],
     ["a non-string workspaceId", { workspaceId: 7 }],
+    // The other end of the contract `isQueuedCapture` now holds up. This row is
+    // the reason a blank `workspaceId` must LOSE the queue entry rather than be
+    // tolerated: the route answers 400, the queue reads 400 as `retry`, and a
+    // retry that can only ever be refused again is a capture stalled for ever
+    // with nothing on screen saying so.
+    ["a blank workspaceId", { workspaceId: "" }],
   ])("answers 400 for %s, and writes nothing", async (_why, over) => {
     const res = await post(validBody(over));
     expect(res.status).toBe(400);

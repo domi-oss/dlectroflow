@@ -273,6 +273,26 @@ function isCaptureBlockReason(value: unknown): value is CaptureBlockReason {
  * **Absent is valid and means "not yet refused"** — the field is optional, and the
  * overwhelming majority of entries have never been refused at all.
  *
+ * ## All three required strings are checked for EMPTINESS, not only for type
+ *
+ * `workspaceId` was type-checked and not length-checked while `clientKey` and
+ * `text` beside it were both (Duo review round 7, `!334`). That is not a tidiness
+ * point, because a blank one produces the one outcome this module exists to
+ * prevent and cannot report: `parseCapture` in `/api/braindump` refuses a
+ * zero-length `workspaceId` with **400**, 400 is outside the status map so
+ * {@link applyFlushOutcome} reads it as `retry`, and `retry` keeps the capture and
+ * clears any mark. The entry would then be re-sent on every flush for ever, while
+ * the strip says it is waiting to save and nothing says why — a silent permanent
+ * stall, which `/api/braindump`'s `CLIENT_KEY_SHAPE` comment names as strictly
+ * worse than a refusal somebody can see.
+ *
+ * It is also the one required field whose blank value this module can produce
+ * itself, which is why it is the one that was worth a test rather than a cast.
+ * `clientKey` comes from {@link newClientKey} and `text` is emptiness-checked by
+ * {@link enqueue} before anything is stored, but `enqueue` stores whatever
+ * `workspaceId` its caller hands it — so a caller reading the id from a prop that
+ * has not resolved yet reaches this with no tampering at all.
+ *
  * **Anything else, `null` included, loses the entry.** That is the deliberate
  * choice and it is not free: this module drops words nowhere else. Two things make
  * it the right one. A value outside the union cannot come from this module —
@@ -293,6 +313,7 @@ function isQueuedCapture(value: unknown): value is QueuedCapture {
     typeof c.text === "string" &&
     c.text.length > 0 &&
     typeof c.workspaceId === "string" &&
+    c.workspaceId.length > 0 &&
     typeof c.capturedAt === "number" &&
     Number.isFinite(c.capturedAt) &&
     (c.blockedBy === undefined || isCaptureBlockReason(c.blockedBy))

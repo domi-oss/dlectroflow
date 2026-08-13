@@ -162,6 +162,37 @@ describe("capture queue — reading (#175)", () => {
     ]);
   });
 
+  // One table for all three required strings, because the defect this closes was
+  // an INCONSISTENCY between them rather than a missing check in isolation: the
+  // guard demanded a non-empty `clientKey` and a non-empty `text` and let a blank
+  // `workspaceId` through (Duo review round 7, `!334`).
+  //
+  // ⚠️ A blank `workspaceId` is not a display problem, and it is the one value here
+  // whose absence the module itself can produce — `enqueue` stores whatever
+  // `workspaceId` its caller hands it, where `clientKey` comes from this module's
+  // own `newClientKey` and `text` is emptiness-checked at the door. Followed
+  // through: `parseCapture` in `/api/braindump` refuses a zero-length
+  // `workspaceId` with **400**, 400 is outside the status map so
+  // `applyFlushOutcome` reads it as `retry`, and `retry` KEEPS the capture and
+  // CLEARS any mark. So the entry retries on every flush, for ever, while the strip
+  // says it is waiting to save and nothing anywhere says why. The route's own
+  // comment asserts the opposite — "a queued capture can never be malformed …
+  // `readQueue` returns only entries `isQueuedCapture` accepted" — which is an
+  // invariant this guard has to actually hold up.
+  it.each([
+    ["clientKey", { clientKey: "" }],
+    ["text", { text: "" }],
+    ["workspaceId", { workspaceId: "" }],
+  ])("drops an entry whose %s is present but blank", (_field, over) => {
+    const store = memoryStore({
+      [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify([
+        capture({ clientKey: "good" }),
+        { ...capture({ clientKey: "junk" }), ...over },
+      ]),
+    });
+    expect(readQueue(store).map((c) => c.clientKey)).toEqual(["good"]);
+  });
+
   // ⚠️ `blockedBy` is not decoration: it selects the strip's copy AND the remedy
   // offered, so a value outside the union drives the strip into a state it has no
   // branch for. Worse than the display bug, a guard that returns `true` here has
