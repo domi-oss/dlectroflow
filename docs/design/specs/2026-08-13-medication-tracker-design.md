@@ -464,7 +464,8 @@ behaviour is the closest this app could come to contradicting that sentence.
 #### 4. The engineering consequence, which is real and load-bearing
 
 No streak, no badge and no points means **no `RewardEvent` row, no `logReward`, no `awardBadge`**
-(`src/lib/rewards.ts:36`, `:98`). The reward is **purely presentational**: a string chosen and
+(both exported from `src/lib/rewards.ts` — named as symbols rather than lines, since that file is
+under active change on `!339`). The reward is **purely presentational**: a string chosen and
 rendered, with nothing persisted and nothing to reconcile.
 
 **So this feature cannot join the throw-after-commit defect class**, which is worth spelling out
