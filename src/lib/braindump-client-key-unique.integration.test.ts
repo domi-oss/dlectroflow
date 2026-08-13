@@ -78,7 +78,8 @@ describe("BrainDumpItem clientKey uniqueness (#175)", () => {
     const rows = await prisma.$queryRaw<
       { indexdef: string }[]
     >`SELECT indexdef FROM pg_indexes
-        WHERE tablename = 'BrainDumpItem'
+        WHERE schemaname = current_schema()
+          AND tablename = 'BrainDumpItem'
           AND indexdef ILIKE '%UNIQUE%'
           AND indexdef ILIKE '%clientKey%'`;
 
@@ -144,7 +145,9 @@ describe("BrainDumpItem clientKey uniqueness (#175)", () => {
     const rows = await prisma.$queryRaw<
       { is_nullable: string }[]
     >`SELECT is_nullable FROM information_schema.columns
-        WHERE table_name = 'BrainDumpItem' AND column_name = 'clientKey'`;
+        WHERE table_schema = current_schema()
+          AND table_name = 'BrainDumpItem'
+          AND column_name = 'clientKey'`;
 
     expect(rows).toHaveLength(1);
     expect(rows[0].is_nullable).toBe("YES");
