@@ -202,26 +202,17 @@ export async function ejectStepToInbox(
  * the same day in full and nothing is left half-advanced. The points for this one
  * confirm are lost, and that is the whole cost.
  *
- * ## THREE calls, not one thunk (Duo review, `!339`)
+ * ## Three calls, not one thunk
  *
- * These three were bundled into a single `bestEffort` thunk, which was wrong in a
- * way the false-failure framing above hides. A thunk runs sequentially, so the
- * FIRST rejection cancelled the statements behind it: a `logReward` fault
- * silently cost the FirstBreakdown badge and the day's streak credit too, and one
- * shared tag could not tell an operator which of the three had actually been
- * lost. Three calls with three tags, the shape `completeFocus` already uses.
+ * The rule and its rationale are on `bestEffort` (`src/lib/best-effort.ts`). What
+ * is local to this site is the check that the rule needs: **none of these three
+ * reads a row another writes.** `awardBadge` is a once-ever `findUnique` +
+ * `skipDuplicates` insert, `touchStreakOnEngagement` reads `Settings` and `Streak`
+ * and takes its own `SELECT … FOR UPDATE`, and neither goes near `RewardEvent`. So
+ * all three are independent and each gets its own call and tag.
  *
- * **Splitting is safe here, and that had to be checked rather than assumed** —
- * `best-effort.ts` notes that `rewardStepDone`'s payouts must stay bundled
- * because `maybeAwardTenStepsDay` counts the `RewardEvent` that `logReward` has
- * just written. These three have no such edge: `awardBadge` is a once-ever
- * `findUnique` + `skipDuplicates` insert, `touchStreakOnEngagement` reads
- * `Settings` and `Streak` and takes its own `SELECT … FOR UPDATE`, and neither
- * reads `RewardEvent` at all. Splitting also introduces no double-pay, because it
- * changes nothing about what a retry re-runs — a retried confirm always re-runs
- * all three, which is the pre-existing reason this swallow exists at all
- * (`logReward` appends, so a false failure that provoked a retry would bank the
- * points twice).
+ * Also local: splitting introduces no double-pay here, because it changes nothing
+ * about what a retry re-runs — a retried confirm always re-ran all three.
  *
  * The revalidations run either way, deliberately, and are NOT gated on the
  * payout: the steps are saved, so skipping them would leave the person's own tab

@@ -70,61 +70,35 @@
  * app swallow" one file to read rather than a repo-wide search.
  *
  * Named `<site>_..._failed`, matching `capture_streak_touch_failed`.
+ *
+ * **One member per consequence a site can lose.** The rule that produces that
+ * shape, and its single exception, live on {@link bestEffort} — not repeated here,
+ * because a rule written in two places drifts in one of them. Each member below
+ * carries only what is local to it: which site, which consequence.
  */
 export type BookkeepingTag =
-  /**
-   * `confirmBreakdown` — the BreakdownConfirmed points.
-   *
-   * Three tags for this site, one per payout, and for a reason stronger than
-   * naming: the three used to share one `bestEffort` thunk, and because a thunk
-   * is sequential the first rejection **cancelled the two behind it**. Splitting
-   * them is what makes each independent; the distinct tags are what let an
-   * operator see which one was actually lost. Safe to split because none of the
-   * three reads a row another writes — contrast `rewardStepDone`, which must stay
-   * one thunk because `maybeAwardTenStepsDay` counts the `RewardEvent` that
-   * `logReward` just wrote.
-   */
+  /** `confirmBreakdown` — the BreakdownConfirmed points. */
   | "breakdown_points_failed"
   /** `confirmBreakdown` — the once-ever FirstBreakdown badge. */
   | "breakdown_badge_failed"
   /** `confirmBreakdown` — the qualifying-engagement streak touch. */
   | "breakdown_streak_touch_failed"
   /**
-   * `completeStep` — `rewardStepDone` (points, streak, ten-steps badge).
+   * `completeStep` — `rewardStepDone`: points, streak and ten-steps badge under
+   * ONE tag.
    *
-   * **The one deliberately BUNDLED site, and the reason is a read-after-write.**
-   * One tag covers three consequences here, which everywhere else in this union
-   * would be the defect: `maybeAwardTenStepsDay` does
-   * `rewardEvent.count({ type: StepDone })` and counts the row `logReward` has
-   * just written, so it cannot be made independent of it — split them and the
-   * count is short by one and the badge is silently not awarded. The rule this
-   * union follows is therefore **split unless a later consequence reads what an
-   * earlier one wrote**, not "always split". See `rewardStepDone`'s own docblock
-   * for the residual this bundling leaves.
+   * ⚠️ **The one deliberately bundled site in this union** — flagged here rather
+   * than only behind the pointer, because a reader who meets three consequences on
+   * one tag needs to know it is a decision without going to look. The dependency
+   * that forces it, and the residual it leaves, are in `rewardStepDone`'s docblock
+   * (`src/lib/rewards.ts`).
    */
   | "step_done_bookkeeping_failed"
-  /**
-   * `markTaskCompleted` — the TaskComplete points.
-   *
-   * Two tags, split for the same reason as `confirmBreakdown`'s three and checked
-   * against the same rule: `awardBadge(TaskComplete)` is a once-ever `findUnique`
-   * + `skipDuplicates` insert that never reads `RewardEvent`, so neither payout
-   * reads what the other wrote.
-   */
+  /** `markTaskCompleted` — the TaskComplete points. */
   | "task_complete_points_failed"
   /** `markTaskCompleted` — the once-ever TaskComplete badge. */
   | "task_complete_badge_failed"
-  /**
-   * `completeFocus` — the step payout (points, streak, ten-steps badge).
-   *
-   * Two tags rather than one for this site, because its two payouts are two
-   * `bestEffort` calls rather than one wrapped block: they were split so that a
-   * failure in either is independent of the other, and a shared tag would make
-   * that independence invisible to the only reader that matters. An alert
-   * filtered on one tag must be able to say WHICH payout was lost without
-   * parsing `message` — see the call site, and the rule at the head of this
-   * union.
-   */
+  /** `completeFocus` — the step payout (points, streak, ten-steps badge). */
   | "focus_step_reward_failed"
   /** `completeFocus` — the session-finished bonus, independent of the above. */
   | "focus_session_bonus_failed"
@@ -149,17 +123,75 @@ export type BookkeepingTag =
  *
  * Exported so a call site with no value to return, and no thunk to wrap, can
  * still emit the line; `bestEffort` is the form every current site uses.
+ *
+ * ## A BUG and a BLIP get different tags (`!339`)
+ *
+ * A `TypeError` from a mistyped property at a call site is not an operational
+ * failure, and until `!339` it produced a line indistinguishable from a database
+ * blip — swallowed, `null` returned, nothing to alert on. It now emits
+ * {@link DEFECT_TAG} with the site in a `site` field, so one filter catches every
+ * programmer fault across every site while operational lines keep their per-site
+ * tag untouched.
+ *
+ * **Why a tag and not a re-throw, which was the other option considered:** a
+ * re-throw would reintroduce #257, the thing this module exists to prevent. The
+ * payout runs *after* its write committed, so an exception escaping here
+ * propagates out of the server action and tells the person their work failed over
+ * a row that is in the database. The cause being a bug rather than a blip changes
+ * nothing about the row. It would turn "payout silently unpaid" into "payout
+ * unpaid AND the write falsely reported failed" — strictly worse. The tag keeps
+ * the fault loud without lying to the person about their data.
+ *
+ * ## TWO TIERS, SAME TAG EITHER WAY
+ *
+ * The structured JSON line is tier one. If building it throws, tier two emits the
+ * tag and the workspace as plain arguments — **no JSON, no interpolation, and no
+ * further reads of the error value**, because touching that value is what just
+ * failed. The contract a reader can rely on: **the tag reaches the log on both
+ * paths**, so one grep finds either line. Before `!339` tier two did not exist and
+ * the `catch` was empty, which meant the one case this logger is reached for
+ * produced no line at all — the failure mode `!334` found in
+ * `logCaptureBookkeepingFailure` and confirmed here.
+ *
+ * The innermost `catch` *is* empty, and that is a conclusion rather than an
+ * omission: `console.error` itself is unusable, so there is nothing left to try,
+ * and throwing out of a block that exists to stop #257 would be the worse harm.
+ *
+ * ## What the guarded block is actually guarding against
+ *
+ * Three reachable faults, and this list was **wrong** before `!339`: reading
+ * `.message` can throw on a hostile getter; `String(error)` can throw on a hostile
+ * `toString`; and `String(error)` also throws `TypeError: Cannot convert object to
+ * primitive value` on a **null-prototype** rejection, which has no inherited
+ * `toString` at all — the most realistic of the three.
+ *
+ * It previously claimed `JSON.stringify` on a **circular value** as the second, and
+ * that cannot happen here: every field serialised is a string by construction
+ * (`tag` and `workspaceId` are typed `string`, `ts` comes from `toISOString()`, and
+ * `message` is a `typeof`-checked string or `String(error)`), so a cycle in `error`
+ * never reaches the serialiser — it takes the structured path and logs normally. A
+ * test written from that claim goes green against an empty `catch` and proves
+ * nothing, which is worth recording because it nearly happened here. The `try`
+ * still opens before the property read, which is what all three real faults need.
  */
 export function recordBookkeepingFailure(
   tag: BookkeepingTag,
   workspaceId: string,
   error: unknown,
 ): void {
+  // Outside the `try` deliberately: `instanceof` cannot throw for any value,
+  // including a hostile one, so the fallback below can still tell a bug from a
+  // blip even when building the payload fails.
+  const defect = isDefect(error);
+  const lineTag = defect ? DEFECT_TAG : tag;
+
   try {
     const e = error as { message?: unknown } | undefined;
     console.error(
       JSON.stringify({
-        tag,
+        tag: lineTag,
+        // Only on a defect line, so an operational line's shape is unchanged.
+        ...(defect ? { site: tag } : {}),
         workspaceId,
         message: typeof e?.message === "string" ? e.message : String(error),
         ts: new Date().toISOString(),
@@ -172,10 +204,55 @@ export function recordBookkeepingFailure(
     // catch block that exists precisely to keep a committed write from being
     // reported as failed. A logger that threw would undo the whole fix.
     //
-    // Both halves are reachable: reading `.message` can throw on a hostile
-    // getter, and `JSON.stringify` throws on a circular value — so the `try`
-    // opens before the property read rather than around the `console.error`.
+    // But it must not be SILENT either, which is what it was until `!339`.
+    // Relayed from `!334`, whose review found the same shape in
+    // `logCaptureBookkeepingFailure`: a `catch` whose only job is to stop the
+    // throw drops the line entirely, so the one case the logger exists to make
+    // visible is the case it reports nothing for. JSON-free and property-free on
+    // purpose — building the payload is precisely what just failed, so the
+    // fallback touches neither the error value nor the serialiser.
+    try {
+      console.error(lineTag, workspaceId);
+    } catch {
+      // Genuinely the end of the line: `console.error` itself is unusable. Empty
+      // because the alternative is throwing out of a catch block that exists to
+      // stop #257, and a lost log line is a smaller harm than telling someone
+      // their committed work did not save.
+    }
   }
+}
+
+/**
+ * The one tag every programmer fault emits, whatever site it happened at.
+ *
+ * Deliberately NOT a member of {@link BookkeepingTag}: that union means "a
+ * consequence a site can lose", one member per consequence, and its bijection with
+ * the call sites is a property `!339` restored and wants to keep. This is a
+ * different axis — *why* the line exists rather than *what* was lost — so it is
+ * its own constant, and a caller cannot pass it as a site tag.
+ */
+export const DEFECT_TAG = "bookkeeping_defect";
+
+/**
+ * Whether a rejection is a programmer fault rather than an operational one.
+ *
+ * These three cannot be produced by a database, a network or a constraint: they
+ * mean the code is wrong. Everything else — a Prisma error, a timeout, a thrown
+ * string — is operational and keeps its per-site tag, which is what the CONTROL
+ * half of the tests in `best-effort.test.ts` pins.
+ *
+ * `RangeError` is excluded on purpose: `new Date(bad)` and `toISOString` on an
+ * invalid date both produce one from *data*, so it is not reliably a bug.
+ *
+ * `instanceof` rather than reading `.constructor.name`, because a hostile getter
+ * cannot make `instanceof` throw and this runs before the guarded block.
+ */
+function isDefect(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    error instanceof ReferenceError ||
+    error instanceof SyntaxError
+  );
 }
 
 /**

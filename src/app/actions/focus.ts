@@ -212,19 +212,13 @@ async function closeSession(
  * Google is patched either way — it is best-effort already and for the same
  * reason.
  *
- * ## TWO calls, not one thunk (Duo review, `!339`, third round)
+ * ## Two calls, not one thunk
  *
- * The two payouts were bundled in a single `bestEffort` thunk, which is the same
- * defect this MR fixes in `confirmBreakdown` and `completeFocus`: a thunk is
- * sequential, so a `logReward` rejection **cancelled the `awardBadge` behind it**
- * and the shared tag could not say which of the two had been lost. So the residual
- * above was wrong in the bundled version — one fault cost BOTH payouts, not one.
- *
- * Checked against the rule rather than split reflexively: `awardBadge` is a
- * once-ever `findUnique` + `skipDuplicates` insert and never reads `RewardEvent`,
- * so neither payout reads what the other wrote and both are safe to run alone.
- * The site that fails that test is `rewardStepDone`, which stays bundled — its
- * docblock records why.
+ * The rule is on `bestEffort` (`src/lib/best-effort.ts`). Local to this site:
+ * `awardBadge` is a once-ever `findUnique` + `skipDuplicates` insert that never
+ * reads `RewardEvent`, so neither payout reads what the other wrote and each is
+ * safe alone. Note the residual stated above is per-payout **because** of that
+ * split — bundled, one fault cost both.
  */
 async function markTaskCompleted(
   workspaceId: string,
@@ -609,20 +603,11 @@ export async function completeFocus(
   // `step_done` and `session_finished` for one stretch of work. Throwing did not
   // preserve anything; it invited the double-pay.
   //
-  // TWO calls rather than one wrapped block, for the reason `awardFirstSchedule`
-  // reaches with `allSettled`: these two payouts are independent, and
-  // `session_finished` pays for time that was really spent (see
-  // `reverseStepCompletionRewards` — it is the one reward an undo does not take
-  // back). A failed step payout must not silently cost it, and a failed bonus
-  // must not hide a streak that did advance. The residual is at most one of the
-  // two, never both from one fault.
-  //
-  // TWO TAGS for the same reason (Duo review, `!339`). The split above buys
-  // independence in the code; a shared tag would keep it out of the one place an
-  // operator looks, because `best-effort.ts` makes the tag the entire value of
-  // the line. One literal on both calls means a log filtered on it cannot say
-  // which of the two consequences was lost without parsing free text — so the
-  // step payout and the bonus are named separately.
+  // Two calls and two tags — the rule is on `bestEffort`. Local to this site:
+  // `session_finished` pays for time that was really spent and is the one reward
+  // an undo does not take back (`reverseStepCompletionRewards`), so a failed step
+  // payout must not silently cost it, and a failed bonus must not hide a streak
+  // that did advance. The residual is at most one of the two, never both.
   const streak = await bestEffort("focus_step_reward_failed", workspaceId, () =>
     rewardStepDone(workspaceId),
   );
