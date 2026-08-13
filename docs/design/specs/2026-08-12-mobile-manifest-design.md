@@ -27,7 +27,11 @@ is the same phone vertical space #253 is currently fighting for, so the two comp
 - **The Play Store route.** A Trusted Web Activity *requires* this manifest, so the two are sequential
   rather than alternative. Nothing here assumes it happens.
 
-## Current state — grounded 2026-08-11, re-verified 2026-08-12
+## Current state — grounded 2026-08-11, re-verified 2026-08-13 against `origin/main` at `2ab3210`
+
+Every row below was re-read at that named commit rather than in a working tree, because the repo carries
+many worktrees and a tree is only evidence about the commit you are standing on. The re-read changed two
+rows; both are marked.
 
 | Question | Answer |
 | --- | --- |
@@ -74,9 +78,9 @@ against #174's root cause, which is why it was proposed. **It does not work in N
 broken.**
 
 `src/app/manifest.ts` is a Route Handler that is **cached by default** unless it uses a request-time API —
-the cited `manifest.md` says exactly that, in a *Good to know* note, which is what makes this checkable
-rather than recalled. And
-`PUBLIC_ORIGIN` is a **runtime** variable. So reading it at module scope bakes whatever the *build
+the cited `manifest.md` says exactly that, in a *Good to know* note, which is what makes this claim
+checkable rather than recalled. And `PUBLIC_ORIGIN` is a **runtime** variable. So reading it at module
+scope bakes whatever the *build
 container* had — nothing — producing a missing or wrong `start_url`, with a green build and green tests.
 Opting the route out of caching to read it at request time would make every manifest fetch dynamic to
 recover a value that never varies for a given deployment.
