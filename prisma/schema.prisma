@@ -445,6 +445,29 @@ model BrainDumpItem {
   // it. One column serves two purposes: replay-on-reconnect, and the late-write
   // duplicate #210 recorded as its own residual.
   //
+  // It IS carried by export.json, and that is a decision rather than an accident
+  // (Duo review, !334). `ExportSnapshot.inbox` is typed `BrainDumpItem[]` and
+  // `collect.ts` reads the rows with no `select`, so a new column reaches the
+  // archive by default — which is the behaviour the export wants, and is why the
+  // fixture literal is typed against the whole model. Kept rather than excluded:
+  //
+  //  * It is not a secret. `capture-queue.ts` says so in as many words — an
+  //    idempotency key grants nothing without the workspace it is unique within —
+  //    so the `select` that keeps `llmKeyEnc` out of the account row is a control
+  //    for credentials and does not reach this.
+  //  * `DELIBERATELY_EXCLUDED` in export/__tests__/model-coverage.test.ts is keyed
+  //    by MODEL, not by field, so it is not the instrument for this even if the
+  //    answer had been to exclude it. Its one entry also justifies itself on
+  //    "nothing the exported rows do not already carry"; a per-row key is not that.
+  //  * Excluding it would mean adding a `select` to that read, which narrows
+  //    `inbox` from the whole model to a picked type and DESTROYS the compile-time
+  //    tripwire that makes the next new column a build error in the fixture. That
+  //    net is worth more than hiding a field that is null on every online capture.
+  //
+  // The CSV tier omits it, and that is also deliberate: `inboxCsv` names its
+  // columns explicitly and the CSV is the tier a person reads, where an internal
+  // key is noise. json.test.ts asserts the presence so this cannot quietly flip.
+  //
   // Prisma CAN express this one, so unlike the CHECK constraints above it needs no
   // registry entry — and it is deliberately NOT in
   // src/lib/enum-constraint-sync.integration.test.ts, which polices CHECKs and the
