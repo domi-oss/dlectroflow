@@ -847,6 +847,78 @@ export async function ensureFocusStep(id: string): Promise<string | null> {
   return stepId;
 }
 
+/**
+ * Complete a to-do from the inbox: close its steps, close its task, and bank
+ * what that earned.
+ *
+ * ## Paid for exactly once, however many callers arrive (#233)
+ *
+ * This used to guard two `logReward` calls on the `findFirst` below and nothing
+ * else. Two simultaneous completions of one to-do both read `completedAt: null`,
+ * both passed the guard, and **both paid out** — the item completed once and was
+ * paid for twice. Measured on #233: a stepless to-do **+25**, a 5-step to-do
+ * **+75**, **+90** if it also emptied the inbox.
+ *
+ * The harm is not the points. `maybeAwardTenStepsDay` counts today's `step_done`
+ * rows and awards at `>= 10`, so a double-completed **5-step** to-do writes ten
+ * rows for five real steps and earns `ten_steps_day` **unearned** — and badges
+ * are never revoked, so unlike the points that one is permanent. Production
+ * already holds a seven-step task, so a ≥5-step to-do is ordinary rather than
+ * contrived. The inflated `_sum(points)` also leaves the app: it is fed to the
+ * LLM narrative and goes out in the daily rollup email.
+ *
+ * **The fix has to be in the database, and that is not a preference.** One
+ * router instance strictly serialises server actions — verified against the
+ * installed Next 16.2.11 source, where the discard-pending-and-run-now branch is
+ * guarded on `ACTION_NAVIGATE`/`ACTION_RESTORE` only, so `ACTION_SERVER_ACTION`
+ * is always appended and started after the previous settles. Reaching this needs
+ * two router instances (two tabs, or a tab and a phone), production runs two app
+ * replicas, and those two tabs can land on different pods. No in-process guard
+ * can span that, so neither `inbox-view.tsx`'s `inFlight` flag nor the
+ * `completedAt` early return below is the defence — they are the fast paths.
+ *
+ * So the **write** is the guard, not the read: `updateMany` with
+ * `completedAt: null` as a precondition, and every payout gated on its `count`.
+ * Postgres re-evaluates a blocked UPDATE's WHERE against the committed version,
+ * so the loser matches nothing, reports `count: 0` and returns having banked
+ * nothing. That is the same guarded-bulk shape `!301` gave `reopenItem` and
+ * `uncompleteStep`, and `count: 0` means "another caller has already done all of
+ * this" — a no-op, and nothing may be raised at somebody whose other tab
+ * finished first.
+ *
+ * The `findFirst` stays, and is now only a fast path plus the `task` lookup. It
+ * cannot be the guard: it takes no lock, and it is the read whose staleness this
+ * whole note is about.
+ *
+ * ### Two things that had to move with it
+ *
+ * **The item write goes FIRST in the transaction**, before the steps and the
+ * task. That is the row two concurrent completions contend on, so the loser
+ * blocks there and re-reads rather than getting as far as a payout. It also
+ * matches the lock order every sibling writer here already takes —
+ * `reopenItem`, `keepAsTask`, `ensureFocusStep` and `deleteBrainDumpItem` all
+ * take the `BrainDumpItem` row lock before any `Task` or `Step` write, and
+ * inverting it in one writer is how a deadlock gets built.
+ *
+ * **The `step_done` payout is counted off what the write CHANGED**, not off the
+ * pre-read snapshot — the correction `!301` review round 12 made to `reopenItem`,
+ * applied to its mirror image. `updateManyAndReturn` with `done: false` in its
+ * `where` returns exactly the steps this call closed, so a step that a
+ * concurrent `completeStep` had already closed and already paid for is not paid
+ * for again. It is also the set Google is told about (#209), which keeps the
+ * payout and the sync on one source of truth instead of two.
+ *
+ * Scoped by `task.workspaceId` as well as by `taskId`, for the reason
+ * `reopenItem`'s twin gives: a bulk operation carries the scope in its own
+ * arguments rather than inheriting it from a read further up. `Step` declares no
+ * `workspaceId`, so `scoping.harness.test.ts` does not enrol it.
+ *
+ * `TASK_WRITER_TX_BUDGET` because this now takes that same contended row lock,
+ * and `src/lib/constants.ts` carries the whole argument: at Prisma's 5s default a
+ * loser that waits longer is killed with `P2028 Transaction already closed`,
+ * which turns the no-op promised above into an error raised at someone who
+ * pressed a button twice.
+ */
 export async function completeItem(id: string) {
   const workspaceId = await currentWorkspaceId();
   const item = await prisma.brainDumpItem.findFirst({
@@ -855,52 +927,93 @@ export async function completeItem(id: string) {
   });
   if (!item || item.completedAt) return;
 
-  // The steps this call is about to close. Read before the write, and reused
-  // after it as the set whose Google Tasks to patch (#209) — a step that was
-  // already done was patched when it was done, and re-patching costs a request
-  // per step for no change.
-  const closing = item.task?.steps.filter((s) => !s.done) ?? [];
+  const task = item.task;
 
-  if (item.task) {
-    await prisma.step.updateMany({
-      where: { taskId: item.task.id },
-      data: { done: true },
+  const closed = await prisma.$transaction(async (tx) => {
+    // First write in the transaction on purpose — see the docblock. `updateMany`
+    // rather than `update` for the same reason `reverseLatestReward` uses
+    // `deleteMany`: a precondition that matches nothing must report a count, not
+    // raise.
+    const { count: took } = await tx.brainDumpItem.updateMany({
+      where: { id, workspaceId, completedAt: null },
+      data: { completedAt: new Date(), breakdownRequestedAt: null },
     });
-    await prisma.task.update({
-      where: { id: item.task.id },
+    // Another completion of this to-do got there first. Everything it owed has
+    // been paid by that caller, so this one owes nothing — including the Google
+    // patches and the revalidations, which the winner performs.
+    if (took === 0) return null;
+
+    if (!task) return { steps: [] };
+
+    // The steps THIS call turns not-done → done, and the only source of truth
+    // for that: the payout owes one `step_done` each and Google owes one
+    // `completed` each (#209). A step that was already done earned its row when
+    // it was done and was patched then, so `done: false` drops it from both.
+    const steps = await tx.step.updateManyAndReturn({
+      where: { taskId: task.id, done: false, task: { workspaceId } },
+      data: { done: true },
+      select: { googleTaskId: true, googleTaskListId: true },
+    });
+    // Not gated on anything: this call owns the completion, and setting a task
+    // Done is the state the completion means. Inside the transaction so a to-do
+    // can never be left completed with its task still Active, which the three
+    // independent autocommitted writes this replaced permitted between any two of
+    // them. Stated as reachable, not as observed — no such row has been looked
+    // for in production, and the atomicity here comes free with the guard rather
+    // than being the thing it was added for.
+    await tx.task.update({
+      where: { id: task.id },
       data: { status: TaskStatus.Done },
     });
-    for (const _step of closing)
+    return { steps };
+  }, TASK_WRITER_TX_BUDGET);
+
+  // Gated on `closed`, so only the caller that actually took the completion pays
+  // anything — but NOT an early `return`, because the revalidations below are
+  // owed either way. `reopenItem` records that rule in as many words for its own
+  // loser: "each request still has to refresh its own render, whoever did the
+  // write". A loser that returned here would answer its own tab without
+  // invalidating anything, and that tab would go on showing the row as
+  // un-completed until something else happened to refresh it.
+  if (closed) {
+    // Outside the transaction, exactly as before this fix. These are reads and
+    // appends against `RewardEvent`, `Badge` and `Streak`, none of which the
+    // local writes depend on — and `touchStreakOnCompletion` opens its OWN
+    // interactive transaction with a `SELECT … FOR UPDATE` on `Streak`
+    // (`rewards.ts:596`, proved against real Postgres in
+    // `rewards.integration.test.ts`), which must not be nested inside this one
+    // while it holds a `BrainDumpItem` lock. What makes them safe now is not a
+    // transaction, it is `closed`.
+    for (const _step of closed.steps)
       await logReward(workspaceId, RewardType.StepDone);
-    await maybeAwardTenStepsDay(workspaceId);
+    if (task) await maybeAwardTenStepsDay(workspaceId);
+    await logReward(workspaceId, RewardType.TaskComplete);
+    await touchStreakOnCompletion(workspaceId);
+    await awardBadge(workspaceId, BadgeKey.TaskComplete);
+    await maybeAwardInboxZero(workspaceId);
+
+    // #195 + #209 — close every Google Task this to-do owns, at both grains.
+    //
+    // The task row carries an id when the to-do was scheduled while it was still
+    // stepless, and each step carries its own when it was scheduled after a
+    // breakdown; a to-do can have both, and they are always different Google
+    // tasks. #195 fixed the task grain here and #209 the step grain: the step
+    // write above closes every open step in one statement, so the per-step patch
+    // `completeStep` performs never happened and Reclaim went on holding every
+    // block.
+    //
+    // Runs after the local writes and outside any transaction, and swallows its
+    // own failures per patch, so neither an unreachable Google nor one slow step
+    // can cost the user the completion they asked for. Inside the gate for the
+    // saving `reopenItem` and `uncompleteStep` both make: the winner has already
+    // sent these PATCHes, and a second set is a redundant round trip to an API
+    // this app is rate-limited against.
+    if (task) await completeGoogleTasksForItem(task, closed.steps);
   }
-
-  await prisma.brainDumpItem.update({
-    where: { id },
-    data: { completedAt: new Date(), breakdownRequestedAt: null },
-  });
-  await logReward(workspaceId, RewardType.TaskComplete);
-  await touchStreakOnCompletion(workspaceId);
-  await awardBadge(workspaceId, BadgeKey.TaskComplete);
-  await maybeAwardInboxZero(workspaceId);
-
-  // #195 + #209 — close every Google Task this to-do owns, at both grains.
-  //
-  // The task row carries an id when the to-do was scheduled while it was still
-  // stepless, and each step carries its own when it was scheduled after a
-  // breakdown; a to-do can have both, and they are always different Google
-  // tasks. #195 fixed the task grain here and #209 the step grain: `updateMany`
-  // above closes every step in one write, so the per-step patch `completeStep`
-  // performs never happened and Reclaim went on holding every block.
-  //
-  // Runs after the local writes and outside any transaction, and swallows its
-  // own failures per patch, so neither an unreachable Google nor one slow step
-  // can cost the user the completion they asked for.
-  if (item.task) await completeGoogleTasksForItem(item.task, closing);
 
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");
-  if (item.task) revalidatePath(`/tasks/${item.task.id}`);
+  if (task) revalidatePath(`/tasks/${task.id}`);
 }
 
 /**
