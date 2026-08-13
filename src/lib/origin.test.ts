@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   publicOrigin,
   canonicalOriginRedirect,
+  hasDisallowedOrigin,
   inboundHost,
   _resetOriginWarningForTest,
 } from "./origin";
@@ -266,6 +267,180 @@ describe("inboundHost", () => {
 
   it("returns null when the request carries neither", () => {
     expect(inboundHost(h({}))).toBeNull();
+  });
+});
+
+/**
+ * #175 — the CSRF comparand (CWE-352).
+ *
+ * `src/app/api/braindump/route.test.ts` asserts what the ROUTE does with the
+ * answer (a 400 that writes no row, and does not borrow the 403/409 the queue maps
+ * to sign-in copy). What is asserted HERE is the predicate itself, and
+ * specifically the branches a route test reaches awkwardly or not at all: the
+ * fail-closed arms, the normalisation, and the difference between an ABSENT
+ * `Origin` and the string `"null"`.
+ */
+describe("hasDisallowedOrigin", () => {
+  /** A POST as a proxy delivers it: arrival host forwarded, plus any extras. */
+  const req = (arrivedOn: string, headers: Record<string, string> = {}) =>
+    new Request(`https://${arrivedOn}/api/braindump`, {
+      method: "POST",
+      headers: { "x-forwarded-host": arrivedOn, ...headers },
+    });
+
+  const CANONICAL = "work.dlectroflow.dev";
+  /** Served by the same ingress with no redirect — `legacyHosts[1]`. */
+  const APEX = "dlectroflow.dev";
+
+  it("allows an Origin matching the host the request arrived on", () => {
+    expect(
+      hasDisallowedOrigin(req(CANONICAL, { origin: `https://${CANONICAL}` })),
+    ).toBe(false);
+  });
+
+  // ⚠️ The #175 regression, at the level the bug actually lived: a request from a
+  // hostname this deployment serves but PUBLIC_ORIGIN does not name. Pinned with
+  // PUBLIC_ORIGIN SET, because unset is the configuration in which the old
+  // comparand accidentally behaved — an unstubbed test cannot see this.
+  it("allows a served hostname PUBLIC_ORIGIN does not name", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", `https://${CANONICAL}`);
+    expect(hasDisallowedOrigin(req(APEX, { origin: `https://${APEX}` }))).toBe(
+      false,
+    );
+  });
+
+  it("refuses an attacker's Origin against either served host", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", `https://${CANONICAL}`);
+    const forged = { origin: "https://evil.example" };
+    expect(hasDisallowedOrigin(req(CANONICAL, forged))).toBe(true);
+    expect(hasDisallowedOrigin(req(APEX, forged))).toBe(true);
+  });
+
+  // The two served hostnames are different origins to a browser, and the app's own
+  // capture fetch is a relative path — so this is never a request the app makes,
+  // and widening to "any host we serve" would have been over-widening.
+  it("refuses one served host's Origin against the other's Host", () => {
+    expect(
+      hasDisallowedOrigin(req(APEX, { origin: `https://${CANONICAL}` })),
+    ).toBe(true);
+  });
+
+  // A MISSING header is the deliberate non-browser allowance. `"null"` is a real
+  // value a browser SENDS — an opaque origin: a sandboxed iframe, or a POST that
+  // arrived via a cross-origin redirect — so the two must not collapse, which is
+  // why the implementation tests for `=== null` rather than for falsiness.
+  //
+  // The EMPTY string is the input that separates `=== null` from a falsiness
+  // check, and it is why the implementation is written the stricter way: `!declared`
+  // would wave `Origin: ""` through as if the header had not been sent.
+  it("allows an absent Origin but refuses the opaque string 'null'", () => {
+    expect(hasDisallowedOrigin(req(CANONICAL))).toBe(false);
+    expect(hasDisallowedOrigin(req(CANONICAL, { origin: "null" }))).toBe(true);
+    expect(hasDisallowedOrigin(req(CANONICAL, { origin: "" }))).toBe(true);
+  });
+
+  it("refuses a scheme downgrade on the right host", () => {
+    expect(
+      hasDisallowedOrigin(req(CANONICAL, { origin: `http://${CANONICAL}` })),
+    ).toBe(true);
+  });
+
+  it.each([
+    `https://${CANONICAL}.evil.example`,
+    `https://evil.${CANONICAL}`,
+    `https://${CANONICAL}/`,
+  ])("refuses the near-miss %s", (origin) => {
+    expect(hasDisallowedOrigin(req(CANONICAL, { origin }))).toBe(true);
+  });
+
+  // Case and a default port are normalised because the browser normalised them
+  // first: it lowercases the host and omits `:443`, so a proxy that forwarded
+  // either form would otherwise refuse every request rather than none.
+  it.each([
+    ["an upper-case forwarded host", CANONICAL.toUpperCase()],
+    ["an explicit default port", `${CANONICAL}:443`],
+  ])("normalises %s the way the browser already did", (_label, arrivedOn) => {
+    expect(
+      hasDisallowedOrigin(
+        new Request(`https://${CANONICAL}/api/braindump`, {
+          method: "POST",
+          headers: {
+            "x-forwarded-host": arrivedOn,
+            origin: `https://${CANONICAL}`,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("takes only the first entry of a forwarded chain", () => {
+    expect(
+      hasDisallowedOrigin(
+        new Request(`https://${CANONICAL}/api/braindump`, {
+          method: "POST",
+          headers: {
+            "x-forwarded-host": `${CANONICAL}, internal.lb`,
+            origin: `https://${CANONICAL}`,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  // No proxy in front: `npm run dev`, or a self-host terminating TLS in the app.
+  it("compares against a bare Host when nothing forwarded one", () => {
+    const bare = (origin: string) =>
+      hasDisallowedOrigin(
+        new Request("http://localhost:3000/api/braindump", {
+          method: "POST",
+          headers: { host: "localhost:3000", origin },
+        }),
+      );
+    expect(bare("http://localhost:3000")).toBe(false);
+    expect(bare("http://localhost:3001")).toBe(true);
+  });
+
+  // ⚠️ Fail closed. An Origin that cannot be checked is not an Origin that can be
+  // allowed — the opposite reading turns the guard into a formality, and it is the
+  // same failure `canonicalOriginRedirect`'s unparseable-PUBLIC_ORIGIN branch was
+  // pulled up on in !280.
+  //
+  // A non-http scheme is the case that matters most: without the http/https
+  // restriction `new URL("javascript://h").origin` is the literal `"null"`, which
+  // would MATCH a browser's opaque `Origin: null` and turn a sentinel collision
+  // into an allow. Neither proxy lets a spoofed `x-forwarded-proto` reach the pod,
+  // so this is defence in depth rather than a live hole — but a security
+  // comparison must not depend on that being true forever.
+  it.each([
+    ["a non-http forwarded scheme", { "x-forwarded-proto": "javascript" }],
+    ["a garbage forwarded scheme", { "x-forwarded-proto": "" }],
+  ])("refuses rather than allowing when it cannot verify — %s", (_l, extra) => {
+    expect(
+      hasDisallowedOrigin(req(CANONICAL, { origin: "null", ...extra })),
+    ).toBe(true);
+    expect(
+      hasDisallowedOrigin(
+        req(CANONICAL, { origin: `https://${CANONICAL}`, ...extra }),
+      ),
+    ).toBe(true);
+  });
+
+  it("trusts the forwarded proto over the URL's own scheme", () => {
+    // Behind a TLS-terminating ingress the pod is spoken to over http, so the
+    // request URL's scheme is not the browser's. Both proxies overwrite this
+    // header, so it is the trustworthy half of the pair.
+    expect(
+      hasDisallowedOrigin(
+        new Request(`http://${CANONICAL}/api/braindump`, {
+          method: "POST",
+          headers: {
+            "x-forwarded-host": CANONICAL,
+            "x-forwarded-proto": "https",
+            origin: `https://${CANONICAL}`,
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 });
 

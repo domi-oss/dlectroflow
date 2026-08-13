@@ -11,10 +11,15 @@ import { cn, touchTarget } from "@/lib/utils";
  * is visually + textually identical (owner report: it had drifted — a bordered
  * box in the inbox vs an icon-only ✓ in focus lanes). Borderless `rounded-md` +
  * `hover:bg-accent` + `font-medium` matches the row's other secondary controls
- * (the 📅/▾ end-cluster in row-actions.tsx) instead of standing out as the only
- * bordered pill. The label itself — `t("action.complete", voice)` — already
- * carries the "✓ " prefix (see strings.ts), so the glyph + word travel together
- * as one accessible name; nothing here relies on colour alone.
+ * (the ▾ overflow trigger in row-actions.tsx) instead of standing out as the
+ * only bordered pill.
+ *
+ * The label is `t("action.complete", voice)` and is a WORD, not a glyph: #253
+ * dropped the "✓ " prefix it used to carry, because this button is rendered on
+ * every row of every list and the tick was paying for width on all of them
+ * while naming no state (it is only rendered on a row that is NOT complete).
+ * Nothing here relies on colour, and nothing relies on an icon — the accessible
+ * name is the visible text.
  */
 export function CompleteButton({
   voice,

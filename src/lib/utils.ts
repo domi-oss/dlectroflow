@@ -27,12 +27,18 @@ export const touchTarget =
  *
  * `outline-none` and the ring travel together in this one string on purpose.
  * Removing the UA outline is what makes an indicator the author's problem
- * (WCAG 2.4.11, which axe does not implement), and `a11y-class-hygiene`'s Rule D
- * can only see that the replacement exists if it is in the same class scope —
- * splitting them would silently satisfy the guard while painting nothing.
+ * (WCAG 2.4.7 Focus Visible, AA — axe implements no rule for it), and
+ * `a11y-class-hygiene`'s Rule D can only see that the replacement exists if it is
+ * in the same class scope — splitting them would silently satisfy the guard while
+ * painting nothing.
  *
  * Compose with {@link touchTarget} for icon-only controls: a bare 20px glyph is
- * far short of the 44px WCAG 2.5.5 minimum.
+ * short of the app's own 44x44 floor. That floor is **2.5.5 Target Size
+ * (Enhanced), AAA** — a house convention, not the conformance bar. The AA one is
+ * **2.5.8 Target Size (Minimum)** at 24x24, which a 20px glyph also misses, so
+ * this composition is doing both jobs at once. Both citations here were wrong
+ * before #258, in the same direction: they made a voluntary bar read as an
+ * obligation.
  */
 export const controlSurface =
   "hover:bg-accent hover:border-primary/40 rounded-md border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";

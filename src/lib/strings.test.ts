@@ -49,8 +49,10 @@ describe("t() function", () => {
     ["stat.stepsToday", "playful", "Bites today"],
     ["action.breakdown", "plain", "Break into steps"],
     ["action.breakdown", "playful", "🍿 Snack-size it"],
-    ["action.complete", "plain", "✓ Complete"],
-    ["action.complete", "playful", "✓ Complete"],
+    // #253 — no leading tick. The glyph cost a permanently-visible row control
+    // width it did not earn at 360px, and it said nothing the word did not.
+    ["action.complete", "plain", "Complete"],
+    ["action.complete", "playful", "Complete"],
     ["action.reopen", "plain", "Reopen"],
     ["nav.everything", "plain", "Library"],
     ["nav.everything", "playful", "🍱 Larder"],
@@ -75,15 +77,92 @@ describe("t() function", () => {
     ["bucket.empty", "plain", "Nothing here yet"],
     ["action.moveTo", "plain", "Move to…"],
     ["prompt.breakNow", "plain", "Break into steps now?"],
+    ["prompt.breakNow", "playful", "🍿 Snack-size it now?"],
     ["action.reviewNow", "plain", "Review now"],
     ["action.reviewNow", "playful", "🥫 Review now"],
-    // v6 dropdown full-labels + short button
-    ["action.breakdownFull", "plain", "Break into smaller steps"],
-    ["action.addTodoFull", "plain", "Add as single task to do"],
+    // v6 dropdown full-labels + short button.
+    //
+    // #253 renamed three of them so each names the STATE IT PRODUCES in the words
+    // the destination bucket already uses — "multi-step to-do" and "single-task
+    // to-do" are `section.multiStep` / `section.singleTask`, and Schedule says
+    // where the row is actually sent. `action.completeFull` was left alone in that
+    // pass and the pair is the reason why: `section.completed` reads "Completed",
+    // so "Mark as completed" already agreed with its destination and a draft
+    // "Mark as complete" would have broken the agreement it was meant to create.
+    // The app-wide sweep of the same rule is #259; #253 renames only the ▾ entries
+    // it renders. Both voices are pinned here because the rename has to carry the
+    // playful variant with it (#86) — same emoji, new words.
+    ["action.breakdownFull", "plain", "Add as multi-step to-do"],
+    ["action.breakdownFull", "playful", "🍿 Add as multi-step to-do"],
+    // #253 F1 — the navigating twin, split off `prompt.breakNow`. Both are pinned
+    // here BY VALUE because the whole point of the split is that they diverge: the
+    // menu entry is an imperative, the card's CTA keeps its question mark. A future
+    // "tidy" that re-merges them reds two cases rather than none.
+    //
+    // It must also stay distinct from `action.breakdown`, the SHORT inline CTA on the
+    // same row — a dedicated case for that sits at the foot of this file, because a
+    // value assertion alone would not notice the two converging.
+    ["action.breakNow", "plain", "Break down in the editor"],
+    ["action.breakNow", "playful", "🍿 Break down in the editor"],
+    ["action.addTodoFull", "plain", "Add as single-task to-do"],
+    ["action.addTodoFull", "playful", "🍽️ Add as single-task to-do"],
     ["action.saveShort", "plain", "Save"],
     ["action.completeFull", "plain", "Mark as completed"],
     ["action.editTitle", "plain", "Edit task title"],
-    ["action.schedule", "plain", "Schedule"],
+    ["action.schedule", "plain", "Schedule to calendar (send to Google Tasks)"],
+    [
+      "action.schedule",
+      "playful",
+      "🗓️ Schedule to calendar (send to Google Tasks)",
+    ],
+    // #253 — the same slot when the Google path is not usable yet. These exist
+    // because the row's ▾ entry stopped being an inline `Connect Google →` link and
+    // became NAVIGATION into the Integrations settings section, which means the
+    // state has to be readable from the label. Both name the destination first and
+    // the obstacle second, and both voices are pinned because the playful column
+    // carries the same words with its existing emoji (#86 freezes the register).
+    //
+    // ⚠️ The wording is load-bearing for #128, not cosmetic: a row that says
+    // "(not connected)" and takes you to settings is not a connect control, which
+    // is what lets that issue's "prefer a personal account" caveat consolidate at
+    // the three controls that do connect instead of being repeated per row.
+    [
+      "action.scheduleNotConnected",
+      "plain",
+      "Schedule to calendar (not connected)",
+    ],
+    [
+      "action.scheduleNotConnected",
+      "playful",
+      "🗓️ Schedule to calendar (not connected)",
+    ],
+    [
+      "action.scheduleReconnect",
+      "plain",
+      "Schedule to calendar (reconnect needed)",
+    ],
+    [
+      "action.scheduleReconnect",
+      "playful",
+      "🗓️ Schedule to calendar (reconnect needed)",
+    ],
+    // #253 — one key for "open this row's focus timer" on an ITEM row, replacing
+    // three spellings of one destination: two hard-coded "Start visual focus timer"
+    // literals in `inbox-view.tsx` and `library-rows.tsx` reaching for
+    // `step.startFocusTimer`, a STEP-grain key naming an action on an item. The
+    // plain value is the inbox's existing wording, so this de-duplicated without
+    // changing what anybody reads. `step.startFocusTimer` / `step.resumeFocusTimer`
+    // survive for `task-steps.tsx`, where the row IS a step and the resumable
+    // variant is real; whether the two grains converge is #259's call.
+    ["action.startFocusTimer", "plain", "Start visual focus timer"],
+    ["action.startFocusTimer", "playful", "🍽️ Start visual focus timer"],
+    // #253 — the one destination the canonical entries did not already cover when
+    // the nested `Move to…` picker was removed. Same phrase and same emoji as
+    // `step.sendToReview`, pinned side by side so the two grains cannot drift apart
+    // while #259 decides whether they merge.
+    ["action.sendToReview", "plain", "Send back to review"],
+    ["action.sendToReview", "playful", "🥫 Send back to review"],
+    ["step.sendToReview", "plain", "Send back to review"],
     // #25 step-row labels — voice-aware (plain literal, playful food-themed)
     ["step.startFocus", "plain", "▶ Start Focus"],
     ["step.startFocus", "playful", "▶ Start Focus"],
@@ -313,7 +392,16 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("action.breakdown", "playful")).toBe("🍿 Snack-size it");
   });
 
-  // action.addTodo (used in InboxView row button)
+  // action.addTodo — NO consumer since #253 moved this act into the row's ▾ list,
+  // where it renders `action.addTodoFull` ("Add as single-task to-do"). The key
+  // and these two cases stay: `t()` is the public surface and a self-hoster's
+  // voice override can still reach it, so its plain/playful pair is worth pinning.
+  // The comment is corrected rather than deleted because "used in InboxView row
+  // button" is what a reader would otherwise grep for and not find.
+  //
+  // `action.editTitle` is the second key in this state, for the same reason and on
+  // this precedent — #253 dropped the ▾ "Edit task title" entry as a mirror of the
+  // row's ✎ pencil. Its cases live in the table above.
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });
@@ -581,6 +669,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.cancel",
     "action.moveTo",
     "action.breakdownFull",
+    "action.breakNow",
     "action.addTodoFull",
     "action.saveShort",
     "action.completeFull",
@@ -704,4 +793,131 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
       expect(hasEmoji(t(key, "plain"))).toBe(false);
     });
   }
+});
+
+/**
+ * #253 F1 — the row's break-up labels must stay distinguishable from each other.
+ *
+ * Three keys name the same underlying act on three surfaces, and two of them sit on
+ * the SAME ROW. `action.breakNow` was briefly "Break into steps", which is
+ * character-identical to `action.breakdown`, the short inline CTA beside it — the
+ * exact defect #253 removed when it took the full "Save for later" `aria-label` off
+ * the inline `Save`: two controls in one row answering to one name, an ambiguous
+ * voice-control target (WCAG 2.5.3's neighbourhood) and a row from which no query can
+ * pick out either. It was caught by an unrelated spec's `/break into steps/i` matching
+ * two elements, which is the same ambiguity a user's voice command would hit.
+ *
+ * A value assertion cannot see convergence — both would still "pass" while being
+ * equal — so the relationship is asserted directly.
+ */
+describe("the break-up labels stay distinct (#253 F1)", () => {
+  const keys = [
+    "action.breakdown",
+    "action.breakNow",
+    "prompt.breakNow",
+  ] as const;
+
+  it.each(["plain", "playful"] as const)(
+    "no two of the three collide in %s voice",
+    (voice) => {
+      const rendered = keys.map((k) => t(k, voice));
+      expect(
+        new Set(rendered).size,
+        `two of ${JSON.stringify(rendered)} are identical`,
+      ).toBe(keys.length);
+    },
+  );
+
+  /**
+   * Prefixes, but only for the pairs that can be on screen TOGETHER.
+   *
+   * ⚠️ A first version of this asserted it across all three and immediately caught a
+   * real relation: `action.breakdown` ("Break into steps") is a prefix of
+   * `prompt.breakNow` ("Break into steps now?"). That is NOT a defect, and the reason
+   * is the whole shape of this test — those two are inline CTAs on different rows in
+   * different buckets (Needs-review, and an awaiting Multi-step card), so no user and
+   * no query ever sees both at once. Ambiguity is a property of a CONTEXT, not of a
+   * string table.
+   *
+   * The two pairs that do co-occur, each on one row:
+   *   • Needs-review row      — inline `action.breakdown` + ▾ `action.breakdownNow`
+   *   • awaiting Multi-step   — inline `prompt.breakNow`  + ▾ `action.breakNow`
+   */
+  it.each([
+    ["the Needs-review row", "action.breakdown"],
+    ["an awaiting Multi-step card", "prompt.breakNow"],
+  ] as const)(
+    "on %s, the ▾ entry is neither equal to nor a prefix of the inline CTA",
+    (_where, inlineKey) => {
+      for (const voice of ["plain", "playful"] as const) {
+        const inline = t(inlineKey, voice);
+        const entry = t("action.breakNow", voice);
+        expect(entry, `equal in ${voice}`).not.toBe(inline);
+        expect(
+          entry.startsWith(inline),
+          `"${inline}" is a prefix of "${entry}" in ${voice} voice`,
+        ).toBe(false);
+        expect(
+          inline.startsWith(entry),
+          `"${entry}" is a prefix of "${inline}" in ${voice} voice`,
+        ).toBe(false);
+      }
+    },
+  );
+
+  /**
+   * ── The ▾'s own entries, which now share a construction on purpose ───────────
+   *
+   * The owner's rename made `action.breakdownFull` "Add as multi-step to-do" so it
+   * parallels `action.addTodoFull` ("Add as single-task to-do") beneath it. That is
+   * the right call for scannability AND it creates exactly the condition this file
+   * guards: two labels sharing the prefix `Add as ` that **co-occur in one list**.
+   *
+   * Asserted rather than assumed to be fine. Sharing a leading substring is
+   * harmless; what defeats a voice command or a `getByRole` name is one label being
+   * EQUAL to, a PREFIX of, or CONTAINED IN another. These two diverge at "multi" vs
+   * "single", so none of the three holds — and in playful they diverge at character 1
+   * (🍿 against 🍽️), which is stronger still.
+   *
+   * `action.addToCalendar` is in the set because it also opens with "Add " and sits in
+   * the same list, which the two-entry framing would have missed.
+   */
+  const sameList = [
+    "action.breakNow",
+    "action.breakdownFull",
+    "action.addTodoFull",
+    "action.saveForLater",
+    "action.completeFull",
+    "action.addToCalendar",
+    "action.delete",
+  ] as const;
+
+  it.each(["plain", "playful"] as const)(
+    "no ▾ entry is equal to, a prefix of, or contained in another (%s)",
+    (voice) => {
+      const rendered = sameList.map((k) => [k, t(k, voice)] as const);
+      for (const [ka, a] of rendered) {
+        for (const [kb, b] of rendered) {
+          if (ka === kb) continue;
+          expect(a, `${ka} equals ${kb}`).not.toBe(b);
+          expect(
+            b.startsWith(a),
+            `${ka} ("${a}") is a prefix of ${kb} ("${b}")`,
+          ).toBe(false);
+          expect(
+            b.includes(a),
+            `${ka} ("${a}") is contained in ${kb} ("${b}")`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it("the menu entry is an imperative and the card's prompt is a question", () => {
+    // The owner's split, pinned so a later pass cannot quietly re-merge the register.
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("prompt.breakNow", voice)).toMatch(/\?$/);
+      expect(t("action.breakNow", voice)).not.toMatch(/\?$/);
+    }
+  });
 });

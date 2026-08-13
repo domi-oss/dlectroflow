@@ -20,8 +20,10 @@ import { identityLine, type AccountIdentity } from "@/lib/identity";
 // point rather than a nicety.
 //
 // #117 — the focus indicator is an INSET RING, not just the background swap
-// this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
-// does not implement it, so the whole a11y suite was structurally blind to it:
+// this used to rely on. A swap this faint leaves no indicator anybody can see, so
+// it fails 2.4.7 Focus Visible (AA) in practice, and the ring is what clears
+// 2.4.13 Focus Appearance (AAA) as well. axe implements no rule for either, so
+// the whole a11y suite was structurally blind to it:
 // --accent against the popup's --background surface is 1.09:1 in light and
 // 1.24:1 in dark, against the 3:1 an indicator needs. --ring reads 5.09:1 on
 // that surface and 4.65:1 on the focused --accent in light, 8.83:1 / 7.14:1 in

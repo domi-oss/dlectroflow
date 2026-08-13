@@ -1,6 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { captureItem, needsReviewRow, waitForShell, MOBILE } from "../helpers";
+import {
+  captureItem,
+  needsReviewRow,
+  waitForShell,
+  MOBILE,
+  ROW_MENU_SCHEDULE,
+} from "../helpers";
 import { MEMBER_USER_ID, MEMBER_GOOGLE_ACCESS_TOKEN } from "../constants";
 import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
 
@@ -156,7 +162,20 @@ test("a member's inbox calendar control leads with Google, not the .ics fallback
   await expect(row).toBeVisible();
   // Before #118 this row showed "Add to calendar (.ics)" for a member, because
   // the page handed them `google = null`.
-  await expect(row.getByRole("button", { name: "Schedule" })).toBeVisible();
+  //
+  // #253 — the control is an entry in the row's ▾ list, not an inline 📅. Which
+  // control it is remains the whole point of the assertion: a member must get the
+  // Google path, not the guest .ics fallback.
+  await row.getByRole("button", { name: "All options" }).click();
+  // Exact, and named by the constant: #253 renamed this entry to name the
+  // destination ("… send to Google Tasks"), which is what makes it the assertion it
+  // claims to be — a member gets the GOOGLE path, and the label now says so.
+  await expect(
+    row.getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true }),
+  ).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: "Add to calendar (.ics)" }),
+  ).toBeVisible(); // the owner-only companion entry, not the guest's primary
 });
 
 test("the disconnect confirmation is reachable and reads correctly at 390px", async ({

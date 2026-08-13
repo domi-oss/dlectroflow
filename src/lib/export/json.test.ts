@@ -158,6 +158,28 @@ describe("export.json — the round-trippable tier", () => {
     expect(parsed.shoppingItems).toHaveLength(3);
   });
 
+  // #175 — the archive carries `clientKey`, and this pins it as a decision rather
+  // than a side effect of `inbox` being typed against the whole model (Duo review,
+  // `!334`). The reasoning lives beside the column in `prisma/schema.prisma`; the
+  // short version is that an idempotency key is not a secret, that
+  // `DELIBERATELY_EXCLUDED` is keyed by model rather than by field so it could not
+  // express the alternative anyway, and that narrowing the read to exclude it would
+  // cost the compile-time tripwire which makes the next new column a build error.
+  //
+  // `in` rather than a value comparison, because the two failure modes differ and
+  // only one of them is visible from the value: `JSON.stringify` drops `undefined`
+  // and keeps `null`, so a row that reached the archive with the field missing
+  // entirely and a row that reached it as an explicit null both read `undefined`
+  // once parsed.
+  it("carries clientKey as an explicit null rather than dropping the field", () => {
+    expect("clientKey" in parsed.inbox[0]).toBe(true);
+    expect(parsed.inbox[0].clientKey).toBeNull();
+    // The control that stops this passing on an empty archive, in the same shape
+    // the shopping-summary absence above uses.
+    expect(parsed.inbox).toHaveLength(2);
+    expect(everyKey(parsed)).toContain("clientKey");
+  });
+
   it("writes every timestamp as ISO-8601 with an explicit offset", () => {
     const offsets =
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(Z|[+-]\d{2}:\d{2})$/;

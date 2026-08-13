@@ -12,7 +12,10 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
   () => {
     const prismaMock = {
       brainDumpItem: {
-        create: vi.fn().mockResolvedValue({ id: "item-1" }),
+        // #175 — capture writes through `INSERT … ON CONFLICT DO NOTHING` now
+        // (`writeCapture`, src/lib/capture-write.ts), so the winner's row comes
+        // back in an array.
+        createManyAndReturn: vi.fn().mockResolvedValue([{ id: "item-1" }]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       task: {
@@ -76,7 +79,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   currentWorkspaceIdMock.mockResolvedValue("owner");
   prismaMock.task.findFirst.mockResolvedValue({ id: "t1" });
-  prismaMock.brainDumpItem.create.mockResolvedValue({ id: "item-1" });
+  prismaMock.brainDumpItem.createManyAndReturn.mockResolvedValue([
+    { id: "item-1" },
+  ]);
   prismaMock.focusSession.create.mockResolvedValue({ id: "sess" });
   prismaMock.focusSession.updateMany.mockResolvedValue({ count: 0 });
 });
@@ -85,7 +90,9 @@ describe("streak engagement — the three qualifying actions", () => {
   it("capture (createBrainDumpItem) advances the streak", async () => {
     const { createBrainDumpItem } = await import("./braindump");
     await createBrainDumpItem("buy milk");
-    expect(prismaMock.brainDumpItem.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.brainDumpItem.createManyAndReturn).toHaveBeenCalledTimes(
+      1,
+    );
     expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner");
   });
 

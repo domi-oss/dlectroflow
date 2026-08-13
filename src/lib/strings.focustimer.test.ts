@@ -3,7 +3,9 @@ import { t } from "@/lib/strings";
 
 describe("focus-timer redesign strings (MR ②)", () => {
   it("timer readout + controls resolve; plain stays free of decorative emoji", () => {
-    expect(t("focus.timer.completeStep", "plain")).toBe("✓ Complete step");
+    // #253 — the sibling of `action.complete`, detick'd in the same breath so
+    // the two Complete affordances cannot read as different controls.
+    expect(t("focus.timer.completeStep", "plain")).toBe("Complete step");
     expect(t("focus.timer.of", "plain")).toBe("of");
     expect(t("focus.timer.steps", "plain")).toBe("steps");
   });

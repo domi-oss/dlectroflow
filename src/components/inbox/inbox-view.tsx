@@ -86,6 +86,8 @@ import {
 import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
+import { rowMenuEntry } from "@/components/ui/anchored-popup";
+import { groupedRowMenu } from "@/components/ui/row-menu-separator";
 import {
   RowActions,
   ScheduleControl,
@@ -286,16 +288,51 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    guard can span, so a guard widened to cover it would buy nothing and read
  *    as though it had. That is why the defence lives in the actions, and
  *    `reopenItem` says so in as many words ("the same Done row open in two
- *    tabs"): see its reversal counted off what the writes CHANGED,
- *    `touchStreakOnCompletion`'s interactive-transaction row lock
- *    (`rewards.ts:596`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *    tabs"): see its reversal counted off what the writes CHANGED, the
+ *    interactive-transaction row lock — the `tx.$queryRaw … FOR UPDATE` that
+ *    opens `touchStreakOnEngagement`'s transaction in `rewards.ts` — and
+ *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
  *
- *    ⚠️ Corrected #251: this used to say the row lock was "proved against a real
- *    database in `rewards.integration.test.ts`". **That file does not exist**, and
- *    `touchStreakOnCompletion` is mocked in every test that names it — so the lock
- *    is implemented and unexercised. The three defences above are not equally
- *    evidenced, and the one carrying a false citation was the one nobody checked.
- *    Tracked on #233, which rested its severity table on the same sentence.
+ *    ⚠️ Cited by FUNCTION, not by line, and named `touchStreakOnEngagement`
+ *    rather than `touchStreakOnCompletion`. This bullet said "`rewards.ts:677`",
+ *    which is the `@deprecated` three-line alias — no lock, no transaction — so
+ *    it pointed a reader checking the claim at code that does not support it. It
+ *    replaced a correct line number to do so. #233 removed the number from
+ *    `rewards.integration.test.ts`'s own copy of this citation for exactly that
+ *    reason: a line reference goes on reading authoritatively after it stops
+ *    being true. The alias is still what the completion call sites call, which is
+ *    why the tests race it; the read-decide-write lives in the engagement
+ *    function.
+ *
+ *    ⚠️ Corrected #251, then again on #253: this used to say the row lock was
+ *    "proved against a real database in `rewards.integration.test.ts`". #251's
+ *    correction — **that file does not exist** — was true and read as though the
+ *    proof had never been written. It had. `src/lib/rewards.integration.test.ts`
+ *    existed from #21 (`ff9e88a`) until **#251's `783a6bf` deleted all 113 lines
+ *    of it**, in a commit whose message documents the inbox-zero gate it was
+ *    actually about and never mentions the deletion. So the accurate statement is
+ *    not "unproven" but "the proof was removed and the citation outlived it",
+ *    which is a different failure with a different fix.
+ *
+ *    **SETTLED — the proof exists.** #233 landed it:
+ *    `src/lib/rewards.integration.test.ts` is in the tree, fires genuinely
+ *    concurrent calls at real Postgres, and asserts `maxLiveTx` so a barrier that
+ *    never actually overlapped cannot pass. It also carries a citation guard that
+ *    fails loudly rather than open, so a second silent deletion reds the suite
+ *    instead of quietly restoring the state #251 left.
+ *
+ *    This sentence is corrected here for the THIRD time and each earlier version
+ *    was wrong in the same direction — describing the proof's status from an
+ *    inherited claim rather than from the tree. It said "does not exist" when the
+ *    file had existed and been deleted, then "is being restored … treat as
+ *    unsettled" after the restore had already landed. So the bullet is now one of
+ *    three equal defences, and the way to check that is to open the file rather
+ *    than to read this comment.
+ *
+ *    The mocking observation it rested on stands and is why the integration test
+ *    is the only thing that can speak here: `touchStreakOnCompletion` is mocked
+ *    in every unit file that names it, so no unit test can exercise an
+ *    interactive-transaction row lock.
  *
  *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
  *    two truly simultaneous completions of one to-do could bank twice. It is
@@ -667,16 +704,30 @@ export const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
   not_found: "This task couldn't be found.",
 };
 
-/** ICS states carry the "Add to calendar" label; Google states carry "Schedule". */
+/**
+ * The ▾ entry's label for a row's Schedule slot, from the control's state.
+ *
+ * ICS states carry "Add to calendar"; a usable Google path carries the full
+ * "Schedule to calendar (send to Google Tasks)".
+ *
+ * #253 — the two UNUSABLE Google states are named here too, and that is new. They
+ * used to be unreachable: `ScheduleControl`'s `connect`/`reconnect` branch returned
+ * an inline `Connect Google →` link before it ever looked at `label`. The `menu`
+ * variant now renders a navigation entry instead and takes its text from here, so
+ * every state this function is asked about has an answer — and each one names the
+ * destination first, then why it cannot happen yet.
+ */
 const isIcsState = (s: ScheduleControlProps["state"]) =>
   s === "ics_ready_steps" || s === "ics_needs_duration";
 const scheduleMenuLabel = (
   s: ScheduleControlProps["state"],
   voice: Voice,
-): string =>
-  isIcsState(s)
-    ? t("action.addToCalendar", voice)
-    : t("action.schedule", voice);
+): string => {
+  if (isIcsState(s)) return t("action.addToCalendar", voice);
+  if (s === "connect") return t("action.scheduleNotConnected", voice);
+  if (s === "reconnect") return t("action.scheduleReconnect", voice);
+  return t("action.schedule", voice);
+};
 
 export function InboxView({
   initialItems,
@@ -1669,6 +1720,17 @@ export function InboxView({
 
   // ✎ inline title editing — shared by every bucket's rows. Keyed so it's
   // safe to drop directly into a RowActions `overflow` array too.
+  //
+  // #253 — this is the ONLY edit affordance on a row now. The ▾ list used to
+  // carry an "Edit task title" entry calling the identical `setEditingId(item.id)`
+  // (see the commit that removed it), which is the mirror shape #253's sweep was
+  // written to catch; it survived the first pass only because the sweep compared
+  // the list against the ACTION BAR and this button lives on the TITLE line.
+  //
+  // ⚠️ `Edit ${item.text}` is load-bearing beyond this row. !337's row-lookup fix
+  // for #255 anchors on it being the row's unique accessible name, so renaming it
+  // — or letting a second control answer to it — reintroduces a measured ~20%
+  // flake in the write-failure specs.
   const pencil = (item: Item) => (
     <button
       key={`edit-${item.id}`}
@@ -1684,18 +1746,6 @@ export function InboxView({
     </button>
   );
 
-  // v6: the ▾ dropdown's edit entry is the full text "Edit task title" (the
-  // title-line affordance stays the ✏️ pencil above). Keyed for the menu array.
-  const editMenuItem = (item: Item) => (
-    <button
-      key={`edit-menu-${item.id}`}
-      type="button"
-      onClick={() => setEditingId(item.id)}
-      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-    >
-      {t("action.editTitle", voice)}
-    </button>
-  );
   const titleEditor = (item: Item) => {
     // #179 — the field holds the RECONSTRUCTION (`text {note}`), not the bare
     // stored text. That is what makes the round trip an identity by construction:
@@ -2168,19 +2218,48 @@ export function InboxView({
     );
   };
 
-  // v5: 🗑 delete lives inline in every row's end cluster AND (per the "▾
-  // lists ALL the row's options including duplicates" rule) a second time
-  // inside the ▾ menu — both instances share the same confirmDeleteId state,
-  // so confirming/cancelling either one keeps the other in sync. `fullWidth`
-  // switches on the menu-entry styling (menu items are left-aligned, full
-  // width rows; the end-cluster one is a compact inline button).
+  // `InboxView`'s delete factory. Two resting shapes plus the armed confirm, all
+  // sharing one `confirmDeleteId` so confirming or cancelling either resting variant
+  // keeps the other in sync.
+  //
+  // ⚠️ NOT the same function as `ItemRow`'s `deleteControl(key)` further down this
+  // file. That one takes a key alone and has no `icon` at all, and its comment says
+  // so — "the `icon` branch had no caller left" — which is true OF THAT FACTORY and
+  // false of this one. Read the arity before believing either sentence: a reviewer of
+  // `ed4dffb` conflated the two and reported this `icon` option as dead.
+  //
+  // #253 retired the "▾ lists ALL the row's options including duplicates" rule this
+  // factory was written for: the ▾ list now holds only what is not already on the
+  // row, so the menu entry is the ROUTE to delete on every `RowActions` row rather
+  // than a mirror of the 🗑 beside it. `icon` survives for one caller — the Done
+  // bucket hand-rolls its action line (it needs Reopen where the primary CTA goes)
+  // and is not a `RowActions` row, so its 🗑 was never in the cluster #253 deleted.
+  /**
+   * The row's delete control, in the only two shapes anything renders.
+   *
+   * ⚠️ `fullWidth` is GONE, and the reason is the shape #213 was written against.
+   * Duo's review of `ed4dffb` reported the `icon` option as dead code with no
+   * caller. That is false — `icon: true` is the Done row's resting 🗑
+   * (`delete-done`), the one bucket that hand-rolls its action line instead of
+   * rendering `RowActions`; forcing that branch off reds `sizes every control in
+   * every bucket's action group` and `sizes the ARMED delete confirm, in both
+   * factories that render one`.
+   *
+   * The genuinely inert path was the OTHER one. Every menu caller passed
+   * `fullWidth: true` and the Done row passes `icon: true`, so the default
+   * `fullWidth: false, icon: false` combination had **no caller at all** — and it
+   * was the one shape here that omitted `touchTarget`, so anyone who did reach for
+   * it would have got a sub-44px delete that `expectFullTargets` would then have
+   * caught. An unreachable trap is worse than a reachable one because nothing
+   * exercises it.
+   *
+   * So the resting control is now always the full-width menu entry, leaving exactly
+   * two shapes and no unsized one. `icon` stays because it renders.
+   */
   const deleteControl = (
     itemId: string,
     key: string,
-    {
-      fullWidth = false,
-      icon = false,
-    }: { fullWidth?: boolean; icon?: boolean } = {},
+    { icon = false }: { icon?: boolean } = {},
   ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
@@ -2238,10 +2317,13 @@ export function InboxView({
     ) : (
       <button
         key={key}
-        className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
-        )}
+        // Colours unchanged: muted at rest, `hover:text-foreground` on the accent
+        // background. #253 changed WHERE the resting delete lives, not how it reads.
+        //
+        // Unconditionally the menu-entry shape now: `rowMenuEntry` carries the 44px
+        // floor, and the narrow variant this used to fall back to had no caller and
+        // no `touchTarget`. See the docblock above.
+        className={rowMenuEntry("text-muted-foreground hover:text-foreground")}
         onClick={() => requestDelete(itemId)}
       >
         {t("action.delete", voice)}
@@ -2531,8 +2613,8 @@ export function InboxView({
           both themes and the one the capture notice, focus-timer.tsx and
           shopping-list.tsx already use — not a raw palette shade, which is what
           dropped a confirmation below 4.5:1 in #40. Neither control sets
-          `outline-none`, so the UA focus ring draws and WCAG 2.4.11 is satisfied
-          without a bespoke indicator. */}
+          `outline-none`, so the UA focus ring draws and WCAG 2.4.7 Focus Visible
+          is satisfied without a bespoke indicator. */}
       {writeFailure && (
         <>
           <div
@@ -2550,8 +2632,9 @@ export function InboxView({
               // No `outline-none` here, and `a11y-class-hygiene` is why the first
               // draft had one and this does not: the moment an element can hold
               // focus, suppressing the UA outline leaves it with no visible focus
-              // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
-              // is the whole reason it exists — axe cannot see 2.4.11.
+              // indicator at all — WCAG 2.4.7 Focus Visible, which is AA. The gate
+              // caught it, which is the whole reason it exists: axe implements no
+              // rule for 2.4.7.
               tabIndex={-1}
               className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
             >
@@ -2743,6 +2826,9 @@ export function InboxView({
                           voice={voice}
                           now={now}
                           onBreakdown={() => breakdown(item.id, item.text)}
+                          onMoveToMultiStep={() =>
+                            moveItemToBucket(item.id, "multiStep")
+                          }
                           onKeep={() =>
                             run(
                               () => keepAsTask(item.id),
@@ -2752,13 +2838,6 @@ export function InboxView({
                           }
                           onSaveForLater={() =>
                             moveItemToBucket(item.id, "savedLater")
-                          }
-                          onSnooze={() =>
-                            run(
-                              () => snoozeBrainDumpItem(item.id, 60),
-                              { id: item.id, field: "snooze" },
-                              item.text,
-                            )
                           }
                           onComplete={() =>
                             run(
@@ -2798,31 +2877,8 @@ export function InboxView({
                             ) : null
                           }
                           scheduleError={scheduleErrors[item.id]}
-                          moveMenu={
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
-                          moveIcon={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
                           dragGrip={<DragGrip id={item.id} text={item.text} />}
                           editButton={pencil(item)}
-                          editMenuItem={editMenuItem(item)}
                           titleEditor={
                             editingId === item.id
                               ? titleEditor(item)
@@ -3049,78 +3105,189 @@ export function InboxView({
                                         trigger,
                                       ]
                                 }
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                schedule={schedule}
-                                del={deleteControl(item.id, "delete", {
-                                  icon: true,
-                                })}
-                                menu={[
-                                  <MoveToMenu
-                                    key="move"
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />,
-                                  // Rows with steps: view the broken-down list (inline
-                                  // expand) + jump to the task page to focus a step —
-                                  // above "Mark as completed". Hidden while awaiting.
-                                  !awaitingBreakdown ? (
+                                /* #253 — the same principle and the same shape as the
+                                   Needs-review row's list (see `ItemRow` below for the
+                                   argument): canonical and complete, `Move to…` and
+                                   `Delete` as the bookends, what-you-do-to-the-item in
+                                   between, then the calendar pair, grouped by
+                                   `rowMenuSeparator`.
+
+                                   NOT the same entries, deliberately. This row is
+                                   already broken into steps, so `Break into multi-step
+                                   to-do` and `Add as single-task to-do` are not actions
+                                   it has — and it carries two the review row does not:
+                                   `View multi-step task list` (the inline expander) and
+                                   `Start visual focus timer` (the task page). Those are
+                                   what this row's middle group is, with the inline CTA's
+                                   twin last: `Mark as completed`, or `Break into steps
+                                   now?` while the breakdown has not arrived, which is
+                                   also when the two step-dependent entries have nothing
+                                   to point at. */
+                                menu={groupedRowMenu([
+                                  // ⚠️ The nested `Move to…` picker is gone (see
+                                  // `ItemRow` for the owner's reasoning), and on THIS
+                                  // renderer its destinations were not already covered.
+                                  // The picker offered every bucket but this row's own
+                                  // — needsReview, singleTask, savedLater, completed —
+                                  // and only `completed` had an entry (`Mark as
+                                  // completed`, below). So three explicit destination
+                                  // entries replace it, each dispatched through
+                                  // `moveItemToBucket`, which is byte-for-byte what the
+                                  // picker's `onMove` did: same `dropPlan`, same no-op
+                                  // guard, same `role="status"` announcement (#163/#225).
+                                  //
+                                  // Deleting the picker without these would have
+                                  // stripped three routes from this row and left drag
+                                  // as the only way out of Multi-step.
+                                  [
                                     <button
-                                      key="view-list-m"
+                                      key="review-m"
                                       type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      className={rowMenuEntry()}
                                       onClick={() =>
-                                        setExpandedId(expanded ? null : item.id)
+                                        moveItemToBucket(item.id, "needsReview")
                                       }
                                     >
-                                      View multi-step task list
-                                    </button>
-                                  ) : null,
-                                  !awaitingBreakdown ? (
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
+                                    // ⚠️ `moveItemToBucket` here, NOT `keepAsTask` as on
+                                    // the Needs-review row: this entry replaces
+                                    // `Move to… → Single-task`, so it keeps that path's
+                                    // exact behaviour (`triage`). Both land the row in
+                                    // the same bucket, which is what the shared label
+                                    // names; `keepAsTask` additionally materialises the
+                                    // `Task`. Unifying the two is #259/#213 territory,
+                                    // not a menu-layout change.
+                                    //
+                                    // ⚠️⚠️ AWAITING ROWS ONLY, and this is a bug fix
+                                    // rather than a layout choice. On a row that HAS
+                                    // steps this entry never worked: `triage` clears
+                                    // `breakdownRequestedAt`, but `bucketItems` keeps
+                                    // the row in Multi-step on `stepsTotal > 1` alone
+                                    // (`bucket.ts`), so the row does not move — while
+                                    // `moveItemToBucket` still fired
+                                    // `movedAnnouncement`, telling a screen-reader
+                                    // user it had landed in Single-task. A dead
+                                    // option that lied about its own outcome, against
+                                    // that function's stated invariant.
+                                    //
+                                    // On an awaiting row it is the whole point:
+                                    // `awaitsBreakdown` is `stepsTotal === 0 &&
+                                    // breakdownRequestedAt != null`, so clearing the
+                                    // stamp genuinely moves the row out. Hence the
+                                    // gate is `awaitingBreakdown`, not `true` and not
+                                    // `stepsTotal === 0` — the latter would also catch
+                                    // a stepless row with no stamp, which is not in
+                                    // this bucket at all.
+                                    awaitingBreakdown ? (
+                                      <button
+                                        key="single-m"
+                                        type="button"
+                                        className={rowMenuEntry()}
+                                        onClick={() =>
+                                          moveItemToBucket(
+                                            item.id,
+                                            "singleTask",
+                                          )
+                                        }
+                                      >
+                                        {t("action.addTodoFull", voice)}
+                                      </button>
+                                    ) : null,
                                     <button
-                                      key="focus-list-m"
+                                      key="save-m"
                                       type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      // Guard rather than assert: a multi-step row's Task always
-                                      // exists by construction, but a data inconsistency must not
-                                      // navigate to `/tasks/null` (Duo review).
+                                      className={rowMenuEntry()}
                                       onClick={() =>
-                                        item.taskId &&
-                                        router.push(`/tasks/${item.taskId}`)
+                                        moveItemToBucket(item.id, "savedLater")
                                       }
                                     >
-                                      Start visual focus timer
-                                    </button>
-                                  ) : null,
-                                  awaitingBreakdown ? (
-                                    <button
-                                      key="break-now-m"
-                                      type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      onClick={() =>
-                                        breakdown(item.id, item.text)
-                                      }
-                                    >
-                                      {t("prompt.breakNow", voice)}
-                                    </button>
-                                  ) : (
+                                      {t("action.saveForLater", voice)}
+                                    </button>,
+                                  ],
+                                  [
+                                    // Rows with steps: view the broken-down list (inline
+                                    // expand) + jump to the task page to focus a step.
+                                    // Hidden while awaiting a breakdown, which is also
+                                    // when this row's inline CTA becomes Break now.
+                                    !awaitingBreakdown ? (
+                                      <button
+                                        key="view-list-m"
+                                        type="button"
+                                        className={rowMenuEntry()}
+                                        onClick={() =>
+                                          setExpandedId(
+                                            expanded ? null : item.id,
+                                          )
+                                        }
+                                      >
+                                        View multi-step task list
+                                      </button>
+                                    ) : null,
+                                    !awaitingBreakdown ? (
+                                      <button
+                                        key="focus-list-m"
+                                        type="button"
+                                        className={rowMenuEntry()}
+                                        // Guard rather than assert: a multi-step row's Task always
+                                        // exists by construction, but a data inconsistency must not
+                                        // navigate to `/tasks/null` (Duo review).
+                                        onClick={() =>
+                                          item.taskId &&
+                                          router.push(`/tasks/${item.taskId}`)
+                                        }
+                                      >
+                                        {t("action.startFocusTimer", voice)}
+                                      </button>
+                                    ) : null,
+                                    // The inline red CTA's twin, in the awaiting
+                                    // state only — that is the state it names.
+                                    //
+                                    // ⚠️ `action.breakNow`, NOT `prompt.breakNow`.
+                                    // The two were one key until #253 F1 split them:
+                                    // a menu entry is a command, so this reads as an
+                                    // imperative that names where it takes you
+                                    // ("Break down in the editor"), while the
+                                    // card's red button keeps "Break into steps
+                                    // now?" — a question is the right register on a
+                                    // card, and it is the only thing that visually
+                                    // marks an unbroken-down one. Owner's call on
+                                    // both halves. Same key as the Needs-review
+                                    // row's navigating entry, because it is the same
+                                    // act: `startBreakdown`, into the editor.
+                                    awaitingBreakdown ? (
+                                      <button
+                                        key="break-now-m"
+                                        type="button"
+                                        className={rowMenuEntry()}
+                                        onClick={() =>
+                                          breakdown(item.id, item.text)
+                                        }
+                                      >
+                                        {t("action.breakNow", voice)}
+                                      </button>
+                                    ) : null,
+                                    // ⚠️ UNCONDITIONAL, and it used to be the else
+                                    // branch of the ternary above. Everything else
+                                    // this state suppresses is suppressed for a
+                                    // reason to do with steps — `view-list-m` and
+                                    // `focus-list-m` have nothing to point at, and
+                                    // the inline cluster collapses to the single red
+                                    // CTA. Complete was the fourth casualty and the
+                                    // only one with no such reason.
+                                    //
+                                    // With the nested picker gone (it offered
+                                    // `completed` from this row) that left an
+                                    // awaiting row with NO route to complete: not in
+                                    // the ▾, not inline. Reachable in one ordinary
+                                    // sequence — drag an item into Multi-step, then
+                                    // realise you already did it — and the only way
+                                    // out was to request a breakdown you do not want
+                                    // in order to reach a Complete you do.
                                     <button
                                       key="complete-m"
                                       type="button"
-                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      className={rowMenuEntry()}
                                       onClick={() =>
                                         run(
                                           () => completeItem(item.id),
@@ -3130,32 +3297,31 @@ export function InboxView({
                                       }
                                     >
                                       {t("action.completeFull", voice)}
-                                    </button>
-                                  ),
-                                  schedule ? (
-                                    <ScheduleControl
-                                      key="schedule-m"
-                                      {...schedule}
-                                      variant="menu"
-                                      label={scheduleMenuLabel(
-                                        schedule.state,
-                                        voice,
-                                      )}
-                                    />
-                                  ) : null,
-                                  effectiveGoogle ? (
-                                    <ScheduleControl
-                                      key="ics-m"
-                                      variant="menu"
-                                      {...icsProps(item)}
-                                      label={t("action.addToCalendar", voice)}
-                                    />
-                                  ) : null,
-                                  editMenuItem(item),
-                                  deleteControl(item.id, "delete-m", {
-                                    fullWidth: true,
-                                  }),
-                                ]}
+                                    </button>,
+                                  ],
+                                  [
+                                    schedule ? (
+                                      <ScheduleControl
+                                        key="schedule-m"
+                                        {...schedule}
+                                        variant="menu"
+                                        label={scheduleMenuLabel(
+                                          schedule.state,
+                                          voice,
+                                        )}
+                                      />
+                                    ) : null,
+                                    effectiveGoogle ? (
+                                      <ScheduleControl
+                                        key="ics-m"
+                                        variant="menu"
+                                        {...icsProps(item)}
+                                        label={t("action.addToCalendar", voice)}
+                                      />
+                                    ) : null,
+                                  ],
+                                  [deleteControl(item.id, "delete-m")],
+                                ])}
                               />
                               {scheduleErrors[item.id] && (
                                 <p className="text-destructive mt-1 text-xs">
@@ -3301,79 +3467,117 @@ export function InboxView({
                                   />,
                                   trigger,
                                 ]}
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                schedule={schedule}
-                                del={deleteControl(item.id, "delete", {
-                                  icon: true,
-                                })}
-                                menu={[
-                                  <MoveToMenu
-                                    key="move"
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />,
-                                  <button
-                                    key="focus-m"
-                                    type="button"
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() =>
-                                      focusOnItem(item.id, item.text)
-                                    }
-                                  >
-                                    Start visual focus timer
-                                  </button>,
-                                  <button
-                                    key="complete-m"
-                                    type="button"
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() =>
-                                      run(
-                                        () => completeItem(item.id),
-                                        { id: item.id, field: "done" },
-                                        item.text,
-                                      )
-                                    }
-                                  >
-                                    {t("action.completeFull", voice)}
-                                  </button>,
-                                  schedule ? (
-                                    <ScheduleControl
-                                      key="schedule-m"
-                                      {...schedule}
-                                      variant="menu"
-                                      label={scheduleMenuLabel(
-                                        schedule.state,
-                                        voice,
-                                      )}
-                                    />
-                                  ) : null,
-                                  effectiveGoogle ? (
-                                    <ScheduleControl
-                                      key="ics-m"
-                                      variant="menu"
-                                      {...icsProps(item)}
-                                      label={t("action.addToCalendar", voice)}
-                                    />
-                                  ) : null,
-                                  editMenuItem(item),
-                                  deleteControl(item.id, "delete-m", {
-                                    fullWidth: true,
-                                  }),
-                                ]}
+                                /* #253 — canonical and complete, same bookends and
+                                   grouping as every other ▾ list on the board. The two
+                                   middle entries are the full-label twins of this row's
+                                   inline `▶ Start Focus` and `Complete`; they were
+                                   deleted mid-issue as duplicates and are back, because
+                                   the list is the place a person is entitled to find
+                                   everything. `focusOnItem(item.id, item.text)` really
+                                   is the identical expression in both places, and that
+                                   is now the point rather than the objection.
+
+                                   Not `Add as multi-step to-do` / `Add as
+                                   single-task to-do`: this row IS the single-task
+                                   bucket, so one is what it already is and the other is
+                                   reached by `Move to… → Multi-step`. */
+                                menu={groupedRowMenu([
+                                  // The picker's destinations, explicit (see the
+                                  // multi-step row above for the full reasoning). It
+                                  // offered needsReview, multiStep, savedLater and
+                                  // completed here; only `completed` had an entry, so
+                                  // three are added, all through `moveItemToBucket` so
+                                  // the behaviour is identical to the picker's.
+                                  //
+                                  // ⚠️ `Add as multi-step to-do` on THIS row parks
+                                  // the item in Multi-step with a "Break into steps
+                                  // now?" CTA (`requestBreakdown`) — what
+                                  // `Move to… → Multi-step` always did here. On the
+                                  // Needs-review row the same label navigates into the
+                                  // breakdown editor (`startBreakdown`). Same
+                                  // destination bucket, different next step, and the
+                                  // difference predates this change.
+                                  [
+                                    <button
+                                      key="review-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "needsReview")
+                                      }
+                                    >
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
+                                    <button
+                                      key="multi-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "multiStep")
+                                      }
+                                    >
+                                      {t("action.breakdownFull", voice)}
+                                    </button>,
+                                    <button
+                                      key="save-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "savedLater")
+                                      }
+                                    >
+                                      {t("action.saveForLater", voice)}
+                                    </button>,
+                                  ],
+                                  [
+                                    <button
+                                      key="focus-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        focusOnItem(item.id, item.text)
+                                      }
+                                    >
+                                      {t("action.startFocusTimer", voice)}
+                                    </button>,
+                                    <button
+                                      key="complete-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        run(
+                                          () => completeItem(item.id),
+                                          { id: item.id, field: "done" },
+                                          item.text,
+                                        )
+                                      }
+                                    >
+                                      {t("action.completeFull", voice)}
+                                    </button>,
+                                  ],
+                                  [
+                                    schedule ? (
+                                      <ScheduleControl
+                                        key="schedule-m"
+                                        {...schedule}
+                                        variant="menu"
+                                        label={scheduleMenuLabel(
+                                          schedule.state,
+                                          voice,
+                                        )}
+                                      />
+                                    ) : null,
+                                    effectiveGoogle ? (
+                                      <ScheduleControl
+                                        key="ics-m"
+                                        variant="menu"
+                                        {...icsProps(item)}
+                                        label={t("action.addToCalendar", voice)}
+                                      />
+                                    ) : null,
+                                  ],
+                                  [deleteControl(item.id, "delete-m")],
+                                ])}
                               />
                               {scheduleErrors[item.id] && (
                                 <p className="text-destructive mt-1 text-xs">
@@ -3488,24 +3692,20 @@ export function InboxView({
                                   >
                                     {t("action.breakdown", voice)} →
                                   </button>,
-                                  <button
-                                    key="keep"
-                                    className={cn(
-                                      touchTarget,
-                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                                    )}
-                                    onClick={() =>
-                                      run(
-                                        () => keepAsTask(item.id),
-                                        { id: item.id, field: "triage" },
-                                        item.text,
-                                      )
-                                    }
-                                  >
-                                    {t("action.addTodo", voice)}
-                                  </button>,
+                                  // #253 — Add to-do left the row for the ▾ list, so
+                                  // this frame is the same four as every other bucket:
+                                  // main CTA, Save, Complete, Note.
                                   <button
                                     key="save"
+                                    // Named by its visible text — see the same button
+                                    // on the Needs-review row for why #253's earlier
+                                    // `aria-label` of the full label came back off. In
+                                    // short: the ▾ entry carrying those exact words is
+                                    // restored, and two controls in one row answering to
+                                    // "Save for later" is an ambiguous voice-control
+                                    // target and an unqueryable row. `title` keeps the
+                                    // full wording on hover without entering the name.
+                                    title={t("action.saveForLater", voice)}
                                     className={cn(
                                       touchTarget,
                                       "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
@@ -3536,84 +3736,91 @@ export function InboxView({
                                   // settled for every list row.
                                   trigger,
                                 ]}
-                                move={
-                                  <MoveToMenu
-                                    key="move-icon"
-                                    compact
-                                    describedById={moveInstructionsId}
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />
-                                }
-                                del={deleteControl(item.id, "delete-saved", {
-                                  icon: true,
-                                })}
-                                menu={[
-                                  <MoveToMenu
-                                    key="move"
-                                    currentBucket={bucketOfItem(item, now)}
-                                    voice={voice}
-                                    onMove={(target) =>
-                                      moveItemToBucket(item.id, target)
-                                    }
-                                  />,
-                                  <button
-                                    key="breakdown-m"
-                                    onClick={() =>
-                                      breakdown(item.id, item.text)
-                                    }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.breakdownFull", voice)}
-                                  </button>,
-                                  <button
-                                    key="keep-m"
-                                    onClick={() =>
-                                      run(
-                                        () => keepAsTask(item.id),
-                                        { id: item.id, field: "triage" },
-                                        item.text,
-                                      )
-                                    }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.addTodoFull", voice)}
-                                  </button>,
-                                  <button
-                                    key="save-m"
-                                    onClick={() => {
-                                      setSavedOptionsId(null);
-                                      run(
-                                        () => snoozeBrainDumpItem(item.id, 60),
-                                        { id: item.id, field: "snooze" },
-                                        item.text,
-                                      );
-                                    }}
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.saveForLater", voice)}
-                                  </button>,
-                                  <button
-                                    key="complete-m"
-                                    onClick={() =>
-                                      run(
-                                        () => completeItem(item.id),
-                                        { id: item.id, field: "done" },
-                                        item.text,
-                                      )
-                                    }
-                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                  >
-                                    {t("action.completeFull", voice)}
-                                  </button>,
-                                  editMenuItem(item),
-                                  deleteControl(item.id, "delete-saved-m", {
-                                    fullWidth: true,
-                                  }),
-                                ]}
+                                /* #253 — the review frame a parked row reveals, so it
+                                   carries the Needs-review row's list minus the two it
+                                   has no route to: there is no Schedule or .ics control
+                                   on a saved row, and there never was.
+
+                                   `Save for later` here is the RE-snooze — the same
+                                   `snoozeBrainDumpItem(id, 60)` as the inline `Save`
+                                   beside it, which also puts the row back to sleep. It
+                                   was dropped mid-issue for being that duplicate and is
+                                   back for the same reason the others are: this list is
+                                   the row's canonical set, and a person looking for
+                                   "park it again" should not have to know that the short
+                                   button above means that. */
+                                menu={groupedRowMenu([
+                                  // The picker offered needsReview, multiStep,
+                                  // singleTask and completed here, and the review
+                                  // frame's own four entries below already cover three
+                                  // of them. Only `needsReview` needed adding — the
+                                  // row's way back out of the pantry to be re-triaged.
+                                  [
+                                    <button
+                                      key="review-m"
+                                      type="button"
+                                      className={rowMenuEntry()}
+                                      onClick={() =>
+                                        moveItemToBucket(item.id, "needsReview")
+                                      }
+                                    >
+                                      {t("action.sendToReview", voice)}
+                                    </button>,
+                                  ],
+                                  [
+                                    <button
+                                      key="breakdown-m"
+                                      onClick={() =>
+                                        breakdown(item.id, item.text)
+                                      }
+                                      className={rowMenuEntry()}
+                                    >
+                                      {t("action.breakdownFull", voice)}
+                                    </button>,
+                                    <button
+                                      key="keep-m"
+                                      onClick={() =>
+                                        run(
+                                          () => keepAsTask(item.id),
+                                          { id: item.id, field: "triage" },
+                                          item.text,
+                                        )
+                                      }
+                                      className={rowMenuEntry()}
+                                    >
+                                      {t("action.addTodoFull", voice)}
+                                    </button>,
+                                    <button
+                                      key="save-m"
+                                      onClick={() => {
+                                        setSavedOptionsId(null);
+                                        run(
+                                          () =>
+                                            snoozeBrainDumpItem(item.id, 60),
+                                          { id: item.id, field: "snooze" },
+                                          item.text,
+                                        );
+                                      }}
+                                      className={rowMenuEntry()}
+                                    >
+                                      {t("action.saveForLater", voice)}
+                                    </button>,
+                                    <button
+                                      key="complete-m"
+                                      onClick={() =>
+                                        run(
+                                          () => completeItem(item.id),
+                                          { id: item.id, field: "done" },
+                                          item.text,
+                                        )
+                                      }
+                                      className={rowMenuEntry()}
+                                    >
+                                      {t("action.completeFull", voice)}
+                                    </button>,
+                                  ],
+                                  [deleteControl(item.id, "delete-saved-m")],
+                                ])}
                               />
                             ) : (
                               <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
@@ -3632,9 +3839,14 @@ export function InboxView({
                                 </button>
                                 <span className="flex-1" />
                                 <MoveToMenu
-                                  compact
                                   describedById={moveInstructionsId}
                                   currentBucket={bucketOfItem(item, now)}
+                                  // #253 — suppresses the Single-task target for an
+                                  // item carrying 2+ steps, which `triage` cannot
+                                  // move there. A saved item CAN carry steps: it
+                                  // arrives via Send back to review, which retains
+                                  // the Task, then Save for later.
+                                  stepsTotal={item.stepsTotal}
                                   voice={voice}
                                   onMove={(target) =>
                                     moveItemToBucket(item.id, target)
@@ -3758,9 +3970,17 @@ export function InboxView({
                           </button>
                           <span className="flex-1" />
                           <MoveToMenu
-                            compact
                             describedById={moveInstructionsId}
                             currentBucket={bucketOfItem(item, now)}
+                            // #253 — same suppression, and this row is the MORE
+                            // reachable of the two: completing a multi-step task
+                            // puts it here with its steps intact, so Single-task is
+                            // two presses away rather than four. `dropPlan` sets
+                            // `reopenFirst` for a completed source, and `reopenItem`
+                            // guarantees ≥1 not-done step — so after the reopen the
+                            // item is triaged with `stepsTotal > 1` and lands in
+                            // Multi-step, never Single-task.
+                            stepsTotal={item.stepsTotal}
                             voice={voice}
                             onMove={(target) =>
                               moveItemToBucket(item.id, target)
@@ -4168,9 +4388,9 @@ function ItemRow({
   now,
   isDragging,
   onBreakdown,
+  onMoveToMultiStep,
   onKeep,
   onSaveForLater,
-  onSnooze,
   onComplete,
   confirmingDelete,
   onRequestDelete,
@@ -4182,11 +4402,8 @@ function ItemRow({
   scheduled = false,
   icsMenu,
   scheduleError,
-  moveMenu,
-  moveIcon,
   dragGrip,
   editButton,
-  editMenuItem,
   titleEditor,
   noteTrigger,
   noteBody,
@@ -4196,14 +4413,36 @@ function ItemRow({
   voice: Voice;
   now: number;
   isDragging?: boolean;
+  /** `startBreakdown` — creates the Task and NAVIGATES to the breakdown screen.
+   * Labelled `action.breakNow` ("Break into steps"), an imperative because a menu
+   * entry is a command; the card's inline red CTA keeps the question mark. */
   onBreakdown: () => void;
+  /** #253 F1 — PARK the item in Multi-step without navigating, through
+   * `moveItemToBucket(id, "multiStep")` and nothing else, so `dropPlan`, the no-op
+   * guard, the `{ field: "move" }` retry grain and `movedAnnouncement` stay
+   * byte-identical to the drag path.
+   *
+   * This row previously had **no** route to Multi-step at all. Its
+   * `action.breakdownFull` entry was wired to `onBreakdown`, and `startBreakdown`
+   * writes `Triaged` + `triagedAt` and never `breakdownRequestedAt` — so
+   * `bucketOfItem` landed the item in **singleTask** while the label named
+   * Multi-step. With this row's 📥 deleted by #253, a pointer drag was the only
+   * honest route, and `drag-announce.ts` states in the repo's own words that the
+   * menu is not a fallback for dragging but *is* the keyboard and
+   * assistive-technology path (WCAG 2.1.1, 2.5.7) — so this was an accessibility
+   * gap, not a cosmetic one.
+   *
+   * Both entries are offered because they are different acts, not two spellings of
+   * one: parking rests the item in Multi-step indefinitely (nothing reaps
+   * `breakdownRequestedAt`), breaking down now opens the editor. */
+  onMoveToMultiStep: () => void;
   onKeep: () => void;
   /** "Save for later" — a direct MOVE to the Saved bucket, dispatched through
-   * the same `moveItemToBucket` path drag and MoveToMenu use. */
+   * the same `moveItemToBucket` path drag and MoveToMenu use. #253 removed this
+   * row's separate `onSnooze` prop rather than leaving it accepting a handler
+   * nothing renders: it dispatched the same `snoozeBrainDumpItem(id, 60)` this
+   * one reaches through `dropPlan`, so it was a second route to one write. */
   onSaveForLater: () => void;
-  /** "Snooze 1h" (▾-menu only) — the literal-duration snooze action, kept
-   * SEPARATE from the Save-for-later bucket move. */
-  onSnooze: () => void;
   onComplete: () => void;
   confirmingDelete: boolean;
   onRequestDelete: () => void;
@@ -4218,13 +4457,8 @@ function ItemRow({
    *  mirror. Null for guests (whose primary control is already the ICS one). */
   icsMenu?: React.ReactNode;
   scheduleError?: string;
-  moveMenu?: React.ReactNode;
-  /** v6: 📥 Move-to icon for the end cluster (compact MoveToMenu). */
-  moveIcon?: React.ReactNode;
   dragGrip?: React.ReactNode;
   editButton?: React.ReactNode;
-  /** v6: "Edit task title" text entry for the ▾ dropdown (title line keeps editButton). */
-  editMenuItem?: React.ReactNode;
   titleEditor?: React.ReactNode;
   /** #186 — the note disclosure's two halves, from the `TaskNoteRow` this row is
    *  wrapped in. The trigger joins the action group; the body opens below it. */
@@ -4247,12 +4481,17 @@ function ItemRow({
     settings,
     now,
   );
-  // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
-  // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
-  const deleteControl = (
-    key: string,
-    { fullWidth = false, icon = false } = {},
-  ) =>
+  // ⚠️ `ItemRow`'s OWN delete factory — a different function from `InboxView`'s
+  // `deleteControl(itemId, key, opts)` above, which still has a live `icon` branch
+  // for the Done row. Distinguishable by arity: this one takes a key alone.
+  //
+  // #253 — one resting shape, not two. THIS factory had an `icon` variant for the
+  // end cluster and a full-width one for the ▾ list, both driven by the same
+  // `confirmingDelete`; the cluster is gone, so the ▾ entry is the route and
+  // **this** factory's `icon` branch had no caller left. `rowMenuEntry` keeps it at
+  // 44px, which the old mirror-only entry never was — it did not need to be while a
+  // 44px 🗑 sat beside it.
+  const deleteControl = (key: string) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
         {/* #251 review — the FOURTH copy of the armed confirm, and the last one
@@ -4290,29 +4529,12 @@ function ItemRow({
           {t("action.cancel", voice)}
         </button>
       </span>
-    ) : icon ? (
-      <button
-        key={key}
-        aria-label={t("action.delete", voice)}
-        title={t("action.delete", voice)}
-        className={cn(
-          // End-cluster icon — ghost hover + a slightly bigger glyph, same
-          // treatment as 📅/▾/📥 (owner: mobile icons read too tiny). Also
-          // picks up the ≥44px touchTarget this variant was missing.
-          "text-muted-foreground hover:bg-accent hover:text-destructive rounded-md px-2 py-1 text-sm",
-          touchTarget,
-        )}
-        onClick={onRequestDelete}
-      >
-        🗑
-      </button>
     ) : (
       <button
         key={key}
-        className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
-          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
-        )}
+        // Colours unchanged from the ▾ entry this replaces: muted at rest,
+        // `hover:text-foreground` on the accent background.
+        className={rowMenuEntry("text-muted-foreground hover:text-foreground")}
         onClick={onRequestDelete}
       >
         {t("action.delete", voice)}
@@ -4397,19 +4619,26 @@ function ItemRow({
               >
                 {t("action.breakdown", voice)} →
               </button>,
-              <button
-                key="keep"
-                onClick={onKeep}
-                className={cn(
-                  touchTarget,
-                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                )}
-              >
-                {t("action.addTodo", voice)}
-              </button>,
+              // #253 — Add to-do left the row for the ▾ list. Four inline actions
+              // remain, and they are the four every bucket sharing this shape now
+              // shows: main CTA, Save, Complete, Note.
               <button
                 key="save-for-later"
                 onClick={onSaveForLater}
+                // Named by its visible text. An earlier pass in #253 gave this an
+                // `aria-label` of the full "Save for later", to compensate for
+                // dropping the ▾ entry that carried those words — and that entry is
+                // back, because the ▾ list is the row's CANONICAL list and the
+                // inline bar a shortcut subset of it. So the compensation is not
+                // only unnecessary, it was actively wrong: it put two controls
+                // answering to "Save for later" in one row, which is an ambiguous
+                // target for voice control (WCAG 2.5.3's neighbourhood) and breaks
+                // every row-scoped query for either of them.
+                //
+                // `title` stays. It does not enter the accessible name while
+                // visible text is present, so it adds the full wording on hover
+                // without creating the collision.
+                title={t("action.saveForLater", voice)}
                 className={cn(
                   touchTarget,
                   "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
@@ -4427,63 +4656,118 @@ function ItemRow({
               // item's id, which `RowActions` renders as nothing.
               noteTrigger,
             ]}
-            move={moveIcon}
-            schedule={schedule}
             scheduled={scheduled}
-            del={deleteControl("delete", { icon: true })}
-            menu={[
-              moveMenu,
-              <button
-                key="breakdown-m"
-                onClick={onBreakdown}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.breakdownFull", voice)}
-              </button>,
-              <button
-                key="keep-m"
-                onClick={onKeep}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.addTodoFull", voice)}
-              </button>,
-              <button
-                key="save-for-later-m"
-                onClick={onSaveForLater}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.saveForLater", voice)}
-              </button>,
-              <button
-                key="complete-m"
-                onClick={onComplete}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                {t("action.completeFull", voice)}
-              </button>,
-              // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
-              // "Save for later": snooze is the literal 1-hour timer
-              // (snoozeBrainDumpItem), Save for later is a direct move to the
-              // Saved bucket via the shared moveItemToBucket dispatcher.
-              <button
-                key="snooze-m"
-                onClick={onSnooze}
-                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-              >
-                Snooze 1h
-              </button>,
-              schedule ? (
-                <ScheduleControl
-                  key="schedule-m"
-                  {...schedule}
-                  variant="menu"
-                  label={scheduleMenuLabel(schedule.state, voice)}
-                />
-              ) : null,
-              icsMenu,
-              editMenuItem,
-              deleteControl("delete-m", { fullWidth: true }),
-            ]}
+            /* ── The ▾ list, #253's second half ──────────────────────────────
+
+               THE PRINCIPLE, and it is the owner's: **the ▾ list is the canonical,
+               complete list of a row's actions; the inline bar is a shortcut subset
+               of it.** An earlier pass in this issue deleted every entry that
+               mirrored an inline button, on the theory that a duplicate is clutter.
+               It is withdrawn. #253 is a complaint about the ROW'S HEIGHT, and this
+               list lives behind a trigger — its length costs no vertical space on
+               the card, so tidying it bought nothing and cost the one place that can
+               be relied on to hold everything. Four entries came back here:
+               `action.breakdownFull`, `action.addTodoFull`, `action.saveForLater` and
+               `action.completeFull`.
+
+               ⚠️ **The nested `Move to…` picker is GONE, and this list is why.**
+               The owner's observation on seeing it rendered: the four entries below
+               ARE the buckets — `Add as multi-step to-do` → Multi-step,
+               `Add as single-task to-do` → Single-task, `Save for later` → Saved,
+               `Mark as completed` → Completed — so a submenu offering the same four
+               was a second route to the same places, one tap deeper, and the only
+               nested popup left in the list. Verified against `ACTION_FOR_BUCKET`
+               (move-dispatch.ts) rather than assumed: it maps five buckets, the
+               picker offered every bucket but this row's own, and those four are
+               exactly the four it offered here. The fifth, `needsReview`, is this
+               row's own bucket, so the picker never offered it and nothing is lost.
+               Coverage on the other three renderers was NOT complete — see each of
+               their menus for the entries added there.
+
+               Drag is untouched, and `ACTION_FOR_BUCKET` / `dropPlan` stay: only the
+               menu entry went. `MoveToMenu` itself is still rendered by the two
+               compact inline 📥 controls (the idle Saved row and the Done row), so it
+               is not orphaned.
+
+               THE ORDER is the owner's. `Delete` is the destructive answer and stays
+               last; the actions that reshape the item come first, in the order they
+               escalate — break it up, keep it whole, park it, finish it — then the
+               calendar pair. Groups are drawn with `rowMenuSeparator`, because
+               sequence alone did not give the column any rhythm to read by.
+
+               ⚠️ `Snooze 1h` is GONE from this list, by the owner's decision, and it
+               is worth recording that this file's own long-standing note about it was
+               half wrong. The note said snooze "is a SEPARATE action from Save for
+               later" — the literal one-hour timer versus a bucket move — and treated
+               collapsing them as a regression. Only the PATH differed. `dropPlan`'s
+               `ACTION_FOR_BUCKET.savedLater` is `"snooze"` (move-dispatch.ts:15), so
+               `moveItemToBucket(id, "savedLater")` runs the identical
+               `snoozeBrainDumpItem(id, 60)` that entry ran; what the entry actually
+               skipped was the dispatcher's no-op guard and its `role="status"` move
+               announcement (#163/#225), which makes it the WORSE of the two routes for
+               a screen-reader user. Nothing became unreachable: `Save for later` here,
+               the inline `Save`, `Move to… → Saved for later`, a drag onto that bucket
+               and the library bulk bar all still write it. */
+            menu={groupedRowMenu([
+              [
+                // #253 F1 — the two break-up entries. FIRST is the navigating one,
+                // deliberately: it is what this slot did before F1, so
+                // behaviour-by-position is preserved and a user who reached for the
+                // first entry still lands in the editor. Only its LABEL changed
+                // (`action.breakdownFull` → `action.breakNow`), because the old one
+                // named a bucket this action does not produce.
+                <button
+                  key="break-now-m"
+                  onClick={onBreakdown}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.breakNow", voice)}
+                </button>,
+                // SECOND is the park, which this row did not have at all. Same label
+                // as the Single-task row's Multi-step entry, since both land the
+                // item in the same bucket by the same dispatcher.
+                <button
+                  key="multi-m"
+                  onClick={onMoveToMultiStep}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.breakdownFull", voice)}
+                </button>,
+                <button
+                  key="keep-m"
+                  onClick={onKeep}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.addTodoFull", voice)}
+                </button>,
+                <button
+                  key="save-for-later-m"
+                  onClick={onSaveForLater}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.saveForLater", voice)}
+                </button>,
+                <button
+                  key="complete-m"
+                  onClick={onComplete}
+                  className={rowMenuEntry()}
+                >
+                  {t("action.completeFull", voice)}
+                </button>,
+              ],
+              [
+                schedule ? (
+                  <ScheduleControl
+                    key="schedule-m"
+                    {...schedule}
+                    variant="menu"
+                    label={scheduleMenuLabel(schedule.state, voice)}
+                  />
+                ) : null,
+                icsMenu,
+              ],
+              [deleteControl("delete-m")],
+            ])}
           />
           {scheduleError && (
             <p className="text-destructive mt-1 text-xs">{scheduleError}</p>

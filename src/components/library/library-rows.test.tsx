@@ -6,6 +6,7 @@ import {
   cleanup,
   fireEvent,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LibraryRows } from "@/components/library/library-rows";
@@ -108,11 +109,124 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
 
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("plated-1"));
     expect(refresh).toHaveBeenCalled();
   });
+
+  /**
+   * #253 — the ▾ is this row's CANONICAL action list, and this spec exists because
+   * nothing here asserted its contents at all: a mid-issue pass reduced the list to
+   * `[delete]` alone and the whole suite stayed green.
+   *
+   * The owner's principle is that the ▾ holds everything a row can do and the inline
+   * bar is a shortcut subset of it — so both twins are restored, and this is asserted
+   * as an exact ordered list because completeness is the claim.
+   *
+   * DERIVED for this surface rather than copied from the inbox's eight, and the three
+   * absences are asserted too, so a later "consistency" pass cannot quietly add
+   * capability this surface has no plumbing for:
+   *   • no `Move to…` — there is no bucket-move dispatcher on this page at all;
+   *   • no `Add as multi-step to-do` / `Add as single-task to-do` — both tabs are
+   *     already triaged, so one names what the row is and the other has no handler;
+   *   • no `Edit time estimate` — `EstimateEditor` is a permanently-visible 44px
+   *     control on the row's meta line, so a ▾ twin would be the `editMenuItem`
+   *     mirror the owner had removed. (`task-steps.tsx` keeps its estimate entry
+   *     because there the estimate is a plain `<span>` and the entry is the only
+   *     route — same test, opposite answer, which is what makes it a test.)
+   */
+  it.each(["plated", "pantry"] as const)(
+    "%s: the ▾ is the row's canonical actions, in order, grouped, all 44px",
+    async (tab) => {
+      const user = userEvent.setup();
+      render(
+        <LibraryRows
+          items={[makeItem({ id: "row-1" })]}
+          tab={tab}
+          voice="plain"
+          now={NOW}
+          settings={settings}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "All options" }));
+      const popup = screen.getByRole("dialog", { name: "All options" });
+      const entries = within(popup).getAllByRole("button");
+      expect(entries.map((b) => b.textContent)).toEqual([
+        "Start visual focus timer",
+        "Mark as completed",
+        "Delete",
+      ]);
+      for (const entry of entries) {
+        expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+      }
+      // One rule, before the destructive entry — decoration, so it has no role and
+      // cannot be announced or counted as an entry.
+      expect(
+        popup.querySelectorAll(":scope > [aria-hidden='true']"),
+      ).toHaveLength(1);
+      for (const absent of [
+        "Move to…",
+        "Add as multi-step to-do",
+        "Add as single-task to-do",
+        "Edit time estimate",
+      ]) {
+        expect(
+          within(popup).queryByText(absent),
+          `"${absent}" arrived on a library row without the plumbing for it`,
+        ).toBeNull();
+      }
+    },
+  );
+
+  // Both restored twins dispatch, asserted independently of their inline siblings:
+  // "the inline button works" is not evidence that the entry does, and a duplicate
+  // wired to nothing is exactly what a restore can get wrong.
+  it("the ▾ 'Start visual focus timer' entry ensures a focus step", async () => {
+    const user = userEvent.setup();
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValueOnce("st-9");
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "row-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(
+      screen.getByRole("button", { name: "Start visual focus timer" }),
+    );
+    await waitFor(() => expect(ensureFocusStep).toHaveBeenCalledWith("row-1"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/st-9"));
+  });
+
+  it("the ▾ 'Mark as completed' entry completes the item and refreshes", async () => {
+    const user = userEvent.setup();
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "row-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(screen.getByRole("button", { name: "Mark as completed" }));
+    await waitFor(() => expect(completeItem).toHaveBeenCalledWith("row-1"));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  // #253 — Delete is reached from the ▾ list. The inline 🗑 went with the trailing
+  // icon cluster, and the list entry (which was already there as a mirror) is now
+  // the route. The two-step confirm itself is unchanged, and the ARMED pair still
+  // renders in the ▾ popup where the entry was.
+  const armDelete = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+  };
 
   it("Delete is a two-step confirm (first tap arms, second tap deletes)", async () => {
     const user = userEvent.setup();
@@ -127,7 +241,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     );
 
     // First tap: arms the confirm — nothing deleted yet, Cancel now visible.
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await armDelete(user);
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 
@@ -150,11 +264,11 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await armDelete(user);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
-    // Back to the armed-again state: the 🗑 Delete control is present once more.
+    // Back to the resting state: the ▾ list offers Delete once more.
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
@@ -179,7 +293,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     expect(
       screen.getByRole("button", { name: "Start focusing" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("pantry-1"));
   });
 
@@ -288,7 +402,10 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
 
     fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /todo a/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^✓ complete$/i }));
+    // The bulk bar is the ONE surface that calls `t("action.complete")` without
+    // going through `CompleteButton` (select-action-bar.tsx), which is why #253
+    // treated the detick as a strings change with consumers.
+    fireEvent.click(screen.getByRole("button", { name: /^complete$/i }));
 
     await waitFor(() =>
       expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"),
@@ -399,7 +516,7 @@ describe("LibraryRows — the note trigger sits in the action group (#44)", () =
 
   it("puts the trigger in the SAME action group as Complete", () => {
     renderRow();
-    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const complete = screen.getByRole("button", { name: "Complete" });
     const trigger = screen.getByRole("button", {
       name: "Note for Prep the deck",
     });
@@ -420,7 +537,7 @@ describe("LibraryRows — the note trigger sits in the action group (#44)", () =
     const box = screen.getByRole("textbox");
     expect(box.closest("[data-row-actions]")).toBeNull();
     expect(box.closest("li")).toBe(
-      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+      screen.getByRole("button", { name: "Complete" }).closest("li"),
     );
   });
 
@@ -506,11 +623,50 @@ describe("LibraryRows — every control in the action group is a 44px target", (
     expectFullTargets(container);
   });
 
+  /**
+   * The same check with the ▾ list OPEN, which is where most of this row's controls
+   * now live.
+   *
+   * `anchored-popup.ts` justifies `rowMenuEntry` keeping a redundant `min-w-11` on
+   * the grounds that "the target-size guards in `inbox-view.test.tsx` and
+   * `library-rows.test.tsx` measure BOTH dimensions of every control inside
+   * `[data-row-actions]` — and the popup is portaled in there, so an open list is in
+   * scope". That was true of `inbox-view.test.tsx` and FALSE of this file: every
+   * call of `expectFullTargets` above renders the list closed, so the only thing
+   * ever checked here was the resting line, and this file's other ▾ assertions look
+   * at `min-h-11` alone. The comment was describing a control that did not exist.
+   *
+   * Added rather than the comment being narrowed, because the width floor is worth
+   * having asserted somewhere on this surface: it is the dimension an emoji-only or
+   * short-label entry loses first.
+   */
+  it.each(["plated", "pantry"] as const)(
+    "%s rows, with the ▾ list open",
+    async (tab) => {
+      const user = userEvent.setup();
+      const { container } = renderTab(tab);
+      await user.click(screen.getByRole("button", { name: "All options" }));
+      // Guard the guard: the popup is portaled into the row's `[data-row-actions]`
+      // host, so if it ever stops being, `expectFullTargets` would silently go back
+      // to measuring only the resting line and passing.
+      const popup = screen.getByRole("dialog", { name: "All options" });
+      expect(popup.closest("[data-row-actions]")).not.toBeNull();
+      expect(
+        popup.querySelectorAll("button, a").length,
+        "the open ▾ contributed no controls to measure",
+      ).toBeGreaterThan(0);
+      expectFullTargets(container);
+    },
+  );
+
   it("and the armed delete confirm, which replaces a 44px control", async () => {
-    // The pair takes the 🗑's place, so a smaller pair shrinks the action line
-    // under the pointer at exactly the moment a mis-tap deletes something.
+    // The pair takes the place of the ▾ entry that opened it — itself 44px via
+    // `rowMenuEntry` since #253 made it the only route to delete — so a smaller
+    // pair shrinks the line under the pointer at exactly the moment a mis-tap
+    // deletes something.
     const user = userEvent.setup();
     renderTab("plated");
+    await user.click(screen.getByRole("button", { name: "All options" }));
     await user.click(screen.getByRole("button", { name: "Delete" }));
     for (const name of ["Delete", "Cancel"]) {
       const control = screen.getByRole("button", { name });
