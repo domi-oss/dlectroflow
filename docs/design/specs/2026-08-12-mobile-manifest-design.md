@@ -30,16 +30,17 @@ is the same phone vertical space #253 is currently fighting for, so the two comp
 ## Current state — grounded 2026-08-11, re-verified 2026-08-13 against `origin/main` at `2ab3210`
 
 Every row below was re-read at that named commit rather than in a working tree, because the repo carries
-many worktrees and a tree is only evidence about the commit you are standing on. The re-read changed two
-rows; both are marked.
+many worktrees and a tree is only evidence about the commit you are standing on. **Every row the re-read
+corrected or added carries a ⚠️.** The markers are the record — a count stated in prose drifts out of step
+with them the moment another row changes, which is what happened here.
 
 | Question | Answer |
 | --- | --- |
-| Is there a manifest? | **No.** Verified across `manifest.json` / `.webmanifest` / `manifest.ts`, `rel="manifest"`, and `next-pwa` / `workbox` / `serwist` in `package.json` and the lockfile — those last three return **zero** hits (control: the same query for `sharp`/`next` returns 141, so the zero is a real absence and not a query that never ran). Two files do match the word `manifest` and neither is one: `src/lib/export/manifest.ts` is the data-export manifest, and `src/lib/manifest-hygiene.{ts,test.ts}` is about `package.json` declaring its imports |
+| Is there a manifest? | ⚠️ **No.** Verified across `manifest.json` / `.webmanifest` / `manifest.ts`, `rel="manifest"`, and `next-pwa` / `workbox` / `serwist` in `package.json` and the lockfile — those last three return **zero** hits (control: the same query for `sharp`/`next` returns 141, so the zero is a real absence and not a query that never ran). Two files do match the word `manifest` and neither is one: `src/lib/export/manifest.ts` is the data-export manifest, and `src/lib/manifest-hygiene.{ts,test.ts}` is about `package.json` declaring its imports |
 | Is there a service worker? | **Yes** — `public/sw.js`, registered at `src/lib/notifications.ts:40`. Notifications only, no `fetch` handler. **An installable app needs no more than this** |
-| Icons available? | `public/brand-mark.png`, **256×256**, and transparent — 79% of its pixels are fully so. No maskable set. Referenced by `src/components/brand/brand-mark.tsx`, its test, and `charts/dlectroflow/Chart.yaml`'s `icon:` — **so it must not be moved or replaced** |
+| Icons available? | ⚠️ `public/brand-mark.png`, **256×256**, and transparent — 79% of its pixels are fully so. No maskable set. Referenced by `src/components/brand/brand-mark.tsx`, its test, and `charts/dlectroflow/Chart.yaml`'s `icon:` — **so it must not be moved or replaced** |
 | Any Next metadata icons already? | ⚠️ **Yes, two.** `src/app/icon.png` is **byte-identical** to `public/brand-mark.png` (same git blob, 256×256), and `src/app/apple-icon.png` is 180×180 and **77.3% fully transparent**. Both arrived with #13/#40, and Next already emits `<link>` tags for them, so the app *does* ship an Apple touch icon today. **That file is the one this work replaces** — see Icons below |
-| Image tooling? | `sharp` **already a dependency** (`package.json`). No new dependency needed |
+| Image tooling? | ⚠️ **`sharp` is available but NOT declared, and the difference decides the build-time option below.** `package.json` mentions it only under `overrides` (`"sharp": "^0.35.3"`), which pins a version rather than declaring a package — it is in neither `dependencies` nor `devDependencies`. It resolves because **`next` lists it under `optionalDependencies`** (`^0.34.5`), and the lockfile marks `node_modules/sharp` `"optional": true`. Enough for a one-off local run after `npm ci`; **not** something to build a pipeline step on |
 | Is `PUBLIC_ORIGIN` available at build time? | **No — it is runtime only.** Set in `charts/dlectroflow/templates/deployment.yaml:204`, read at request time via `src/lib/origin.ts:54`. This is load-bearing; see below |
 
 ## Design
@@ -292,8 +293,10 @@ change and is not proposed here.
 
 Every figure in this section came from a local spike, and a spike stops being evidence the moment its
 session ends — so the command is recorded in place of the trust. It needs the two uncommitted SVG sources
-from the design tool and nothing else: `sharp` is already a dependency (`^0.35.3`), and these numbers were
-taken on **`sharp 0.35.3` / `libvips 8.18.3`**.
+from the design tool and nothing else. `sharp` needs no install — it resolves from `node_modules` after a
+normal `npm ci`, as `next`'s optional transitive pinned to `^0.35.3` by this repo's `overrides` (see the
+*Image tooling?* row). That is sound for a one-off local run and is precisely why the build-time option is
+declined. These numbers were taken on **`sharp 0.35.3` / `libvips 8.18.3`**.
 
 ```js
 // node --input-type=module, run from the repo root with the two SVGs in place
@@ -449,7 +452,7 @@ verification cannot be parallelised or mocked.
 | Absolute `start_url` on `PUBLIC_ORIGIN` | Proposed by #254 and the #175 spec. **Ships broken** — the manifest route is build-cached and the variable is runtime-only. See above |
 | Static `src/app/manifest.json` | No type checking, and cannot carry the reasoning for `scope` — the one line that fails invisibly |
 | `next-pwa` / `serwist` | An entire PWA framework to emit one JSON document. Nothing here needs a service-worker build step; `sw.js` already exists |
-| Generating icons at build time | Adds image processing to the Kaniko build, and a `sharp` dependency to the build stage, for assets that change approximately never. The cost and the dependency surface carry the decision on their own. ⚠️ It is **not** non-deterministic, and the row must not say so: resizing a fixed source with a pinned `sharp` is reproducible given identical inputs |
+| Generating icons at build time | Adds image processing to **`build_app`** — the `npm ci` + `next build` job, **not** Kaniko, which only assembles the image from that job's artifacts — for assets that change approximately never. ⚠️ **And it would mean genuinely DECLARING `sharp`.** Today it resolves only as `next`'s **optional** transitive, so a `--no-optional` install, a platform with no prebuilt binary, or a `next` upgrade that drops the entry each remove it *without failing the install*. That is tolerable for a one-off local run and not for a pipeline step, so making it reliable costs a real new direct dependency — which is the actual price of this option, and it is not the same as "`sharp` is already there". ⚠️ It is **not** non-deterministic, and the row must not say so: resizing a fixed source with a pinned `sharp` is reproducible given identical inputs |
 | Committing the SVG sources | 1.8 MB of base64-wrapped bitmap, not editable in-repo. Would be right for a genuine vector |
 | Upscaling `brand-mark.png` (256) | Unnecessary — the supplied source is 1254px. Recorded because it was the fallback before the export arrived |
 | An install prompt | Owner decision. One known user, one-time act, and the repo has a recorded preference against first-run noise |
