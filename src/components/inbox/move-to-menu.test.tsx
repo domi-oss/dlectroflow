@@ -161,6 +161,13 @@ describe("MoveToMenu", () => {
     );
     await openMenu("Move to");
     const host = container.firstElementChild!;
+    // Guard the guard: an empty host has zero `div`s as well, so this passed
+    // vacuously if the trigger ever stopped opening. Prove the menu rendered into
+    // this host before asserting what it did NOT render.
+    expect(
+      host.querySelectorAll('[role="menuitem"]').length,
+      "the Move-to menu did not open, so the phrasing-content check saw nothing",
+    ).toBeGreaterThan(0);
     expect(host.querySelectorAll("div")).toHaveLength(0);
   });
 });

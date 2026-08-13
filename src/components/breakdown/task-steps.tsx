@@ -17,7 +17,7 @@ import { rowMenuEntry } from "@/components/ui/anchored-popup";
 import { groupedRowMenu } from "@/components/ui/row-menu-separator";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
 import { StepNote } from "@/components/breakdown/task-note";
@@ -479,6 +479,19 @@ export function TaskSteps({
                 <span className="min-w-0 flex-1 break-words">
                   {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
                   {s.text}{" "}
+                  {/* #205 leg, folded in because #253 is what makes it
+                      load-bearing. This was a ~20px convenience while `Edit step
+                      title` sat in the ▾ at 44px; removing that entry as a mirror
+                      leaves the pencil as the SOLE route to renaming a step, at a
+                      fifth of the area of the entry it outlived. `anchored-popup.ts`
+                      draws the line as "entries whose sole-route status THIS change
+                      creates" — that is exactly this control, so this change sizes
+                      it rather than deferring one it just promoted.
+
+                      Both dimensions matter here, unlike a full-width ▾ entry: it is
+                      an emoji-only glyph, so width is the dimension it failed.
+                      44x44 is 2.5.5 (Enhanced), AAA — a house convention, not the
+                      AA 24x24 of 2.5.8. */}
                   <button
                     type="button"
                     aria-label={`Edit ${s.text}`}
@@ -486,7 +499,10 @@ export function TaskSteps({
                       setEditEstId(null);
                       setEditTitleId(s.id);
                     }}
-                    className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+                    className={cn(
+                      touchTarget,
+                      "text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs",
+                    )}
                   >
                     ✏️
                   </button>

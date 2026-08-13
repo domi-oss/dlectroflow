@@ -194,6 +194,18 @@ describe("RowActions", () => {
     // popup inside that container, so a `div` appearing there is what would
     // break the enclosing phrasing content.
     const menuHost = container.querySelector("[data-row-menu]")!;
+    // Guard the guard: `querySelectorAll("div")` is 0 on an EMPTY host too, so
+    // without this the test passes if the trigger ever stops opening — it would be
+    // asserting the absence of markup that was never rendered. Assert the popup is
+    // actually there and actually inside this host first.
+    expect(
+      menuHost.querySelector('[role="dialog"]'),
+      "the ▾ did not open, so the phrasing-content check had nothing to inspect",
+    ).not.toBeNull();
+    expect(
+      menuHost.querySelectorAll("button, a").length,
+      "the open ▾ contributed no entries to the host",
+    ).toBeGreaterThan(0);
     expect(menuHost.querySelectorAll("div")).toHaveLength(0);
   });
 

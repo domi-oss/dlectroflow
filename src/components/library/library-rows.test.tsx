@@ -623,6 +623,42 @@ describe("LibraryRows — every control in the action group is a 44px target", (
     expectFullTargets(container);
   });
 
+  /**
+   * The same check with the ▾ list OPEN, which is where most of this row's controls
+   * now live.
+   *
+   * `anchored-popup.ts` justifies `rowMenuEntry` keeping a redundant `min-w-11` on
+   * the grounds that "the target-size guards in `inbox-view.test.tsx` and
+   * `library-rows.test.tsx` measure BOTH dimensions of every control inside
+   * `[data-row-actions]` — and the popup is portaled in there, so an open list is in
+   * scope". That was true of `inbox-view.test.tsx` and FALSE of this file: every
+   * call of `expectFullTargets` above renders the list closed, so the only thing
+   * ever checked here was the resting line, and this file's other ▾ assertions look
+   * at `min-h-11` alone. The comment was describing a control that did not exist.
+   *
+   * Added rather than the comment being narrowed, because the width floor is worth
+   * having asserted somewhere on this surface: it is the dimension an emoji-only or
+   * short-label entry loses first.
+   */
+  it.each(["plated", "pantry"] as const)(
+    "%s rows, with the ▾ list open",
+    async (tab) => {
+      const user = userEvent.setup();
+      const { container } = renderTab(tab);
+      await user.click(screen.getByRole("button", { name: "All options" }));
+      // Guard the guard: the popup is portaled into the row's `[data-row-actions]`
+      // host, so if it ever stops being, `expectFullTargets` would silently go back
+      // to measuring only the resting line and passing.
+      const popup = screen.getByRole("dialog", { name: "All options" });
+      expect(popup.closest("[data-row-actions]")).not.toBeNull();
+      expect(
+        popup.querySelectorAll("button, a").length,
+        "the open ▾ contributed no controls to measure",
+      ).toBeGreaterThan(0);
+      expectFullTargets(container);
+    },
+  );
+
   it("and the armed delete confirm, which replaces a 44px control", async () => {
     // The pair takes the place of the ▾ entry that opened it — itself 44px via
     // `rowMenuEntry` since #253 made it the only route to delete — so a smaller

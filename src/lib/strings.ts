@@ -71,11 +71,16 @@ export const STRINGS = {
   // `action.addTodoFull`, `action.saveForLater`, `action.completeFull` and
   // `action.sendToReview`, which are the five buckets of `ACTION_FOR_BUCKET`.
   //
-  // Kept, and this is the THIRD key in that state in this issue (`action.addTodo`
-  // and `action.editTitle` are the others), on the precedent the first one set:
-  // `t()` is a public surface a self-hoster's voice override can reach, so pinning
-  // the pair is still worth something, and deleting a key is the breaking half of
-  // the change.
+  // Kept, on the precedent the first one set: `t()` is a public surface a
+  // self-hoster's voice override can reach, so pinning the pair is still worth
+  // something, and deleting a key is the breaking half of the change.
+  //
+  // This issue leaves FOUR keys in that state, not the three this comment used to
+  // claim: `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
+  // `task-steps.tsx` lost its `Edit step title` entry) and this one. Re-derive
+  // rather than trust the list — a key is orphaned when
+  // `git grep -n '"<key>"' -- src e2e` matches only `strings.ts` and
+  // `strings.test.ts`.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
@@ -144,13 +149,36 @@ export const STRINGS = {
   // are entries at all rather than a connect link (#253, owner's call):
   //
   // The row's ▾ used to render an inline `Connect Google →` plus #128's
-  // three-line "prefer a personal account" caveat. Measured at 360px that made the
-  // NOT-connected menu taller than the connected one (497px against 429px), on the
-  // surface the whole issue is about. As a navigation entry the row stops being a
-  // connect control, so the caveat consolidates at the controls that do connect
-  // (`settings/integrations-panel.tsx`, `breakdown/breakdown-chat.tsx`, and
-  // `row-actions.tsx`'s `icon` variant for the task working view) — where #128 put
-  // it first and where the click that Google can refuse actually is.
+  // three-line "prefer a personal account" caveat. Measured at 360px BEFORE this
+  // issue, that made the NOT-connected menu taller than the connected one (497px
+  // against 429px), on the surface the whole issue is about.
+  //
+  // ⚠️ Those two numbers describe the shape that was REPLACED, not what ships. Kept
+  // because they are the measurement the owner's call rests on, and re-labelled
+  // because the same "497" was being read elsewhere in the tree as the current
+  // height of the taller list. What ships is one 44px entry in both states, and the
+  // two lists now measure the SAME: 7 entries, 368px tall at 360x780, plain and
+  // playful, no entry wrapping. They differ only in width (235px not-connected,
+  // 270px connected). Asserted in `e2e/smoke/row-menu-viewport-fit.spec.ts`, which
+  // until #253's review only logged those numbers without checking them.
+  //
+  // As a navigation entry the row stops being a
+  // connect control, so the caveat consolidates at the controls that do connect —
+  // where #128 put it first and where the click that Google can refuse actually is.
+  //
+  // Those surfaces, re-derivable rather than counted:
+  // `grep -rn 'GoogleAccountHint\|GOOGLE_ACCOUNT_HINT' src --include=*.tsx`. Today
+  // that is `settings/integrations-panel.tsx`, `breakdown/breakdown-chat.tsx`
+  // (three states), `breakdown/task-schedule.tsx`, and `row-actions.tsx`'s `icon`
+  // variant — which renders the string directly as a `title`/`aria-describedby`
+  // rather than through the component, and is therefore the one a
+  // component-keyed grep misses.
+  //
+  // ⚠️ Deliberately not a number, on this file's own precedent further down
+  // ("phrased without a count on purpose — this said 'all four' while five…").
+  // This list previously named three files, omitted `task-schedule.tsx`, and
+  // `google-account-hint.tsx` still says "all four connect surfaces" while the
+  // component alone has five call sites.
   //
   // `reconnect` gets the same treatment rather than staying an inline link, and
   // that is deliberate: leave one of the two as a connect control and the row is

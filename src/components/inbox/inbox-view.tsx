@@ -288,9 +288,21 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    guard can span, so a guard widened to cover it would buy nothing and read
  *    as though it had. That is why the defence lives in the actions, and
  *    `reopenItem` says so in as many words ("the same Done row open in two
- *    tabs"): see its reversal counted off what the writes CHANGED,
- *    `touchStreakOnCompletion`'s interactive-transaction row lock
- *    (`rewards.ts:677`) and `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *    tabs"): see its reversal counted off what the writes CHANGED, the
+ *    interactive-transaction row lock — the `tx.$queryRaw … FOR UPDATE` that
+ *    opens `touchStreakOnEngagement`'s transaction in `rewards.ts` — and
+ *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *
+ *    ⚠️ Cited by FUNCTION, not by line, and named `touchStreakOnEngagement`
+ *    rather than `touchStreakOnCompletion`. This bullet said "`rewards.ts:677`",
+ *    which is the `@deprecated` three-line alias — no lock, no transaction — so
+ *    it pointed a reader checking the claim at code that does not support it. It
+ *    replaced a correct line number to do so. #233 removed the number from
+ *    `rewards.integration.test.ts`'s own copy of this citation for exactly that
+ *    reason: a line reference goes on reading authoritatively after it stops
+ *    being true. The alias is still what the completion call sites call, which is
+ *    why the tests race it; the read-decide-write lives in the engagement
+ *    function.
  *
  *    ⚠️ Corrected #251, then again on #253: this used to say the row lock was
  *    "proved against a real database in `rewards.integration.test.ts`". #251's
@@ -302,13 +314,25 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  *    not "unproven" but "the proof was removed and the citation outlived it",
  *    which is a different failure with a different fix.
  *
- *    The lock is therefore implemented and, right now, unexercised —
- *    `touchStreakOnCompletion` is mocked in every test file that names it
- *    (`grep -rl 'touchStreakOnCompletion: vi.fn()' src` returned 16 on
- *    2026-08-12; the only non-mock references are `rewards.ts`, `braindump.ts`
- *    and this comment). **A real-Postgres proof is being restored under #233**,
- *    which rested its own severity table on the same sentence. Treat this bullet
- *    as unsettled until that lands, not as one of three equal defences.
+ *    **SETTLED — the proof exists.** #233 landed it:
+ *    `src/lib/rewards.integration.test.ts` is in the tree, fires genuinely
+ *    concurrent calls at real Postgres, and asserts `maxLiveTx` so a barrier that
+ *    never actually overlapped cannot pass. It also carries a citation guard that
+ *    fails loudly rather than open, so a second silent deletion reds the suite
+ *    instead of quietly restoring the state #251 left.
+ *
+ *    This sentence is corrected here for the THIRD time and each earlier version
+ *    was wrong in the same direction — describing the proof's status from an
+ *    inherited claim rather than from the tree. It said "does not exist" when the
+ *    file had existed and been deleted, then "is being restored … treat as
+ *    unsettled" after the restore had already landed. So the bullet is now one of
+ *    three equal defences, and the way to check that is to open the file rather
+ *    than to read this comment.
+ *
+ *    The mocking observation it rested on stands and is why the integration test
+ *    is the only thing that can speak here: `touchStreakOnCompletion` is mocked
+ *    in every unit file that names it, so no unit test can exercise an
+ *    interactive-transaction row lock.
  *
  *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
  *    two truly simultaneous completions of one to-do could bank twice. It is

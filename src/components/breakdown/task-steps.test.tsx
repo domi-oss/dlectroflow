@@ -200,6 +200,49 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     }
   });
 
+  /**
+   * #205's leg on this file, folded in because #253 is what makes it load-bearing.
+   *
+   * The ✎ pencil was a ~20px convenience (`px-1 text-xs`) while `Edit step title`
+   * sat in the ▾ at 44px. This issue removed that entry as a mirror — correctly,
+   * the two fired identical calls — which leaves the pencil as the SOLE route to
+   * renaming a step, at a fifth of the area of the entry it outlived.
+   *
+   * That is the line `anchored-popup.ts` draws for itself, applied here: "entries
+   * whose sole-route status THIS change creates". The pencil's status was created by
+   * this change, so this change sizes it, rather than deferring a control it just
+   * promoted.
+   *
+   * 44x44 is **2.5.5 Target Size (Enhanced), AAA**; **2.5.8 (Minimum) is the AA
+   * one, at 24x24**. A house convention, not a conformance fix — see
+   * `breakdown/note-field.tsx`, which records having had to undo that inversion.
+   *
+   * Both dimensions, unlike the ▾-entry test above: that one checks height only
+   * because a full-width entry is already far past 44px wide. This is an
+   * emoji-only glyph, so width is the dimension it actually fails.
+   */
+  it("the ✎ pencil carries the 44px minimum, being the only route to a rename now", () => {
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    const pencil = screen.getByRole("button", { name: "Edit First" });
+    expect(pencil.className, "the ✎ pencil is under 44px tall").toContain(
+      "min-h-11",
+    );
+    expect(pencil.className, "the ✎ pencil is under 44px wide").toContain(
+      "min-w-11",
+    );
+  });
+
+  it("the sized pencil still opens the title editor for its own step", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    // Pins the behaviour the class change rides on: the pencil's `onClick` clears
+    // the estimate editor and opens the title one for THIS step.
+    expect(
+      screen.getByRole("textbox", { name: "Edit step title" }),
+    ).toBeInTheDocument();
+  });
+
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
     const user = userEvent.setup();
     render(

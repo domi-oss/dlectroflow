@@ -1189,9 +1189,14 @@ test.describe("#253 the row action line is compact at 360px", () => {
           // belongs to shows the entries but not what they act on. The fit itself
           // is asserted below and holds either way.
           //
-          // 20px rather than something more generous because the taller of the two
-          // lists is 497px and the ▾ sits ~170px into the row: at 120px from the
-          // top it flipped.
+          // 20px rather than something more generous because the list is 368px and
+          // the ▾ sits ~170px into the row: at 120px from the top it flipped.
+          //
+          // ⚠️ This said "the taller of the two lists is 497px". There is no taller
+          // of the two — both measure 368px, logged below on every run — and 497 is
+          // the height of the PRE-#253 not-connected menu, which `strings.ts` and
+          // `row-actions.tsx` cite as the shape this issue replaced. The same number
+          // was being used with two different meanings in the tree.
           const rowLocator = page
             .getByRole("listitem")
             .filter({ hasText: marker })

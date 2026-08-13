@@ -167,6 +167,12 @@ export function ScheduleControl({
     // NOT-connected menu 497px tall against the connected one's 429px at 360px —
     // the taller list, on the surface this whole issue is about.
     //
+    // ⚠️ Those are the heights of the shape this REPLACED. What ships measures 368px
+    // in both states (7 entries, every one 44px and one line, plain and playful);
+    // they differ in width only. See `strings.ts`'s note on the same pair, and
+    // `e2e/smoke/row-menu-viewport-fit.spec.ts`, which now asserts it instead of
+    // logging it.
+    //
     // ⚠️ **This is what keeps #128 satisfied rather than violating it.** #128
     // requires the "prefer a personal account" caveat at every connect entry
     // point, because a Workspace admin can refuse the app at Google's own consent
@@ -365,12 +371,20 @@ export function ScheduleControl({
   // row. That is a feature deleted by a layout change, which is the worst shape a
   // regression can take because nothing fails.
   //
-  // The nesting concern turned out to be already solved rather than real:
-  // `MoveToMenu` is a Base UI `Menu` portaled into its own wrapper inside this
-  // same 🔽 popup, and `e2e/smoke/row-menu-viewport-fit.spec.ts` asserts that a
-  // press inside it still dispatches ("the 🔽 popup's nested Move-to menu still
-  // dispatches a move"). `ScheduleMenu` uses the identical idiom — its own doc
-  // comment says it follows row-actions.tsx's — so it nests on the same terms.
+  // The nesting concern turned out to be already solved rather than real, and the
+  // evidence for that is `ScheduleMenu`'s own — `e2e/smoke/schedule-menu.spec.ts`,
+  // where the dialog opens from a ▾ entry, reads correctly, closes on Escape, and
+  // hands focus back to the entry that opened it ("the menu remembers the choice,
+  // and the .ics path keeps its one click" asserts the settled focus).
+  //
+  // ⚠️ This used to cite `MoveToMenu` nesting "inside this same 🔽 popup" as the
+  // precedent, quoting a test titled "the 🔽 popup's nested Move-to menu still
+  // dispatches a move". Neither survives #253: the "Move to…" entry is gone from
+  // every ▾, so `MoveToMenu` no longer nests in this popup at all — it renders as
+  // the inline 📥 on the idle Saved row and the Done row — and the real test is
+  // "the Move-to menu opened from a row's 📥 still dispatches a move", which now
+  // exercises that composition instead. A precedent that has been deleted cannot
+  // carry the argument, so the argument rests on the nesting that actually ships.
   //
   // The .ics path still keeps its one click. A guest with no Reclaim has nothing
   // to choose that the menu could offer beyond a deadline, and turning their
@@ -592,13 +606,18 @@ export function RowActions({
         </span>
       )}
       {inline}
-      {/* #92 — a Popover, not `absolute right-0`: this ~288px popup used to
-          hang past the bottom edge from any row low on a phone screen. Still
+      {/* #92 — a Popover, not `absolute right-0`: this popup used to hang past
+          the bottom edge from any row low on a phone screen. It was ~288px when
+          #92 measured it; #253's canonical list makes the tallest case 368px
+          (7 entries at 44px plus separators), which is what
+          `e2e/smoke/row-menu-viewport-fit.spec.ts` measures now. Still
           NOT an ARIA menu (see the doc comment above): Popover.Popup is a
           `dialog`, and `menu` entries stay ordinary buttons/links. Portaled
           into `menuRef` rather than <body> so a press on a nested control
-          (the "Move to…" menu) is still a press inside this popup, and so
-          row-scoped queries keep meaning "this row's options".
+          (the Schedule dialog) is still a press inside this popup, and so
+          row-scoped queries keep meaning "this row's options". That was
+          written for the "Move to…" entry, which #253 removed; the Schedule
+          dialog is the nested control it now protects.
 
           #253 — `ml-auto shrink-0` moved here from the deleted cluster span, so
           the trigger is still pinned right of the wrapped inline actions and

@@ -72,10 +72,14 @@ export const ANCHORED_POSITIONER = {
  * The shared popup surface. `max-w` is belt-and-braces next to the positioner's
  * shifting: collision avoidance can only move a popup that *fits*, so a popup
  * wider than the viewport (a long translated label, a 320px-wide phone) needs a
- * width cap as well. Deliberately no max-height/overflow counterpart: the tall
- * popup here is 288px against a 844px viewport, flipping handles it, and a
- * scroll container on the 🔽 popup would become a clipping ancestor for the
- * Move-to menu nested inside it.
+ * width cap as well. Deliberately no max-height/overflow counterpart: the tallest
+ * popup here is 368px — the Needs-review ▾, 7 entries at 44px plus separators,
+ * measured at 360x780 in `e2e/smoke/row-menu-viewport-fit.spec.ts` — against a
+ * 780-844px viewport, so flipping handles it. It read "288px" until #253, which is
+ * what #92 measured before this issue promoted the list's entries to 44px; the
+ * number is restated rather than dropped because it is what the absent
+ * max-height rests on. A scroll container on the 🔽 popup would also become a
+ * clipping ancestor for the Schedule dialog nested inside it.
  */
 export function popupSurface(className?: string): string {
   return cn(
@@ -115,10 +119,20 @@ export function popupSurface(className?: string): string {
  *
  * The end state was a `tabindex="-1"` span: focus on no control at all, and the
  * user's place in the list gone (WCAG 2.4.3 Focus Order). Measured on this branch
- * before the fix, 10 consecutive runs of "dismissing the nested Move-to menu
- * hands focus back to the entry" (e2e/smoke/row-menu-viewport-fit.spec.ts):
- * **7 failed**, and the Schedule dialog's equivalent
- * (e2e/smoke/schedule-menu.spec.ts) failed 2 for 2 including its CI retry.
+ * before the fix, 10 consecutive runs of the Move-to focus spec — titled
+ * "dismissing the Move-to menu hands focus back to the 📥 that opened it"
+ * (e2e/smoke/row-menu-viewport-fit.spec.ts) — **7 failed**, and the Schedule
+ * dialog's equivalent failed 2 for 2 including its CI retry: that one has no test
+ * title of its own, it is the settled-focus assertion inside "the menu remembers
+ * the choice, and the .ics path keeps its one click"
+ * (e2e/smoke/schedule-menu.spec.ts).
+ *
+ * ⚠️ Both citations are quoted from the specs as they stand. The first named a
+ * title that does not exist — it said "the nested Move-to menu … back to the
+ * entry", written when the picker opened from a ▾ entry; #253 removed that entry,
+ * the spec was renamed to the 📥 it now opens from, and this comment kept the old
+ * words. A quoted title that cannot be grepped is worse than a bare file
+ * reference, because it reads as though it had been checked.
  *
  * Moving focus first is what defuses it: by the time the inner popup unmounts,
  * `activeElement` is the trigger rather than `<body>`, so the branch above is
