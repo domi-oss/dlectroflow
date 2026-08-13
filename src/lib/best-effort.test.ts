@@ -50,11 +50,11 @@ describe("bestEffort", () => {
   });
 
   it("says so in the log, with the tag it was given and the workspace", async () => {
-    await bestEffort("breakdown_confirm_bookkeeping_failed", "ws-7", () =>
+    await bestEffort("breakdown_points_failed", "ws-7", () =>
       Promise.reject(new Error(BOOM)),
     );
     expect(errorLog).toHaveBeenCalledTimes(1);
-    expect(line().tag).toBe("breakdown_confirm_bookkeeping_failed");
+    expect(line().tag).toBe("breakdown_points_failed");
     expect(line().workspaceId).toBe("ws-7");
     expect(line().message).toContain(BOOM);
     expect(Date.parse(line().ts)).not.toBeNaN();

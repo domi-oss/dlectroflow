@@ -118,36 +118,30 @@ const STEP = {
 
 let errorLog: ReturnType<typeof vi.spyOn>;
 
-/** The tag of the one line a swallow left behind. */
-const loggedTag = () =>
-  (
-    JSON.parse(String(errorLog.mock.calls[0][0])) as {
-      tag: string;
-      workspaceId: string;
-      message: string;
-    }
-  ).tag;
+type LoggedLine = { tag: string; workspaceId: string; message: string };
 
-const loggedLine = () =>
-  JSON.parse(String(errorLog.mock.calls[0][0])) as {
-    tag: string;
-    workspaceId: string;
-    message: string;
-  };
+/**
+ * The nth structured line a swallow left behind, parsed. Defaults to the first,
+ * which is the only one most cases produce.
+ *
+ * `calls` is annotated rather than inferred: `errorLog` is typed as the general
+ * `ReturnType<typeof vi.spyOn>`, so its call tuples come through as implicit
+ * `any` and `noImplicitAny` rejects an un-annotated read.
+ */
+const loggedLine = (i = 0) =>
+  JSON.parse(String((errorLog.mock.calls as unknown[][])[i][0])) as LoggedLine;
+
+/** Duo review (`!339`): the two index-0 helpers were the same parse twice. */
+const loggedTag = () => loggedLine().tag;
 
 /**
  * The tags of EVERY line logged, in call order — for a site whose payouts are
  * split into separate `bestEffort` calls and must therefore be distinguishable
- * from each other. The index-0 helpers above cannot see a second line at all.
- *
- * `calls` is annotated rather than inferred: `errorLog` is typed as the general
- * `ReturnType<typeof vi.spyOn>`, so its call tuples come through as implicit
- * `any` and `noImplicitAny` rejects the callback parameter.
+ * from each other. The index-0 helpers above cannot see a second line at all,
+ * which is how a suite passes an implementation that logs one tag N times.
  */
 const loggedTags = () =>
-  (errorLog.mock.calls as unknown[][]).map(
-    (call) => (JSON.parse(String(call[0])) as { tag: string }).tag,
-  );
+  (errorLog.mock.calls as unknown[][]).map((_, i) => loggedLine(i).tag);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -226,7 +220,7 @@ describe("confirmBreakdown — a payout that fails after the steps committed", (
     touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
     await confirm();
     expect(errorLog).toHaveBeenCalledTimes(1);
-    expect(loggedLine().tag).toBe("breakdown_confirm_bookkeeping_failed");
+    expect(loggedLine().tag).toBe("breakdown_streak_touch_failed");
     expect(loggedLine().workspaceId).toBe(WS);
     expect(loggedLine().message).toContain(BOOM);
   });
@@ -237,12 +231,74 @@ describe("confirmBreakdown — a payout that fails after the steps committed", (
   it("covers the points and the badge, not only the streak touch", async () => {
     logRewardMock.mockRejectedValueOnce(new Error(BOOM));
     await expect(confirm()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("breakdown_points_failed");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
 
     vi.clearAllMocks();
     awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
     await expect(confirm()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("breakdown_badge_failed");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  /**
+   * ── The three payouts are INDEPENDENT of each other (Duo review, `!339`) ───
+   *
+   * The functional half, and why the finding is more than a naming nit. The three
+   * consequences used to sit sequentially inside ONE `bestEffort` thunk, so the
+   * first rejection **silently cancelled the two behind it**: a `logReward` fault
+   * cost the FirstBreakdown badge and the day's streak credit as well as the
+   * points, and one tag could not say which of the three was lost.
+   *
+   * Splitting is safe here, unlike `rewardStepDone` — which must stay one thunk
+   * because `maybeAwardTenStepsDay` counts the `RewardEvent` that `logReward` has
+   * just written. These three read nothing each other writes: `awardBadge` is a
+   * once-ever `findUnique` + `skipDuplicates` insert, and
+   * `touchStreakOnEngagement` reads `Settings` and `Streak` only. Neither goes
+   * near `RewardEvent`.
+   *
+   * The assertion the old suite lacked: it checked only that the action RESOLVED
+   * and revalidated, and both stayed true while two payouts were being dropped.
+   */
+  it("still pays the badge and the streak when the points fail", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(confirm()).resolves.toBeUndefined();
+    expect(awardBadgeMock).toHaveBeenCalledExactlyOnceWith(
+      WS,
+      BadgeKey.FirstBreakdown,
+    );
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+  });
+
+  // The middle one failing must not cost the last one either.
+  it("still touches the streak when the badge fails", async () => {
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(confirm()).resolves.toBeUndefined();
+    expect(logRewardMock).toHaveBeenCalledWith(
+      WS,
+      RewardType.BreakdownConfirmed,
+    );
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+  });
+
+  it("emits three DIFFERENT tags when all three payouts fail", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    touchStreakOnEngagementMock.mockRejectedValueOnce(new Error(BOOM));
+
+    await expect(confirm()).resolves.toBeUndefined();
+
+    // Ordered: points, badge, streak — the call order, which is what a reader of
+    // the log reconstructs from it.
+    expect(loggedTags()).toEqual([
+      "breakdown_points_failed",
+      "breakdown_badge_failed",
+      "breakdown_streak_touch_failed",
+    ]);
+    // Three lines, because all three RAN despite all three failing. The bundled
+    // version logged once and abandoned the other two.
+    expect(errorLog).toHaveBeenCalledTimes(3);
+    expect(new Set(loggedTags()).size).toBe(3);
   });
 
   // THE CONTROL. Green before the fix and after it: the steps did not save, so

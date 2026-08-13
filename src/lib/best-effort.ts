@@ -72,8 +72,23 @@
  * Named `<site>_..._failed`, matching `capture_streak_touch_failed`.
  */
 export type BookkeepingTag =
-  /** `confirmBreakdown` — the points, the FirstBreakdown badge, the streak. */
-  | "breakdown_confirm_bookkeeping_failed"
+  /**
+   * `confirmBreakdown` — the BreakdownConfirmed points.
+   *
+   * Three tags for this site, one per payout, and for a reason stronger than
+   * naming: the three used to share one `bestEffort` thunk, and because a thunk
+   * is sequential the first rejection **cancelled the two behind it**. Splitting
+   * them is what makes each independent; the distinct tags are what let an
+   * operator see which one was actually lost. Safe to split because none of the
+   * three reads a row another writes — contrast `rewardStepDone`, which must stay
+   * one thunk because `maybeAwardTenStepsDay` counts the `RewardEvent` that
+   * `logReward` just wrote.
+   */
+  | "breakdown_points_failed"
+  /** `confirmBreakdown` — the once-ever FirstBreakdown badge. */
+  | "breakdown_badge_failed"
+  /** `confirmBreakdown` — the qualifying-engagement streak touch. */
+  | "breakdown_streak_touch_failed"
   /** `completeStep` — `rewardStepDone` (points, streak, ten-steps badge). */
   | "step_done_bookkeeping_failed"
   /** `markTaskCompleted` — the task-complete points and badge. */

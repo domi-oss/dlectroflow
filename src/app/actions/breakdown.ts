@@ -194,14 +194,34 @@ export async function ejectStepToInbox(
  * for the rule, the two rejected alternatives (join the transaction, recover on
  * retry) and why they are worse.
  *
- * **The residual, stated rather than implied:** this confirm banks no points, no
- * FirstBreakdown badge and no streak credit. The badge is once-ever and
- * idempotent, so the next confirm earns it. The streak is not banked *at all*
- * only when the person makes no other qualifying engagement that working day —
- * `Streak.lastActiveWorkday` makes it a per-day boolean, so any capture,
- * completion or later confirm credits the same day in full and nothing is left
- * half-advanced. The points for this one confirm are lost, and that is the whole
- * cost.
+ * **The residual, stated rather than implied:** exactly the payout that faulted,
+ * and not the other two. The badge is once-ever and idempotent, so the next
+ * confirm earns it. The streak is not banked *at all* only when the person makes
+ * no other qualifying engagement that working day — `Streak.lastActiveWorkday`
+ * makes it a per-day boolean, so any capture, completion or later confirm credits
+ * the same day in full and nothing is left half-advanced. The points for this one
+ * confirm are lost, and that is the whole cost.
+ *
+ * ## THREE calls, not one thunk (Duo review, `!339`)
+ *
+ * These three were bundled into a single `bestEffort` thunk, which was wrong in a
+ * way the false-failure framing above hides. A thunk runs sequentially, so the
+ * FIRST rejection cancelled the statements behind it: a `logReward` fault
+ * silently cost the FirstBreakdown badge and the day's streak credit too, and one
+ * shared tag could not tell an operator which of the three had actually been
+ * lost. Three calls with three tags, the shape `completeFocus` already uses.
+ *
+ * **Splitting is safe here, and that had to be checked rather than assumed** —
+ * `best-effort.ts` notes that `rewardStepDone`'s payouts must stay bundled
+ * because `maybeAwardTenStepsDay` counts the `RewardEvent` that `logReward` has
+ * just written. These three have no such edge: `awardBadge` is a once-ever
+ * `findUnique` + `skipDuplicates` insert, `touchStreakOnEngagement` reads
+ * `Settings` and `Streak` and takes its own `SELECT … FOR UPDATE`, and neither
+ * reads `RewardEvent` at all. Splitting also introduces no double-pay, because it
+ * changes nothing about what a retry re-runs — a retried confirm always re-runs
+ * all three, which is the pre-existing reason this swallow exists at all
+ * (`logReward` appends, so a false failure that provoked a retry would bank the
+ * points twice).
  *
  * The revalidations run either way, deliberately, and are NOT gated on the
  * payout: the steps are saved, so skipping them would leave the person's own tab
@@ -242,17 +262,20 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   ]);
 
   // Best-effort: the steps above are committed, so no fault here may report the
-  // confirm as failed (#257). See this function's docblock for the residual.
-  await bestEffort(
-    "breakdown_confirm_bookkeeping_failed",
-    workspaceId,
-    async () => {
-      await logReward(workspaceId, RewardType.BreakdownConfirmed);
-      await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
-      // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
-      // streak at most once per working day.
-      await touchStreakOnEngagement(workspaceId);
-    },
+  // confirm as failed (#257). THREE calls rather than one thunk so that one
+  // failing payout cannot cancel the others, and so the tag alone says which was
+  // lost — see this function's docblock for the independence argument and the
+  // residual.
+  await bestEffort("breakdown_points_failed", workspaceId, () =>
+    logReward(workspaceId, RewardType.BreakdownConfirmed),
+  );
+  await bestEffort("breakdown_badge_failed", workspaceId, () =>
+    awardBadge(workspaceId, BadgeKey.FirstBreakdown),
+  );
+  // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
+  // streak at most once per working day.
+  await bestEffort("breakdown_streak_touch_failed", workspaceId, () =>
+    touchStreakOnEngagement(workspaceId),
   );
 
   revalidatePath(`/tasks/${taskId}`);
