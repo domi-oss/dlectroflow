@@ -96,7 +96,25 @@ export const BASELINE_PATH = path.join(
 // Refresh mode: `A11Y_UPDATE_BASELINE=1 npx playwright test e2e/a11y` rewrites
 // the baseline from the current run instead of asserting against it. Used to
 // seed the file and to intentionally accept a reviewed pre-existing violation.
-const UPDATE_BASELINE = process.env.A11Y_UPDATE_BASELINE === "1";
+//
+// Exported for the two `test.skip` guards in `axe-wcag22-coverage.spec.ts`,
+// which keep a synthetic fixture from being written into the committed baseline
+// (a fixture baselined by accident makes that file's positive control pass
+// vacuously ever after). They read the raw env var themselves until review on
+// !341, and sharing the flag is a correctness fix rather than a tidy-up: what
+// those guards need to predict is whether `scanA11y` will take its WRITING
+// branch, and that branch is decided by THIS value. A guard that re-derives the
+// predicate from a second source is asserting about a value the writer does not
+// consult, so the two can only ever agree by coincidence.
+//
+// Evaluated once at module load rather than per call, which is safe here and
+// checked rather than assumed: nothing in the repo assigns to
+// `process.env.A11Y_UPDATE_BASELINE` (only `README.md` and this file's own
+// message text mention it), so it is fixed by the shell before the process
+// starts and cannot change between import and assertion. If that ever stops
+// being true this must become a function — a stale `false` would silently
+// un-skip both guards, which is the failure direction that matters.
+export const UPDATE_BASELINE = process.env.A11Y_UPDATE_BASELINE === "1";
 
 // Types are derived straight from AxeBuilder.analyze() so we don't depend on the
 // exact shape of axe-core's exported types.

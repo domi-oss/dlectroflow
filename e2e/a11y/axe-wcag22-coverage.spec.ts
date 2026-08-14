@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { BASELINE_PATH, WCAG_TAGS, scanA11y } from "./axe-helpers";
+import {
+  BASELINE_PATH,
+  UPDATE_BASELINE,
+  WCAG_TAGS,
+  scanA11y,
+} from "./axe-helpers";
 
 /**
  * #263 — the gate must actually EVALUATE WCAG 2.2, and be shown to bite.
@@ -421,7 +426,7 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     // the rule runs and the assertion still passes would be the false pass this
     // whole change exists to prevent.
     test.skip(
-      process.env.A11Y_UPDATE_BASELINE === "1",
+      UPDATE_BASELINE,
       "refresh mode WRITES the scanned violations into axe-baseline.json, and " +
         "a synthetic fixture must never be recorded there",
     );
@@ -452,7 +457,7 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     // Level AA floor, 44 is what `a11y-class-hygiene` enforces here (#205), and
     // a fixture is a statement about what this repo considers correct.
     test.skip(
-      process.env.A11Y_UPDATE_BASELINE === "1",
+      UPDATE_BASELINE,
       "refresh mode would DELETE this key from the baseline; harmless, but the " +
         "assertion below is not the thing refresh mode is for",
     );
