@@ -207,14 +207,20 @@ describe("the deliberately-bundled exception list stays complete", () => {
   /** Callees that are themselves a bundle — see their docblocks in `rewards.ts`. */
   const BUNDLING = ["rewardStepDone", "touchStreakOnEngagement"];
 
-  /** Every `bestEffort("tag", ws, () => callee(...))`, as [tag, callee] pairs. */
+  /** `bestEffort("tag", ws, () => …)`, capturing the tag and the thunk body. */
+  const CALL_SITE =
+    /bestEffort\(\s*"([a-z0-9_]+)"\s*,\s*\w+\s*,\s*(?:async\s*)?\(\)\s*=>\s*([\s\S]{0,200}?)\)[,;]/g;
+
+  const actionSources = () =>
+    read("../app/actions/focus.ts") + read("../app/actions/breakdown.ts");
+
+  /** Every parsed call site, as [tag, thunk body] pairs. */
+  const parsedSites = () => [...actionSources().matchAll(CALL_SITE)];
+
+  /** Those whose thunk reaches a bundling callee, as [tag, callee] pairs. */
   const callSites = () => {
-    const src =
-      read("../app/actions/focus.ts") + read("../app/actions/breakdown.ts");
     const out: { tag: string; callee: string }[] = [];
-    const re =
-      /bestEffort\(\s*"([a-z0-9_]+)"\s*,\s*\w+\s*,\s*(?:async\s*)?\(\)\s*=>\s*([\s\S]{0,200}?)\)[,;]/g;
-    for (let m = re.exec(src); m; m = re.exec(src)) {
+    for (const m of parsedSites()) {
       // `includes` rather than a built `new RegExp`: the two names cannot collide
       // as substrings, and `regexp-source-hygiene` stands in for a demoted SAST
       // rule (#234) that a pattern interpolating a variable would engage for no
@@ -323,6 +329,32 @@ describe("the deliberately-bundled exception list stays complete", () => {
       "focus_step_reward_failed",
       "step_done_bookkeeping_failed",
     ]);
+  });
+
+  /**
+   * The completeness control `callSites()` did not have, counted on the defect's
+   * own axis rather than on the outcome.
+   *
+   * `CALL_SITE` bounds the thunk body at 200 characters and requires a `,` or `;`
+   * terminator, so a site it cannot parse is simply **absent** — and every
+   * assertion here is about the three bundling tags, which a missing FOURTH site
+   * would not disturb. `sites.length >= 3` cannot see that either. So: every
+   * `bestEffort(` in the two action files must be one the parser saw.
+   *
+   * The second half pins the property `DEFECT_TAG`'s docblock in `best-effort.ts`
+   * says `!339` restored and wants to keep — one union member per call site,
+   * which is the whole reason the defect marker is deliberately not a member.
+   * Nothing tested it, so an orphaned member (or an unlisted site) was free.
+   */
+  it("sees every bestEffort call, and one union member per site", () => {
+    const calls = actionSources().split("bestEffort(").length - 1;
+    const parsed = parsedSites().map((m) => m[1]);
+
+    expect(calls).toBeGreaterThan(0);
+    expect(parsed).toHaveLength(calls);
+
+    const members = unionMembers(read("./best-effort.ts")).map((m) => m.tag);
+    expect([...parsed].sort()).toEqual([...members].sort());
   });
 
   it("marks every tag that wraps a bundling callee", () => {
