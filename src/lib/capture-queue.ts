@@ -182,11 +182,361 @@ export type QueuedCapture = {
    * was stored.
    */
   blockedBy?: CaptureBlockReason;
+  /**
+   * The workspace **the client was running under** when a 409 was last recorded.
+   *
+   * ⚠️ Not the capture's own `workspaceId` above — that is what the capture
+   * declares and is the value the 409 disagreed with, and it never changes. This
+   * is what the app's live session resolved to at the moment of the refusal,
+   * which is the only thing the client has that changes when the user signs in.
+   *
+   * It exists because a 409 does not distinguish "that workspace isn't yours"
+   * from "that workspace was purged" — deliberately, since answering that would
+   * tell whoever supplied a `workspaceId` whether it exists. A purged guest
+   * sandbox can never be resolved again, so *"sign in and these will save"*
+   * becomes a promise the app cannot keep, repeated for ever.
+   *
+   * The client cannot ask which case it is in. What it CAN observe is that the
+   * remedy it offered has already been taken and did not work: a fresh 409 while
+   * the live session resolves to a DIFFERENT workspace means the session changed
+   * between the two refusals and the capture is still refused. See
+   * {@link partitionQueue}, which is where that comparison is made.
+   *
+   * Persisted for the same reason `blockedBy` is: otherwise the comparison dies
+   * on the reload a discarded tab forces.
+   *
+   * ⚠️ **The worker never writes this**, and that is why a worker that sees a 409
+   * leaves the entry unmarked rather than marking it — it has no session to
+   * resolve, so it cannot compute the value, and a mark without it would leave
+   * the strip reasoning with half its inputs missing.
+   */
+  blockedUnder?: string;
+  /**
+   * ms epoch. The first time a client observed this entry's `workspaceId` NOT
+   * matching the live session's workspace. Cleared the moment it matches again.
+   *
+   * The reference instant orphan expiry needs — see {@link sweepUnresolvable}.
+   * `capturedAt` cannot serve: it answers "when was this typed", and an entry
+   * queued weeks ago under a workspace that resolved fine until yesterday is not
+   * an orphan while one queued a minute ago into an already-purged sandbox is on
+   * its way to being one.
+   *
+   * **A client observation, and both of its bounds are stated because neither is
+   * obvious.** It is written and read by the same device, so the cross-device
+   * clock skew that disqualifies `capturedAt` from ordering does not apply — there
+   * is only ever one clock in the comparison. A user who moves their own device
+   * clock can lengthen or shorten the window, and that is acceptable: expiry is a
+   * **storage-limitation backstop, not a security boundary**.
+   */
+  unresolvableSince?: number;
 };
 
 /** Why an enqueue was refused. Each maps to something the user is told. */
 export type EnqueueRefusal =
   "empty" | "max-items" | "max-bytes" | "storage-unavailable";
+
+/**
+ * How long a capture whose workspace no longer resolves is kept before it is
+ * removed. **A client constant, and it has to be ≥ the server's guest TTL.**
+ *
+ * The browser cannot read `GUEST_SANDBOX_TTL_HOURS`: it is a server variable
+ * (`guestSandboxTtlHours`, `src/lib/purge.ts`) and this repo has no
+ * `NEXT_PUBLIC_*` variables at all — the only mention of that prefix anywhere is
+ * a comment in `settings/page.tsx` explaining why a client component cannot read
+ * one. So this is a second surface stating the same fact, and
+ * `capture-orphan-window.ts` is the drift gate that keeps the two in step. It
+ * asserts `client >= server`, not equality: erring long only delays reclaiming
+ * bytes, while erring short deletes a capture whose workspace was going to
+ * resolve again, and that is the one outcome this module forbids everywhere.
+ *
+ * ⚠️ **An operator who sets `GUEST_SANDBOX_TTL_HOURS` above 24 moves the server
+ * side of that comparison out of CI's reach**, and the gate says so rather than
+ * implying coverage — the same boundary `log-retention` reports as undetermined
+ * rather than clean. A self-host running a longer guest TTL should raise this
+ * constant to match, or queued captures belonging to a sandbox that is still
+ * alive will be swept a day early.
+ *
+ * It is user-facing, not internal: `/privacy` states the retention as three
+ * triggers, and the third of them — *"until it can no longer be saved to any
+ * account you can reach"* — **is** this number stated in prose.
+ */
+export const CAPTURE_ORPHAN_WINDOW_HOURS = 24;
+
+/** {@link CAPTURE_ORPHAN_WINDOW_HOURS} in ms, so no caller re-does the sum. */
+export const CAPTURE_ORPHAN_WINDOW_MS = CAPTURE_ORPHAN_WINDOW_HOURS * 3_600_000;
+
+/**
+ * The sentence a collapsed group of stranded captures carries.
+ *
+ * **This is the group KEY, and it is a state rather than a workspace on
+ * purpose.** Grouping by workspace would leak how many distinct prior sessions
+ * this browser has held; grouping by state leaks nothing the sentence does not
+ * already say, since none of the sentences contains user-typed text.
+ *
+ * `session-changed` is not a `blockedBy` value and deliberately is not one: it is
+ * the RESULT of comparing `blockedUnder` against the live session, computed at
+ * render time out of state the app already holds. A persisted verdict is the
+ * `signInTried` flag the spec replaced — a flag nothing sets reads false for
+ * ever, which is precisely the forever-promise bug it was added to fix.
+ */
+export const STRANDED_STATES = [
+  /** No refusal recorded. Neutral copy: "from an earlier sign-in". */
+  "unmarked",
+  /** 409, and the live session still resolves to `blockedUnder`. Offer the sign-in. */
+  "session-expired",
+  /**
+   * 409, and the live session resolves to something ELSE. The remedy has already
+   * been taken and did not work, so the copy withdraws it.
+   */
+  "session-changed",
+  /** 403. Signing in cannot help, so no sign-in is offered. */
+  "account-revoked",
+] as const;
+
+export type StrandedState = (typeof STRANDED_STATES)[number];
+
+/**
+ * One collapsed row: how many, which entries, and which sentence.
+ *
+ * `clientKeys` rather than the captures themselves, and that is the privacy
+ * property rather than an efficiency one — **the words must not be in what the
+ * strip is handed**, or a later render can leak them by accident. The keys are
+ * what the group's discard-without-revealing control needs and nothing more.
+ */
+export type StrandedGroup = {
+  state: StrandedState;
+  count: number;
+  clientKeys: string[];
+};
+
+/**
+ * Split the stored queue into what this session may show and what it may only
+ * count.
+ *
+ * `localStorage` is scoped to the **origin**, not to a session or a workspace, so
+ * user A queues text, signs out, user B signs in on the same browser, and without
+ * this the strip renders A's unsaved words to B.
+ *
+ * ⚠️ **Scoping the text is necessary and not sufficient, which is why this
+ * returns groups and not just a number.** A bare match-or-hide filter makes every
+ * state the scoping rule exists to serve unreachable: a 409 means the resolved
+ * workspace already disagrees with the entry, so the entry is non-matching in the
+ * very render that is supposed to say *"Your session expired. Sign in and these
+ * will save."* Hiding the row takes the copy with it, and `blockedUnder` becomes
+ * dead code — for any visible entry it equals the live workspace by construction.
+ *
+ * So a group carries the **state** as well as the count. The words stay hidden in
+ * every one of them.
+ *
+ * An unresolved `liveWorkspaceId` (the empty string — the strip can render before
+ * the prop settles) matches nothing. Showing nothing is the safe direction;
+ * treating it as a wildcard would reveal every entry on the origin.
+ */
+export function partitionQueue(
+  queue: QueuedCapture[],
+  liveWorkspaceId: string,
+): { mine: QueuedCapture[]; stranded: StrandedGroup[] } {
+  const mine: QueuedCapture[] = [];
+  // A Map keeps first-seen insertion order, which is the array's own order — the
+  // single source of truth for display order. Nothing here sorts.
+  const stranded = new Map<StrandedState, StrandedGroup>();
+
+  for (const entry of queue) {
+    if (liveWorkspaceId !== "" && entry.workspaceId === liveWorkspaceId) {
+      mine.push(entry);
+      continue;
+    }
+    const state = strandedStateOf(entry, liveWorkspaceId);
+    const group = stranded.get(state);
+    if (group) {
+      group.count += 1;
+      group.clientKeys.push(entry.clientKey);
+    } else {
+      stranded.set(state, {
+        state,
+        count: 1,
+        clientKeys: [entry.clientKey],
+      });
+    }
+  }
+
+  return { mine, stranded: [...stranded.values()] };
+}
+
+/**
+ * Which sentence one stranded entry belongs under.
+ *
+ * The `session-expired` → `session-changed` step is the whole reason
+ * `blockedUnder` is persisted: otherwise the comparison dies on the reload a
+ * discarded tab forces, and the app tells the user to sign in when it has already
+ * watched them do it.
+ *
+ * A missing `blockedUnder` on a `session-expired` entry keeps the sign-in offer.
+ * That is the conservative direction — the mark is only written together with the
+ * workspace, so an absent one means "written by something that could not compute
+ * it", which is the worker (see the mirror carve-out), and the worker's own rule
+ * is that a 409 it observes is left for a foreground tab to record properly.
+ */
+function strandedStateOf(
+  entry: QueuedCapture,
+  liveWorkspaceId: string,
+): StrandedState {
+  if (entry.blockedBy === "account-revoked") return "account-revoked";
+  if (entry.blockedBy === "session-expired") {
+    return entry.blockedUnder !== undefined &&
+      entry.blockedUnder !== liveWorkspaceId
+      ? "session-changed"
+      : "session-expired";
+  }
+  return "unmarked";
+}
+
+/**
+ * Age out captures whose workspace this browser can no longer reach, and keep the
+ * clock that decides when they have.
+ *
+ * Three jobs, and the middle one is the one an implementation gets wrong:
+ *
+ *  * **stamp** `unresolvableSince` the first time an entry's workspace does not
+ *    match the live session;
+ *  * **leave an existing stamp alone** on a later read that still does not match.
+ *    Rewriting it on every read means nothing ever expires, and the test for that
+ *    is the only thing standing between this and a promise on `/privacy` that
+ *    cannot be kept;
+ *  * **clear it** the moment the workspace matches again — an entry queued weeks
+ *    ago under a workspace that resolved fine until yesterday is not an orphan.
+ *
+ * Then an entry past {@link CAPTURE_ORPHAN_WINDOW_MS} is removed, because the
+ * notice's retention promise — until it saves, or the user clears it, or it can no
+ * longer be saved to any account they can reach — is **false** for an entry where
+ * neither of the first two can ever fire. Storage limitation is not optional.
+ *
+ * ⚠️ **`capturedAt` cannot serve as the reference instant** and this deliberately
+ * does not consult it: it answers "when was this typed", which is a different
+ * question with a different answer, and reusing it would also contradict its own
+ * rule (the age display and nothing else).
+ *
+ * **Writes nothing when nothing changed.** This runs on every mount, so a no-op
+ * that still committed would put a `JSON.stringify` of as much as 64 KB and a
+ * `setItem` on the load path of every page view, and would fire a `storage` event
+ * in every other tab for no reason.
+ */
+export function sweepUnresolvable(
+  store: QueueStore | null | undefined,
+  liveWorkspaceId: string,
+  now: number,
+): ApplyFlushResult {
+  if (!store) return { ok: false, reason: "storage-unavailable" };
+
+  for (let attempt = 1; ; attempt++) {
+    const { raw, queue: latest } = readStored(store);
+    const next = applySweep(latest, liveWorkspaceId, now);
+    const payload = serialise(next);
+
+    // Nothing to do — and reporting `ok` on a write that never happened is
+    // correct here in a way it would not be for a flush: the store already holds
+    // exactly this value, so no caller is being told a write landed that did not.
+    if (raw !== null && payload.serialised === raw) {
+      return { ok: true, queue: next };
+    }
+    if (raw === null && payload.empty) return { ok: true, queue: next };
+
+    // Same reasoning as `enqueue` and `applyFlushOutcome`: recompute rather than
+    // write a queue built on a value another tab has already replaced.
+    if (attempt < COMMIT_ATTEMPTS && readRaw(store) !== raw) continue;
+
+    if (!write(store, payload)) {
+      return { ok: false, reason: "storage-unavailable" };
+    }
+    return { ok: true, queue: next };
+  }
+}
+
+/** The sweep as a delta on a fresh read — never a snapshot written back over it. */
+function applySweep(
+  queue: QueuedCapture[],
+  liveWorkspaceId: string,
+  now: number,
+): QueuedCapture[] {
+  const next: QueuedCapture[] = [];
+  for (const entry of queue) {
+    const resolves =
+      liveWorkspaceId !== "" && entry.workspaceId === liveWorkspaceId;
+    if (resolves) {
+      if (entry.unresolvableSince === undefined) {
+        next.push(entry);
+      } else {
+        const { unresolvableSince: _cleared, ...rest } = entry;
+        next.push(rest);
+      }
+      continue;
+    }
+    // ⚠️ An unresolved live workspace (`""`) must not START the clock. The strip
+    // can render before its prop settles, and a boot that stamps every entry
+    // would begin expiring the whole origin on a render that knows nothing.
+    if (liveWorkspaceId === "") {
+      next.push(entry);
+      continue;
+    }
+    const since = entry.unresolvableSince ?? now;
+    if (now - since > CAPTURE_ORPHAN_WINDOW_MS) continue;
+    next.push(
+      entry.unresolvableSince === since
+        ? entry
+        : { ...entry, unresolvableSince: since },
+    );
+  }
+  return next;
+}
+
+/**
+ * Throw a capture away, at the user's explicit request. **The only path in this
+ * module that drops words the server has not accounted for.**
+ *
+ * It exists because two refusal states are permanent — an `account-revoked` 403,
+ * and a 409 whose `blockedUnder` comparison has already shown a sign-in will not
+ * help — and without it those entries sit in the key for ever, consuming the
+ * origin-wide byte cap. That is a **denial of capture**: the next capture that
+ * does not fit is refused with "no room until some of these save", a wait for
+ * something that can never happen. Every refusal message tells the user to copy
+ * their words out, and advice to copy something out with no way to then put it
+ * down is not advice.
+ *
+ * Takes one key or several, because a collapsed stranded group is discarded as a
+ * group — its entries cannot be shown individually, so they cannot be discarded
+ * individually either. It is still not a "clear all": the caller passes the keys
+ * of one group, never the queue.
+ *
+ * **Not a flush. Reaches no network.** A discarded capture was never saved and is
+ * not being deleted from the server.
+ *
+ * ⚠️ **The caller must delete from the IndexedDB mirror FIRST and await it**, then
+ * call this — see `capture-mirror.ts`. The reverse order lets a `sync` event
+ * between the two `POST` a capture the user has just discarded, which is the one
+ * outcome a Discard control must never produce.
+ */
+export function discardCapture(
+  store: QueueStore | null | undefined,
+  clientKeys: string | readonly string[],
+): ApplyFlushResult {
+  if (!store) return { ok: false, reason: "storage-unavailable" };
+  const doomed = new Set(
+    typeof clientKeys === "string" ? [clientKeys] : clientKeys,
+  );
+
+  for (let attempt = 1; ; attempt++) {
+    const { raw, queue: latest } = readStored(store);
+    const next = latest.filter((c) => !doomed.has(c.clientKey));
+    const payload = serialise(next);
+
+    if (attempt < COMMIT_ATTEMPTS && readRaw(store) !== raw) continue;
+
+    if (!write(store, payload)) {
+      return { ok: false, reason: "storage-unavailable" };
+    }
+    return { ok: true, queue: next };
+  }
+}
 
 export type EnqueueResult =
   { ok: true; queue: QueuedCapture[] } | { ok: false; reason: EnqueueRefusal };
@@ -316,7 +666,21 @@ function isQueuedCapture(value: unknown): value is QueuedCapture {
     c.workspaceId.length > 0 &&
     typeof c.capturedAt === "number" &&
     Number.isFinite(c.capturedAt) &&
-    (c.blockedBy === undefined || isCaptureBlockReason(c.blockedBy))
+    (c.blockedBy === undefined || isCaptureBlockReason(c.blockedBy)) &&
+    // Emptiness-checked like the three required strings, and for the same reason
+    // one step along: a blank `blockedUnder` compares unequal to every real
+    // workspace id, so it would read as "the session has changed" for ever and
+    // withdraw a sign-in that would have worked.
+    (c.blockedUnder === undefined ||
+      (typeof c.blockedUnder === "string" && c.blockedUnder.length > 0)) &&
+    // ⚠️ Finiteness, not just `typeof number`. A stored `NaN` (or a `null`, which
+    // is `typeof "object"` but is the shape a truncated write leaves) makes the
+    // expiry comparison silently `NaN`, and `NaN` compares false — so a corrupt
+    // entry would become PERMANENT rather than loud, which is the opposite of
+    // what this guard is for.
+    (c.unresolvableSince === undefined ||
+      (typeof c.unresolvableSince === "number" &&
+        Number.isFinite(c.unresolvableSince)))
   );
 }
 
@@ -451,7 +815,18 @@ export function enqueue(
     // a way past 20 items or 64 KB. Over either, the INCOMING capture is the one
     // refused and nothing already queued is touched — the same contract as the
     // cap itself, which is why these paths write nothing at all.
-    if (latest.length >= CAPTURE_QUEUE_MAX_ITEMS) {
+    //
+    // ⚠️ **The two caps count different populations, and the split follows the
+    // purpose each was given** (owner decision 2026-08-12, spec: *"A shared
+    // browser"*). The ITEM cap counts **this workspace's** entries, because its
+    // stated job is keeping the strip legible and the wait comprehensible —
+    // properties of what this user can see, and they cannot see another
+    // workspace's. The BYTE cap below counts **every entry in the key**, because
+    // its job is preventing `QuotaExceededError` and the quota is charged per
+    // origin. Getting the split backwards passes any test that only checks "a cap
+    // fired", which is why both directions have one.
+    const mine = latest.filter((c) => c.workspaceId === entry.workspaceId);
+    if (mine.length >= CAPTURE_QUEUE_MAX_ITEMS) {
       return { ok: false, reason: "max-items" };
     }
     const next = [...latest, entry];
@@ -506,12 +881,13 @@ export function applyFlushOutcome(
   store: QueueStore | null | undefined,
   clientKey: string,
   outcome: FlushOutcome,
+  liveWorkspaceId?: string,
 ): ApplyFlushResult {
   if (!store) return { ok: false, reason: "storage-unavailable" };
 
   for (let attempt = 1; ; attempt++) {
     const { raw, queue: latest } = readStored(store);
-    const next = applyOutcome(latest, clientKey, outcome);
+    const next = applyOutcome(latest, clientKey, outcome, liveWorkspaceId);
     const payload = serialise(next);
 
     // Same reasoning as `enqueue`: recompute rather than write a queue built on a
@@ -579,6 +955,7 @@ function applyOutcome(
   queue: QueuedCapture[],
   clientKey: string,
   outcome: FlushOutcome,
+  liveWorkspaceId?: string,
 ): QueuedCapture[] {
   if (outcome === "saved" || outcome === "duplicate") {
     return queue.filter((c) => c.clientKey !== clientKey);
@@ -590,13 +967,33 @@ function applyOutcome(
     // of itself, so the entry is returned untouched.
     if (isStickyBlock(c.blockedBy)) return c;
 
-    if (isCaptureBlockReason(outcome)) return { ...c, blockedBy: outcome };
+    if (isCaptureBlockReason(outcome)) {
+      // ⚠️ `blockedUnder` is recorded with the 409 that produced it, and is
+      // re-pointed at the CURRENT session on every later 409. It has to follow
+      // the session rather than being written once: the comparison the strip
+      // makes is "does the live workspace still equal `blockedUnder`", so a value
+      // frozen at the first refusal makes the withdrawal permanent after a single
+      // sign-in — the forever-promise bug with the sign reversed.
+      //
+      // Only for `session-expired`. A 403 is terminal on the status alone and its
+      // copy offers no sign-in, so there is nothing for the comparison to decide
+      // and a second at-rest copy of the live workspace would have no reader.
+      if (outcome === "session-expired" && liveWorkspaceId) {
+        return { ...c, blockedBy: outcome, blockedUnder: liveWorkspaceId };
+      }
+      return { ...c, blockedBy: outcome };
+    }
     // `retry` — reaching a retryable failure proves the SESSION guard is no
     // longer what is stopping this capture, so a `session-expired` mark must go.
     // Left in place, the strip would keep asking for a sign-in that has already
     // happened. It does NOT prove anything about a revoked account, which is why
     // the sticky check above comes first.
-    const { blockedBy: _cleared, ...rest } = c;
+    //
+    // `blockedUnder` goes with it: it is the raw input to the 409 comparison and
+    // means nothing without the mark. Left behind, it would be compared against a
+    // future 409's session and could withdraw a sign-in on the strength of a
+    // refusal that has since been superseded.
+    const { blockedBy: _cleared, blockedUnder: _under, ...rest } = c;
     return rest;
   });
 }
@@ -679,17 +1076,63 @@ let clockKeySeq = 0;
  * collision-**free** within a session, and separated across sessions by the
  * millisecond, which is strictly better than anything probabilistic.
  *
+ * ── `taken`: the cross-tab guard, added in MR 2 (#175) ──────────────────────
+ *
+ * The module counter is scoped to a **JS realm**, so it is per-TAB and not
+ * per-origin: two tabs each load their own instance, each counter starts at zero,
+ * and two tier-3 realms minting in the same millisecond draw the **same key**.
+ * Under `@@unique([workspaceId, clientKey])` the second is then read as a replay,
+ * the route answers `200 — already saved`, and the capture is **silently lost**.
+ *
+ * That is not reachable by one person — it needs two Enter presses in two tabs
+ * inside one millisecond, and a flush mints nothing (replaying the existing key
+ * IS the idempotency mechanism). **The guard is taken anyway** because it costs
+ * one set membership test and removes the argument: pass the `clientKey`s already
+ * in the queue and a candidate colliding with any of them is redrawn. Collision-
+ * free across tabs for every entry still queued, which is exactly the window in
+ * which a collision loses words.
+ *
+ * ⚠️ **It is not a proof of uniqueness and must not be described as one.** A
+ * collision against a twin that has already flushed and left the queue still
+ * resolves to `200`. Same same-millisecond coincidence, so the reachability is
+ * unchanged and no further guard is warranted.
+ *
+ * ⚠️ **Divergence from the spec, stated rather than hidden.** The spec has tier 3
+ * compare against the fresh read `enqueue` already holds inside its CAS window,
+ * *"at no extra read"*. It is done here instead, one call earlier, because
+ * `enqueue` deliberately treats a colliding `clientKey` as **the same capture
+ * replayed** and returns `ok` without storing — which is right for a double-tapped
+ * Retry and is precisely the silent drop this guard exists to prevent, so the two
+ * cannot share one comparison. The cost is one `readQueue` in the hook that mints
+ * the key. Tiers 1 and 2 get the same treatment for uniformity; for them it never
+ * fires.
+ *
  * The residual, stated rather than implied: two loads of a `crypto`-less runtime
- * starting inside the same millisecond would draw the same key. Nothing short of
- * randomness fixes that, it is the tier that needs no `crypto` at all to have been
- * present, and it is not worth a third mechanism.
+ * starting inside the same millisecond would draw the same key **and neither
+ * would be in the other's queue read**. Nothing short of randomness fixes that,
+ * it is the tier that needs no `crypto` at all to have been present, and it is not
+ * worth a third mechanism.
  *
  * **Still never throws**, which is the property that matters most and now holds
  * more simply than it did: this function failing would take capture down with it,
  * and that is worse than a weak key. `Date.now`, `toString(36)` and `padStart`
  * cannot fail.
  */
-export function newClientKey(): string {
+export function newClientKey(taken?: Iterable<string>): string {
+  const rivals = taken instanceof Set ? taken : new Set(taken ?? []);
+  // Bounded, not `while (true)`. For tiers 1 and 2 a second collision is a
+  // ~2^-128 event and a loop that cannot terminate is a worse failure than a
+  // duplicate key would be; tier 3 is a monotonic counter, so it needs at most
+  // one step per rival and this bound is generous against a full queue.
+  for (let attempt = 0; attempt < CAPTURE_QUEUE_MAX_ITEMS + 2; attempt++) {
+    const candidate = drawClientKey();
+    if (!rivals.has(candidate)) return candidate;
+  }
+  return drawClientKey();
+}
+
+/** One draw, before the collision check. The three tiers live here. */
+function drawClientKey(): string {
   const c: Crypto | undefined = globalThis.crypto;
   if (typeof c?.randomUUID === "function") return c.randomUUID();
 
