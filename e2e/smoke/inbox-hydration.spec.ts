@@ -267,8 +267,60 @@ const SUB_MINUTE_AGE = /^\d{1,2}s$/;
  * Where one inbox row's markup ends and the next begins. Every row is an `<li>`
  * (`needsReview.map` over `<ItemRow>`), so this is what bounds a per-row search
  * to the row it is about.
+ *
+ * A real tag rather than the three characters `<li`, which are also the start of
+ * `<link` and `<line` — and the measured response carries TEN of those: five
+ * `<link>` in the head and five lucide `<line>` in the header's icons. Raised in
+ * review on !346 for `<link`, but `<line` is the one that will bite: this row
+ * currently renders emoji controls, and the repo's icons are `lucide-react`, so
+ * the row's own markup is one icon change away from streaming an SVG between the
+ * title and the age label. That would truncate the slice before the label and
+ * report a row that HAS an age as having none — a RED e2e_test for a reason
+ * unrelated to hydration, which is the failure class #193 is about. Requiring
+ * the delimiter that ends a real tag name keeps this about `<li>` elements.
+ *
+ * Falsified before fixing, by splicing one of this response's own lucide `<line>`
+ * elements between a row's title and its label: the three-character form returned
+ * `null` for a row whose age was right there, and this one returned `"0s"`.
  */
-const ROW_ELEMENT_START = "<li";
+const ROW_ELEMENT_START = /<li[\s/>]/;
+
+/**
+ * A digit immediately after a row's text means the match is a LONGER row id, not
+ * this row: at `SEED_COUNT >= 10`, `"hydration-105 dark 1"` is a prefix of
+ * `"hydration-105 dark 10"`. Raised in review on !346.
+ *
+ * Not merely a rare ordering — `needsReview` does not stream the rows in seeded
+ * order (measured on the real response: 1, 5, 4, 3, 0, 2), so which of the two
+ * `indexOf` reaches first is effectively a coin flip per run. And it fails in the
+ * SILENT direction: a fresh row 10 would lend its `0s` to a row 1 that was absent
+ * or already past the band, so the guard would report a precondition it never
+ * checked. Non-global — see `SERVED_AGE_LABEL` for why that matters here.
+ *
+ * Falsified before fixing, by renaming this response's own rows so a `10` streams
+ * ahead of a `1` that the server rendered `captured 7m ago`: the plain search
+ * reported `"0s"` for row 1 and the precondition PASSED; this one reports `"7m"`
+ * and it fails. Both forms read `"0s"` for all six rows as actually served, so the
+ * change is inert at `SEED_COUNT = 6`.
+ */
+const ROW_TEXT_CONTINUES = /^\d/;
+
+/**
+ * The offset of the first occurrence of `rowText` that is a WHOLE row id, or -1
+ * if there is none. `charAt` past the end returns `""`, which `ROW_TEXT_CONTINUES`
+ * does not match, so a row whose text ends the document is accepted rather than
+ * skipped.
+ */
+function wholeRowTextStart(html: string, rowText: string): number {
+  for (
+    let at = html.indexOf(rowText);
+    at !== -1;
+    at = html.indexOf(rowText, at + 1)
+  ) {
+    if (!ROW_TEXT_CONTINUES.test(html.charAt(at + rowText.length))) return at;
+  }
+  return -1;
+}
 
 /**
  * The age the server rendered for ONE seeded row, or null if that row is not in
@@ -291,7 +343,7 @@ const ROW_ELEMENT_START = "<li";
  */
 function servedAgeForRow(html: string, rowText: string): string | null {
   const normalised = html.replace(REACT_TEXT_SEPARATOR, "");
-  const rowAt = normalised.indexOf(rowText);
+  const rowAt = wholeRowTextStart(normalised, rowText);
   if (rowAt === -1) return null;
   // Bounded to this row's own <li>. Raised in review on !346: searching forward
   // to the end of the document would make a row that rendered NO label silently
@@ -299,8 +351,11 @@ function servedAgeForRow(html: string, rowText: string): string | null {
   // very guard that exists to catch a missing one. Falsified before fixing:
   // deleting one row's label from a real captured response returned "0s" for it
   // unbounded and null bounded.
-  const nextRowAt = normalised.indexOf(ROW_ELEMENT_START, rowAt);
-  const row = normalised.slice(rowAt, nextRowAt === -1 ? undefined : nextRowAt);
+  const nextRow = ROW_ELEMENT_START.exec(normalised.slice(rowAt));
+  const row =
+    nextRow === null
+      ? normalised.slice(rowAt)
+      : normalised.slice(rowAt, rowAt + nextRow.index);
   return SERVED_AGE_LABEL.exec(row)?.[1] ?? null;
 }
 
