@@ -812,11 +812,22 @@ misconfigured origin rule or a body genuinely over the cap retries forever — b
 client that deletes a capture on a status the server may be returning for a reason the client cannot see.
 **A wasted retry is recoverable; a dropped capture is not.**
 
-⚠️ **A terminal mark is taken from the parsed body, never from the status line.** The route answers
-`{ "status": "account-revoked" }` alongside its `403`, and the mark is set only when the body carries a
-recognised `FlushOutcome`. This matters because a `403` the app did not send — an auth proxy in front of a
-self-host, an ingress rule, a corporate filter — would otherwise permanently mark a perfectly good capture
-*"This account can no longer save"*, whose only exit is deliberately destroying the words.
+⚠️ **A terminal mark needs the status line AND the parsed body to agree.** The route answers
+`{ "status": "account-revoked" }` alongside its `403`, and the mark is set only when **both** the `403` and
+the recognised `FlushOutcome` in the body are present. This matters because either control alone is
+reachable from something the app did not author: a `403` it did not send — an auth proxy in front of a
+self-host, an ingress rule, a corporate filter — or a proxy error page answering `500` with a JSON body of
+its own that happens to carry `status: "account-revoked"`. Either would permanently mark a perfectly good
+capture *"This account can no longer save"*, whose only exit is deliberately destroying the words.
+
+⚠️ **Corrected during `!348` (client half), and the correction is the reason this paragraph is worth
+re-reading rather than skimming.** It previously read *"taken from the parsed body, **never from the status
+line**"*, and named only the spurious-`403` direction. `use-capture-queue.ts` was written to the strict
+conjunction and its own comment then restated this sentence, so the code and the prose beside it disagreed;
+`public/sw.js` — which can import nothing and therefore copies the rule by hand — implemented **this
+sentence**, and Duo review round 2 found the two flush paths classifying one response two different ways, in
+the direction that loses words. **Both halves are load-bearing and each looks redundant while the other
+stands**, which is the same trap the CSRF section records: the danger is a future reader tidying one away.
 
 ⚠️ **And the CSRF refusal is `400`, not `403`, deliberately.** `403` already means `account-revoked` in this
 vocabulary, so reusing it would collapse two states with different remedies — the same defect this document

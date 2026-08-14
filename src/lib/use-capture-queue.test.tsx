@@ -251,11 +251,31 @@ describe("useCaptureQueue — the flush (#175)", () => {
     );
   });
 
-  it("takes a terminal mark from the BODY, never from the status line", async () => {
+  it("needs the BODY as well as the status line — a bare 403 is retryable", async () => {
     // A 403 from an auth proxy, an ingress rule or a corporate filter must not
     // permanently mark a good capture "this account can no longer save", whose
     // only exit is the user deliberately destroying the words.
     fetchMock.mockResolvedValue(jsonReply(403, { error: "blocked by proxy" }));
+    seed([capture()]);
+    render(<Host />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(readQueue(window.localStorage)[0]?.blockedBy).toBeUndefined();
+  });
+
+  /**
+   * The other half of the same conjunction, asserted here as well as in
+   * `capture-sync-worker.test.ts` — deliberately, and not as duplication.
+   *
+   * Duo review round 2 on `!348` found `public/sw.js` and this hook classifying
+   * one response two different ways. `outcomeOf` already had the strict rule, so a
+   * test only on the worker would pin the fix at the site that happened to be
+   * wrong rather than the rule both sites owe. The two flush paths cannot share
+   * code — the worker imports nothing — so they are held together by having the
+   * same pair of cases on each side.
+   */
+  it("needs the STATUS as well as the body — a 500 that says account-revoked is retryable", async () => {
+    fetchMock.mockResolvedValue(jsonReply(500, { status: "account-revoked" }));
     seed([capture()]);
     render(<Host />);
 

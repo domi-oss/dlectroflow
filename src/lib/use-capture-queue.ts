@@ -201,11 +201,23 @@ function broadcast(): void {
 function outcomeOf(status: number, body: unknown): FlushOutcome {
   if (status === 201) return "saved";
   if (status === 200) return "duplicate";
-  // ⚠️ A terminal mark is taken from the parsed BODY, never from the status line.
-  // A 403 the app did not send — an auth proxy in front of a self-host, an
-  // ingress rule, a corporate filter — would otherwise permanently mark a
+  // ⚠️ A terminal mark needs the status line AND the parsed body to agree, and
+  // `flushOne` in public/sw.js must keep the same rule — it can import nothing,
+  // so the agreement is carried by tests on both sides and by this note.
+  //
+  // Either control alone is reachable from something the app did not author: a
+  // 403 from an auth proxy, an ingress rule or a corporate filter in front of the
+  // route; or a proxy error page answering 5xx with a JSON body of its own that
+  // happens to carry `status: "account-revoked"`. Either would permanently mark a
   // perfectly good capture "this account can no longer save", whose only exit is
   // the user deliberately destroying the words.
+  //
+  // ⚠️ This comment used to read "taken from the parsed BODY, never from the
+  // status line", which is what the merged spec says and is NOT what the two
+  // lines below do. Duo review round 2 on `!348` found the worker had implemented
+  // the comment rather than the code, so the two flush paths disagreed about the
+  // same response — in the direction that loses words. The rule is the strict
+  // conjunction; do not relax either half back toward the prose.
   const declared =
     typeof body === "object" && body !== null
       ? (body as { status?: unknown }).status

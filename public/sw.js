@@ -157,11 +157,25 @@ function writeMirror(db, work) {
 /**
  * Flush one capture. Returns `"done"`, `"terminal"` or `"retry"`.
  *
- * ⚠️ **The terminal mark is taken from the parsed BODY, never from the status
- * line.** A 403 the app did not send — an auth proxy in front of a self-host, an
- * ingress rule, a corporate filter — would otherwise permanently mark a
- * perfectly good capture "this account can no longer save", whose only exit is
- * the user deliberately destroying the words.
+ * ⚠️ **A terminal mark needs the status line AND the parsed body to agree, and
+ * this must stay identical to `outcomeOf` in src/lib/use-capture-queue.ts.**
+ * Either control alone is reachable from something the app did not author:
+ *
+ *  * body alone — a proxy error page, a self-host's ingress, a misconfigured
+ *    upstream answering `500` with a JSON body of its own that happens to carry
+ *    `status: "account-revoked"`;
+ *  * status alone — a 403 from an auth proxy, an ingress rule or a corporate
+ *    filter in front of the route.
+ *
+ * Either one would permanently mark a perfectly good capture "this account can no
+ * longer save", whose only exit is the user deliberately destroying the words.
+ * The body check was here from the start; the status check is Duo review round 2
+ * on `!348`, which found the two flush paths disagreeing about the same response
+ * — the foreground read it as retryable and the worker as terminal.
+ *
+ * **Both directions are pinned by tests** (`capture-sync-worker.test.ts`), and
+ * that matters more than usual here: dropping either half leaves a guard that
+ * reads as complete, and the failure it lets through is silent and permanent.
  *
  * Everything unrecognised is `"retry"`, deliberately: a wasted retry is
  * recoverable and a dropped capture is not.
@@ -202,7 +216,13 @@ async function flushOne(entry) {
   // the CLIENT was running under" — and the worker has no session to resolve, so
   // it cannot compute one. A 409 it sees is therefore left unmarked and simply
   // retried; the next foreground flush records it properly.
-  if (body && body.status === "account-revoked") return "terminal";
+  //
+  // The `403` comparand is the same one `outcomeOf` uses, deliberately spelled
+  // out rather than derived: this file can import nothing, so agreement between
+  // the two paths is carried by the tests and by this note.
+  if (response.status === 403 && body && body.status === "account-revoked") {
+    return "terminal";
+  }
   return "retry";
 }
 

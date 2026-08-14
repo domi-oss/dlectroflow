@@ -321,7 +321,7 @@ describe("sw.js — the sync handler drains the mirror (#175)", () => {
     expect(rows[0]?.blockedBy).toBe("account-revoked");
   });
 
-  it("takes the terminal mark from the BODY, never from the status line", async () => {
+  it("needs the BODY as well as the status line — a bare 403 is retryable", async () => {
     // A 403 the app did not send — an auth proxy in front of a self-host, an
     // ingress rule, a corporate filter — must not permanently mark a perfectly
     // good capture "this account can no longer save", whose only exit is
@@ -335,6 +335,59 @@ describe("sw.js — the sync handler drains the mirror (#175)", () => {
     expect(
       harness.idb.rows(CAPTURE_MIRROR_STORE)[0]?.blockedBy,
     ).toBeUndefined();
+  });
+
+  /**
+   * Duo review round 2 on `!348` — the other half of the same cross-check, and
+   * the half that was missing.
+   *
+   * The docblock above `flushOne` used to read *"the terminal mark is taken from
+   * the parsed BODY, never from the status line"*, and the worker implemented
+   * exactly that: **any** status whose body happened to parse as
+   * `{ status: "account-revoked" }` was terminal. `outcomeOf` in
+   * `use-capture-queue.ts` has always required `403 && account-revoked`, so the
+   * two flush paths disagreed about the same response — and they disagreed in the
+   * direction that loses words, because the worker's arm is the one that writes a
+   * mark whose only exit is the user destroying the capture.
+   *
+   * The reachable shape is the mirror image of the case above: something between
+   * the app and the route — a proxy error page, a self-host's ingress, a
+   * misconfigured upstream — answering `500` (or `200`) with a JSON body it did
+   * not author. Both controls have to hold, so both are asserted.
+   *
+   * A 500 is chosen for the case rather than a 200 because a 200 already exits at
+   * `flushOne`'s `done` branch before any body is read, so it could never reach
+   * the mark at all and would pass against the defect.
+   */
+  it("needs the STATUS as well as the body — a 500 that says account-revoked is retryable", async () => {
+    const harness = await loadWorker(() =>
+      reply(500, { status: "account-revoked" }),
+    );
+    seedMirror(harness, [entry()]);
+
+    // Retryable, so the pass must reject: rejecting is the only way the platform
+    // comes back with no tab open, and this capture is still saveable.
+    await expect(harness.fireSync()).rejects.toBeTruthy();
+    expect(
+      harness.idb.rows(CAPTURE_MIRROR_STORE)[0]?.blockedBy,
+    ).toBeUndefined();
+  });
+
+  /**
+   * The non-vacuous control for the pair above: the same body on the same status
+   * the app really does send still marks. Without it, "no mark was written" would
+   * also be the answer if the mark had stopped working altogether.
+   */
+  it("still marks on the 403 the route actually sends", async () => {
+    const harness = await loadWorker(() =>
+      reply(403, { status: "account-revoked" }),
+    );
+    seedMirror(harness, [entry()]);
+
+    await expect(harness.fireSync()).resolves.toBeDefined();
+    expect(harness.idb.rows(CAPTURE_MIRROR_STORE)[0]?.blockedBy).toBe(
+      "account-revoked",
+    );
   });
 
   it("never writes session-expired, even on a 409 that says so", async () => {
