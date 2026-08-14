@@ -26,6 +26,27 @@ describe("jobBlock", () => {
   it("returns null for a job that does not exist", () => {
     expect(jobBlock("a_job:\n  stage: deploy", "nope")).toBeNull();
   });
+
+  it("finds the job when its own key line carries a trailing comment (#226)", () => {
+    // The exposure `#226` was filed for, one level up from the reported symptom:
+    // the start line used to be matched with `l === `${job}:``, so annotating the
+    // key made the block unfindable and every assertion below report that the job
+    // is missing from the file. `ci-docs-only`'s sibling extractor already reads
+    // its key through `withoutComment` for exactly this reason.
+    const yml = [
+      "a_job: # teardown, see #145",
+      "  stage: deploy",
+      "  needs: []",
+    ].join("\n");
+    expect(jobBlock(yml, "a_job")).toEqual(["  stage: deploy", "  needs: []"]);
+  });
+
+  it("does not accept a key whose value merely starts with the job name", () => {
+    // The reason the key match is not a `startsWith`: `a_job: some-value` is a
+    // scalar binding, not a block. Pinned alongside the comment tolerance above
+    // so widening one does not quietly widen the other.
+    expect(jobBlock("a_job: some-value\n  x: 1", "a_job")).toBeNull();
+  });
 });
 
 describe("parseJobNeeds", () => {
@@ -92,6 +113,43 @@ describe("parseJobNeeds", () => {
   it("returns null for a job that does not exist", () => {
     expect(parseJobNeeds("j:\n  needs: []", "absent_job")).toBeNull();
   });
+
+  it("reads the empty flow form when it carries a trailing comment (#226)", () => {
+    // The same blindness as `declaresStopAction`, and this one is the worst of
+    // the three because it does not merely miss: `[] # why` failed the `=== "[]"`
+    // test, fell through to the flow-sequence branch, and came back as
+    // `{ kind: "list", jobs: ["] # why"] }` — a dependency on a job that cannot
+    // exist. The live file carries a twenty-line comment above `needs: []`
+    // explaining why it is load-bearing, so an inline restatement is an
+    // unremarkable edit.
+    expect(
+      parseJobNeeds("j:\n  needs: [] # load-bearing, see #145", "j"),
+    ).toEqual({ kind: "empty" });
+  });
+
+  it("reads the flow-sequence form when it carries a trailing comment (#226)", () => {
+    expect(
+      parseJobNeeds("j:\n  needs: [build_app] # artifacts only", "j"),
+    ).toEqual({ kind: "list", jobs: ["build_app"] });
+  });
+
+  it("keeps a `#` that is inside a quoted scalar rather than reading it as a comment (#226)", () => {
+    // The direction stripping must NOT break. `.gitlab-ci.yml`'s rules are full
+    // of quoted `if:` expressions, and this repo's own guard modules cite issue
+    // numbers inside them; cutting at the first `#` regardless of quote state
+    // would truncate a value and answer with a job name that was never written.
+    const yml = [
+      "j:",
+      "  needs:",
+      '    - job: "build#1"',
+      "  script:",
+      "    - true",
+    ].join("\n");
+    expect(parseJobNeeds(yml, "j")).toEqual({
+      kind: "list",
+      jobs: ["build#1"],
+    });
+  });
 });
 
 describe("declaresStopAction", () => {
@@ -111,6 +169,36 @@ describe("declaresStopAction", () => {
       "  environment:",
       "    name: review/x",
       "    url: https://x",
+    ].join("\n");
+    expect(declaresStopAction(yml, "j")).toBe(false);
+  });
+
+  it("detects `action: stop` when the line carries a trailing comment (#226)", () => {
+    // `.gitlab-ci.yml` is one of the few entries in `.prettierignore`, and the
+    // recorded reason is that it "relies on hand-aligned inline comments" — so no
+    // formatter will ever normalise one away and annotating this line is an
+    // ordinary edit. The anchored `\s*$` this used to match on made that edit
+    // report that a teardown job declares no stop action when it plainly does,
+    // which is the loud half of the pair `guardedFlags` had silently (#191).
+    const yml = [
+      "j:",
+      "  environment:",
+      "    name: review/x",
+      "    action: stop # the namespace goes with the merge, not with the timer",
+    ].join("\n");
+    expect(declaresStopAction(yml, "j")).toBe(true);
+  });
+
+  it("does not read `action: stop` out of a comment", () => {
+    // The opposite direction, which stripping is what makes safe: prose
+    // describing the key must not be mistaken for the key. Without stripping this
+    // passed by accident — the anchor happened to exclude it — so it is pinned
+    // rather than left resting on a regex detail that has now changed.
+    const yml = [
+      "j:",
+      "  environment:",
+      "    name: review/x",
+      "    url: https://x # a teardown job would say action: stop here",
     ].join("\n");
     expect(declaresStopAction(yml, "j")).toBe(false);
   });
