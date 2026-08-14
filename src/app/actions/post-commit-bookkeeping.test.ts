@@ -596,6 +596,53 @@ describe("completeFocus — a payout that fails after the session closed", () =>
   });
 
   /**
+   * ── What `points` COVERS, so "only what banked" stays true (`!339` review) ──
+   *
+   * The figure is the SESSION's own two payouts. It is not everything the request
+   * banked: finishing the LAST step of a task also reaches `markTaskCompleted`,
+   * whose `task_complete` payout is worth 25 and sits outside the figure — as it
+   * did before #257, when this was the literal `15`.
+   *
+   * So the under-claim the return statement documents has **two** cases, not the
+   * one it named, and this is the second. Pinned rather than changed: the
+   * direction is the safe one, and widening the figure would move a number the
+   * done screen shows on every task completion, which is a product decision and
+   * not a review's to take. What the two tests below buy is that nobody reads
+   * "only what banked" as "all of what banked" and turns an under-claim into an
+   * over-claim — the same misreading of a completeness claim that cost this MR
+   * two earlier rounds.
+   */
+  it("counts the session's own payouts only, not the task-complete bonus", async () => {
+    // The only gate on `markTaskCompleted` — see the note on the branch test
+    // below for why `step.findFirst` must stay on its default here.
+    prismaMock.step.count.mockResolvedValueOnce(0);
+
+    await expect(finish()).resolves.toMatchObject({
+      ok: true,
+      points:
+        RewardPoints[RewardType.StepDone] +
+        RewardPoints[RewardType.SessionFinished],
+    });
+    // The 25 DID bank. It is excluded from the figure, not lost.
+    expect(logRewardMock).toHaveBeenCalledWith(WS, RewardType.TaskComplete);
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  // The corner the exclusion is most visible in: both session payouts fail on a
+  // task-finishing session, so the screen shows no points line at all while the
+  // task-complete payout behind it banked 25.
+  it("reports no points when only the task-complete payout banked", async () => {
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    // The FIRST `logReward` of the request is the session bonus; the
+    // task-complete one behind it takes the default and resolves.
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+
+    await expect(finish()).resolves.toMatchObject({ ok: true, points: 0 });
+    expect(logRewardMock).toHaveBeenCalledWith(WS, RewardType.TaskComplete);
+  });
+
+  /**
    * The recovery route that makes `completeStep`'s "permanently stuck" reading
    * wrong, pinned rather than asserted in prose (`!339` review).
    *

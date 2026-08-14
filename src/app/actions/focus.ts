@@ -540,6 +540,14 @@ export async function updateStepEstimate(stepId: string, minutes: number) {
 export type CompleteResult = {
   ok: boolean;
   nextStepId: string | null;
+  /**
+   * What THIS SESSION's own two payouts banked, which is not everything the
+   * request banked — `focus-timer.tsx` renders it as "+N points", so the two
+   * deliberate under-claims behind it are spelled out at the return statement
+   * rather than only here. `0` is a real value: a payout that fails after the
+   * step committed is swallowed (#257), so the figure can legitimately be
+   * nothing and the done screen then shows no points line at all.
+   */
   points: number;
   googleSynced: boolean;
   streak: number | null;
@@ -666,16 +674,30 @@ export async function completeFocus(
     // dashboard total stayed put.
     //
     // Per payout rather than all-or-nothing, because the two are independent
-    // `bestEffort` calls and either can fail alone — so all four combinations
-    // are truthful. Read from `RewardPoints` rather than restated, so the figure
-    // cannot drift from the map `logReward` actually writes.
+    // `bestEffort` calls and either can fail alone — so all four combinations of
+    // THESE TWO are truthful. Read from `RewardPoints` rather than restated, so
+    // the figure cannot drift from the map `logReward` actually writes.
     //
-    // Under-claims by design in one case: `rewardStepDone` is a legitimate
-    // bundle, so `ok: false` means "something in it failed", not "nothing
-    // banked" — if the points landed and the streak touch then threw, those 10
-    // are real and go unclaimed. Under-claiming is the only direction that
-    // cannot tell someone their work earned something it did not, which is the
-    // same principle as #257 itself pointed the other way.
+    // Under-claims by design in TWO cases, and the count is spelled out because
+    // an exception count stated as "one" was wrong twice on this MR already:
+    //
+    //  1. `rewardStepDone` is a legitimate bundle, so `ok: false` means
+    //     "something in it failed", not "nothing banked" — if the points landed
+    //     and the streak touch then threw, those 10 are real and go unclaimed.
+    //  2. This is the SESSION's figure, not the request's. Finishing the last
+    //     step of a task also reaches `markTaskCompleted` above, whose
+    //     `task_complete` payout is worth 25 and is deliberately outside it —
+    //     exactly as it was when this line was the literal `15`. So a task
+    //     finished from the timer reports 15 over 40 banked, and a session whose
+    //     own two payouts both failed reports nothing at all over the 25 that
+    //     did. Widening it would move a number the done screen shows on every
+    //     task completion, which is a product decision rather than #257's.
+    //
+    // Under-claiming is the only direction that cannot tell someone their work
+    // earned something it did not, which is the same principle as #257 itself
+    // pointed the other way. Both cases are pinned in
+    // `post-commit-bookkeeping.test.ts` so neither can quietly become an
+    // over-claim by someone reading "only what banked" as "all of what banked".
     points:
       (stepPayout.ok ? RewardPoints[RewardType.StepDone] : 0) +
       (bonusPayout.ok ? RewardPoints[RewardType.SessionFinished] : 0),
