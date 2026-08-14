@@ -6,9 +6,15 @@
  * becomes `{ ok: false }` instead of propagating, and the failure leaves one
  * greppable line carrying the workspace. **`ok` rather than a bare `T | null`,
  * because a thunk that succeeds by returning `null` is not a failure** — the
- * contract test below carries the case that forced it. The five call sites and the
- * reasoning for each are in `src/app/actions/post-commit-bookkeeping.test.ts` and
- * in `best-effort.ts`.
+ * contract test below carries the case that forced it.
+ *
+ * **Five functions, nine calls** — stated both ways because the two numbers are
+ * easy to read as a contradiction. `beginFocus`, `markTaskCompleted`,
+ * `completeStep`, `completeFocus` and `confirmBreakdown` are the five that had the
+ * unguarded shape; three of them split their payouts into one call per
+ * consequence, so the union carries nine tags and the guard below asserts nine.
+ * The reasoning per site is in `src/app/actions/post-commit-bookkeeping.test.ts`
+ * and in `best-effort.ts`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
