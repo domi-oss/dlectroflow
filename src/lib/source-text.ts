@@ -26,6 +26,37 @@
  * removal for free, because a parser never sees comments as code. The regex
  * ones stay regex-based deliberately — dependency-free, and short enough that
  * the whole rule fits on screen — so this is the price they pay instead.
+ *
+ * ── One helper per comment SYNTAX, not one helper ─────────────────────────────
+ * There are three exports, and #226 asked whether that is two too many, because
+ * the issue behind it was two sibling parsers disagreeing about the same file.
+ * The answer measured there is no: they are one per syntax, and the pairs are
+ * mutually exclusive rather than redundant.
+ *
+ *   `stripComments`       line and block comments, TypeScript sources
+ *   `stripShellComments`  `#`, whole input       `scripts/*.sh`, helm invocations
+ *   `stripYamlComment`    `#`, ONE line          `.gitlab-ci.yml` structure
+ *
+ * The two `#` strippers differ in the two places that decide their answers, and
+ * each difference is a shipped fix that adopting the other's rule would reopen:
+ *
+ *   - **Word start.** Shell's is whitespace plus `;&|()<>`, each measured against
+ *     bash on !261. YAML's is whitespace only — `a;#b` is the scalar `a;#b`, so
+ *     lending shell's operators to YAML silently truncates a value.
+ *   - **Quote scope.** Shell tracks quoting across the whole input, because a
+ *     multi-line string in one of these scripts would otherwise let every line
+ *     after it be read as unquoted. YAML resets per line, because one unbalanced
+ *     apostrophe anywhere in the pipeline file would otherwise stop every comment
+ *     below it being stripped — which is #226's own defect, applied file-wide.
+ *
+ * So collapsing these two is not the tidying it looks like. A FURTHER `#` variant
+ * still is worth pushing back on — and one exists, measured while answering #226:
+ * `backup-hygiene.ts:343` declares its own function *also called*
+ * `stripShellComments`, deliberately narrower (whole-line comments only, no quote
+ * tracking) and with its own written reasoning. Left alone here because its
+ * narrowness is argued rather than accidental, and because reading a call site and
+ * assuming which one you are looking at is the only real hazard it carries. Noted
+ * so the next reader of this list knows the shadowed name is out there.
  */
 
 /**
@@ -117,4 +148,62 @@ export function stripShellComments(source: string): string {
     i += 1;
   }
   return out;
+}
+
+/**
+ * `line` with a YAML inline comment removed, quote state respected (#191, #226).
+ *
+ * Needed because the one file these callers exist to read is the file where an
+ * inline comment is idiomatic: `.gitlab-ci.yml` is listed in `.prettierignore`,
+ * and the reason recorded there is that it "relies on hand-aligned inline
+ * comments". It carries dozens; the exact count is re-measurable and was wrong
+ * the first time it was written down. So no formatter will ever normalise one
+ * away, and annotating a rule or a key is an edit no reviewer would question.
+ *
+ * Stripping happens before any matching, which closes both directions at once —
+ * and in `ci-schedule-guards` both were silent:
+ *
+ *     when: never # why           a real guard read as NO guard. Worse than it
+ *                                 sounds: `guardParityGaps` skips blocks that
+ *                                 guard nothing, so the block leaves the check
+ *                                 altogether and passes while asserting nothing.
+ *     if: '…'  # was $FLAG_A …    a flag read out of prose, which then enters
+ *                                 `allGuardedFlags` and reports every properly
+ *                                 guarded block as missing a flag that does not
+ *                                 exist.
+ *
+ * YAML's comment rule is narrower than shell's: an unquoted `#` opens a comment
+ * only at the start of a line or after whitespace. `a#b` is the scalar `a#b`,
+ * and a `/ #191/` regex inside a quoted `if:` is data, not a comment — hence
+ * tracking quotes rather than cutting at the first `#`.
+ *
+ * ── Why ONE line, unlike `stripShellComments` ────────────────────────────────
+ * Singular in the name because it is singular in behaviour, and that is the
+ * difference callers have to know about: quote state resets at the call, so a
+ * caller maps it over lines rather than handing it a document. Deliberate. YAML
+ * admits multi-line flow scalars, so whole-input tracking would be the more
+ * faithful reading of the spec — but the failure it buys is unbounded. One
+ * unbalanced apostrophe, which a plain scalar is entitled to contain, would leave
+ * every line below it looking quoted and therefore leave every comment below it
+ * unstripped, re-opening #226 for the whole rest of the file instead of one line.
+ * Per-line, that same apostrophe costs one line's comment. Bounded and loud beats
+ * spec-faithful and silent for a guard whose only job is to be trustworthy.
+ */
+export function stripYamlComment(line: string): string {
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i);
+    }
+  }
+  return line;
 }
