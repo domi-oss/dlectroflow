@@ -1,5 +1,28 @@
-// Minimal service worker for dlectroflow reminders.
-// Its job is to host notifications (showNotification / notificationclick).
+// Service worker for dlectroflow. Two jobs, and they are unrelated:
+//
+//  1. hosting notifications (showNotification / notificationclick);
+//  2. #175 — draining the offline capture queue through Background Sync, which
+//     is the ONLY path that flushes a queued brain dump while no tab is open.
+//
+// Design: docs/design/specs/2026-08-11-offline-capture-queue-design.md.
+//
+// ⚠️ This file is served as a static asset and is NOT bundled, so it can import
+// nothing. Every constant below is repeated from src/lib/capture-mirror.ts, and
+// src/lib/capture-sync-worker.test.ts asserts the two agree — the drift it
+// guards has no symptom, because a worker reading a renamed store finds an empty
+// database for ever while the foreground flush keeps working and nothing on
+// screen changes.
+
+/** Mirrors CAPTURE_MIRROR_DB_NAME. Same string as the localStorage key. */
+const MIRROR_DB_NAME = "df-capture-queue";
+/** Mirrors CAPTURE_MIRROR_DB_VERSION. */
+const MIRROR_DB_VERSION = 1;
+/** Mirrors CAPTURE_MIRROR_STORE, keyed on clientKey so a put upserts. */
+const MIRROR_STORE = "captures";
+/** Mirrors CAPTURE_SYNC_TAG, registered by the page on every enqueue. */
+const SYNC_TAG = "capture-flush";
+/** The plain route, because a worker cannot replay a Next server action. */
+const FLUSH_URL = "/api/braindump";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -23,3 +46,227 @@ self.addEventListener("notificationclick", (event) => {
       }),
   );
 });
+
+// ── #175: Background Sync ───────────────────────────────────────────────────
+//
+// The browser retries a `sync` event only if the promise given to
+// `event.waitUntil()` REJECTS. Resolve and the platform considers the work done
+// and will not come back. So the exit condition is "no retryable work remains",
+// NOT "the mirror is empty" — see `drainMirror`.
+self.addEventListener("sync", (event) => {
+  if (event.tag !== SYNC_TAG) return;
+  event.waitUntil(drainMirror());
+});
+
+/**
+ * Is this stored row really a mirrored capture?
+ *
+ * The mirror is writable by anything on the origin and this worker POSTs
+ * whatever it finds, so an unvalidated read is a request built from a value
+ * nothing in this app wrote. Deliberately a copy of `isMirroredCapture` in
+ * src/lib/capture-mirror.ts: nothing can be imported here, and a worker that
+ * skipped validation because "the app already validates" would be trusting a
+ * store the app is not the only writer of.
+ */
+function isCapture(row) {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof row.clientKey === "string" &&
+    row.clientKey.length > 0 &&
+    typeof row.text === "string" &&
+    row.text.length > 0 &&
+    typeof row.workspaceId === "string" &&
+    row.workspaceId.length > 0
+  );
+}
+
+/** Open the mirror. Resolves `null` for every failure — never rejects. */
+function openMirror() {
+  return new Promise((resolve) => {
+    let request;
+    try {
+      request = self.indexedDB.open(MIRROR_DB_NAME, MIRROR_DB_VERSION);
+    } catch {
+      resolve(null);
+      return;
+    }
+    request.onupgradeneeded = () => {
+      try {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(MIRROR_STORE)) {
+          db.createObjectStore(MIRROR_STORE, { keyPath: "clientKey" });
+        }
+      } catch {
+        // Surfaces as onerror below; swallowed so the handler cannot throw
+        // into the platform.
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+/** Every valid row in the mirror. `[]` for every failure. */
+function readMirror(db) {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(MIRROR_STORE, "readonly");
+      const request = tx.objectStore(MIRROR_STORE).getAll();
+      request.onsuccess = () => {
+        const rows = request.result;
+        resolve(Array.isArray(rows) ? rows.filter(isCapture) : []);
+      };
+      request.onerror = () => resolve([]);
+      tx.onerror = () => resolve([]);
+      tx.onabort = () => resolve([]);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
+/**
+ * One write transaction. Resolves on `oncomplete`, not on the request.
+ *
+ * A `put` calls back as soon as the value is accepted and the transaction can
+ * still abort afterwards, so resolving on the request would report a write that
+ * did not durably happen.
+ */
+function writeMirror(db, work) {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(MIRROR_STORE, "readwrite");
+      let settled = false;
+      const answer = (ok) => {
+        if (settled) return;
+        settled = true;
+        resolve(ok);
+      };
+      tx.oncomplete = () => answer(true);
+      tx.onerror = () => answer(false);
+      tx.onabort = () => answer(false);
+      work(tx.objectStore(MIRROR_STORE));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+/**
+ * Flush one capture. Returns `"done"`, `"terminal"` or `"retry"`.
+ *
+ * ⚠️ **The terminal mark is taken from the parsed BODY, never from the status
+ * line.** A 403 the app did not send — an auth proxy in front of a self-host, an
+ * ingress rule, a corporate filter — would otherwise permanently mark a
+ * perfectly good capture "this account can no longer save", whose only exit is
+ * the user deliberately destroying the words.
+ *
+ * Everything unrecognised is `"retry"`, deliberately: a wasted retry is
+ * recoverable and a dropped capture is not.
+ */
+async function flushOne(entry) {
+  let response;
+  try {
+    response = await fetch(FLUSH_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Only the three fields the route's contract names. `capturedAt` is the
+      // strip's age display and the route neither reads nor accepts it.
+      body: JSON.stringify({
+        clientKey: entry.clientKey,
+        text: entry.text,
+        workspaceId: entry.workspaceId,
+      }),
+      // The worker's own fetch carries the registering origin, which is the
+      // matching-Origin case the route's CSRF check already allows. Credentials
+      // are needed for the session cookie the route resolves the workspace from.
+      credentials: "include",
+    });
+  } catch {
+    // Network failure, which is the ordinary case this whole feature is for.
+    return "retry";
+  }
+
+  if (response.status === 201 || response.status === 200) return "done";
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  // ⚠️ `account-revoked` is the ONLY mark this worker may write. A
+  // `session-expired` mark is useless without `blockedUnder` — "the workspace
+  // the CLIENT was running under" — and the worker has no session to resolve, so
+  // it cannot compute one. A 409 it sees is therefore left unmarked and simply
+  // retried; the next foreground flush records it properly.
+  if (body && body.status === "account-revoked") return "terminal";
+  return "retry";
+}
+
+/**
+ * Drain the mirror and decide the promise.
+ *
+ * | After a pass | waitUntil | Why |
+ * |---|---|---|
+ * | mirror empty | resolve | nothing to come back for |
+ * | anything retryable left (5xx, network, 401, **409**) | reject | the only way to get another attempt with no tab open |
+ * | everything left is `account-revoked` | resolve | ⚠️ rejecting here is the bug — those can never flush, so the platform would retry on its own schedule for ever, burn battery and give up anyway, while the remedy (Discard) is a foreground control |
+ * | mixed | reject | the retryable ones justify another attempt; the blocked ones are skipped each pass |
+ *
+ * **Failures are per-entry, not per-pass.** One capture's 5xx must not stop the
+ * pass trying the rest, or a single stuck entry blocks the queue behind it —
+ * the head-of-line failure this design's premise refuses.
+ */
+async function drainMirror() {
+  const db = await openMirror();
+  // No mirror, no work, and nothing a retry would fix.
+  if (!db) return;
+
+  const entries = await readMirror(db);
+  if (entries.length === 0) return;
+
+  const saved = [];
+  const terminal = [];
+  let retryable = 0;
+
+  for (const entry of entries) {
+    // Skipped rather than flushed: a terminal entry must not be POSTed on every
+    // pass for the life of the browser profile.
+    if (entry.blockedBy === "account-revoked") continue;
+
+    const outcome = await flushOne(entry);
+    if (outcome === "done") saved.push(entry.clientKey);
+    else if (outcome === "terminal") terminal.push(entry);
+    else retryable += 1;
+  }
+
+  if (saved.length > 0) {
+    // The worker cannot write localStorage, so this removes the entry from the
+    // mirror and nothing more: localStorage still lists it as waiting until a
+    // foreground tab next runs, at which point reconciliation re-mirrors it, the
+    // foreground flush re-POSTs it, and the route answers 200 — already saved —
+    // which removes it from both stores. The clientKey column is what makes that
+    // safe; without it the worker's success would be a duplicate row on the next
+    // open. Cost: one redundant POST per worker-flushed capture, paid once.
+    await writeMirror(db, (store) => {
+      for (const key of saved) store.delete(key);
+    });
+  }
+
+  if (terminal.length > 0) {
+    // The worker's own first-failure case. Recorded in the mirror — which it CAN
+    // write — and propagated into localStorage by mount-time reconciliation.
+    await writeMirror(db, (store) => {
+      for (const entry of terminal) {
+        store.put({ ...entry, blockedBy: "account-revoked" });
+      }
+    });
+  }
+
+  if (retryable > 0) {
+    throw new Error("capture-flush: retryable work remains");
+  }
+}
