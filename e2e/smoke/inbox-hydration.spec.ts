@@ -29,7 +29,14 @@ import { OWNER_WS_ID } from "../constants";
 
 const SEED_MARKER = "hydration-105";
 
-/** Enough fresh rows that at least one is mid-second on any given reload. */
+/**
+ * Enough fresh rows that at least one is mid-second on any given reload.
+ *
+ * Load-bearing in a second way since #193: the precondition pairs EACH of these
+ * rows with its own age in the served markup and requires all of them to be
+ * sub-minute, so lowering this number does not just reduce sampling, it reduces
+ * how much of the board the guard is a claim about.
+ */
 const SEED_COUNT = 6;
 
 /** The throttle at which the unfixed inbox lost dark mode on every reload. */
@@ -96,9 +103,11 @@ const THEME_SAMPLES = 10;
 const THEME_SAMPLE_EVERY_MS = 200;
 
 /**
- * How long ONE throttled `/` load is allowed to take before its assertion gives
- * up — the navigation, the stream, and React hydrating the whole board at
- * `CPU_THROTTLE_RATE`.
+ * How long React is allowed to take to HYDRATE the board at `CPU_THROTTLE_RATE`
+ * before the assertion waiting on it gives up. Scoped to that alone: the
+ * navigation and the server-markup waits have their own bounds above, because
+ * `ITERATION_BUDGET_MS` adds all four up and a term covering three things at once
+ * cannot be summed honestly.
  *
  * Playwright's default is 5 s, and that is what this spec ran on until #193.
  * 5 s of a 20x-throttled main thread is ~250 ms of unthrottled work, which is
