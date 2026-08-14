@@ -1223,6 +1223,164 @@ export const STRINGS = {
   // capture typed while an older failure's notice is still on screen.
   "capture.error.saving": { plain: "Saving…", playful: "Saving…" },
 
+  // ── #175: the offline capture queue's strip ────────────────────────────────
+  //
+  // Identical across voices, for the same reason `capture.error.*` above is: the
+  // playful skin is a delight layer and "did I lose that thought?" is not where
+  // delight belongs.
+  //
+  // ⚠️ **Every refusal state gets its OWN sentence, and that is the rule rather
+  // than a preference.** A refusal message whose remedy the user cannot act on is
+  // the same defect as one with the wrong number in it: telling someone whose
+  // two-word capture was refused to "shorten it" is advice that cannot work, and
+  // telling someone who pasted one essay that "20 captures are already waiting"
+  // quotes a figure that may well be zero. So no two of these share a value, and a
+  // tenth state arriving later gets a tenth sentence rather than borrowing one.
+  //
+  // ⚠️ **The strip never says "offline".** `navigator.onLine` reads true on a
+  // captive portal, in a lift and at the edge of coverage, so the app is not
+  // entitled to assert it. Every sentence here says what is TRUE instead: the
+  // words are held, and what will or will not move them.
+  //
+  // The item cap can quote a figure the user recognises (20). Neither byte
+  // condition can, because a byte total is not something anyone can count in their
+  // own queue — so the byte copy names no unit at all.
+  "captureQueue.waiting": {
+    plain: "waiting to save",
+    playful: "waiting to save",
+  },
+  "captureQueue.expand": {
+    plain: "Show what's waiting",
+    playful: "Show what's waiting",
+  },
+  "captureQueue.collapse": {
+    plain: "Hide what's waiting",
+    playful: "Hide what's waiting",
+  },
+  "captureQueue.retry": { plain: "Retry now", playful: "Retry now" },
+  // Rule E's channel: announced from the polite region while a flush is in
+  // flight, not merely described. Plural-agnostic wording, because the count
+  // changes under the announcement as entries drain.
+  "captureQueue.saving": {
+    plain: "Saving what's waiting…",
+    playful: "Saving what's waiting…",
+  },
+  "captureQueue.discard": { plain: "Discard", playful: "Discard" },
+  "captureQueue.discardConfirm": {
+    plain: "Discard for good",
+    playful: "Discard for good",
+  },
+  // ⚠️ Discard is destructive and irreversible, and it is NOT a delete from the
+  // server — a discarded capture was never saved. The copy must not imply either.
+  "captureQueue.discardPrompt": {
+    plain:
+      "Throw these words away? They were never saved, so this cannot be undone.",
+    playful:
+      "Throw these words away? They were never saved, so this cannot be undone.",
+  },
+  // Refused because a POST for this very entry is outstanding. Said rather than
+  // silently disabling the control, and the wait is nameable because the flush is
+  // bounded by CAPTURE_TIMEOUT_MS.
+  "captureQueue.discardInFlight": {
+    plain: "This one is being saved right now. Give it a moment and try again.",
+    playful:
+      "This one is being saved right now. Give it a moment and try again.",
+  },
+  // The confirm resolved against an entry that has already left the queue.
+  // Silence here is the same defect as a silent save, one step along: the user
+  // pressed a destructive control, was shown nothing, and the words are somewhere
+  // they were told they would not be.
+  "captureQueue.discardSaved": {
+    plain:
+      "That one saved just before you discarded it — it's in your inbox now.",
+    playful:
+      "That one saved just before you discarded it — it's in your inbox now.",
+  },
+  "captureQueue.blocked.sessionExpired": {
+    plain: "Your session expired. Sign in and these will save.",
+    playful: "Your session expired. Sign in and these will save.",
+  },
+  // No sign-in offered: it has already been tried and did not work. This state is
+  // LEARNED by trying, which is why it is a comparison against `blockedUnder`
+  // rather than something the server could ever hand over.
+  "captureQueue.blocked.sessionChanged": {
+    plain:
+      "These can't be saved to this account any more. Your words are still here — copy them somewhere safe.",
+    playful:
+      "These can't be saved to this account any more. Your words are still here — copy them somewhere safe.",
+  },
+  // No sign-in offered: #220 has already cleared the session, and signing in
+  // cannot un-freeze an account. Telling this person to sign in would misstate
+  // what happened to them and send them at a remedy that cannot work.
+  "captureQueue.blocked.accountRevoked": {
+    plain:
+      "This account can no longer save. Your words are still here — copy them somewhere safe.",
+    playful:
+      "This account can no longer save. Your words are still here — copy them somewhere safe.",
+  },
+  // The neutral collapsed row. No refusal to report, so no remedy is offered —
+  // and no text, no author and no workspace are shown. The user is told something
+  // recoverable exists rather than meeting an empty strip.
+  "captureQueue.strandedNeutral": {
+    plain: "captures from an earlier sign-in are still held in this browser.",
+    playful: "captures from an earlier sign-in are still held in this browser.",
+  },
+  // ⚠️ The discard-without-revealing control cannot use the ordinary two-step
+  // confirm, which exists so the confirm is made against words the user can read
+  // — here they may not be. It confirms against the COUNT and says plainly that
+  // the text cannot be shown.
+  "captureQueue.strandedDiscardPrompt": {
+    plain:
+      "Throw away what this browser is holding from an earlier sign-in? The words can't be shown, and this cannot be undone.",
+    playful:
+      "Throw away what this browser is holding from an earlier sign-in? The words can't be shown, and this cannot be undone.",
+  },
+  "captureQueue.refused.maxItems": {
+    plain:
+      "20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to.",
+    playful:
+      "20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to.",
+  },
+  // ONE capture over the byte bound. Nothing already queued is relevant, so the
+  // remedy is about this capture: shorten it, or copy it elsewhere.
+  "captureQueue.refused.tooLong": {
+    plain:
+      "That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe.",
+    playful:
+      "That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe.",
+  },
+  // The queue TOTAL is at the bound. This capture is fine; the queue is full — so
+  // deliberately no "shorten it", because the capture's own length is not the
+  // problem and shortening would not help.
+  "captureQueue.refused.noRoom": {
+    plain:
+      "There's no room to hold more until some of these save. Your words are still in the box; copy them somewhere safe if you need to.",
+    playful:
+      "There's no room to hold more until some of these save. Your words are still in the box; copy them somewhere safe if you need to.",
+  },
+  // `QuotaExceededError`. The one refusal whose remedy is not about this app at
+  // all: no cap is quoted and NO WAIT is offered, because nothing queued here
+  // would free the space. It also does not tell the user to change a storage
+  // setting — the app cannot see which condition it is in, and a wrong
+  // instruction is worse than none.
+  "captureQueue.refused.storage": {
+    plain:
+      "This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe.",
+    playful:
+      "This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe.",
+  },
+  // The origin check refused the request (400, CSRF). No sign-in offered and no
+  // account mentioned: the user did nothing wrong, nothing about their account is
+  // implicated, and the 400 is classified retryable so the words are still held.
+  // The operator's legibility comes from the route's distinct log reason, not
+  // from this sentence.
+  "captureQueue.refused.blocked": {
+    plain:
+      "Something blocked this from reaching the server, so it's still waiting here. Nothing is lost — it'll try again.",
+    playful:
+      "Something blocked this from reaching the server, so it's still waiting here. Nothing is lost — it'll try again.",
+  },
+
   // ── A ROW write that did not land (#225) ───────────────────────────────────
   // The other half of the same defect. `capture.error.*` above covers the one
   // write whose failure destroys words that exist nowhere else; these cover the
