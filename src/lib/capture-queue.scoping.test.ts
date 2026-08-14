@@ -175,6 +175,53 @@ describe("capture queue — the strip is scoped to the live workspace (#175)", (
     expect(stranded).toEqual([]);
   });
 
+  it("keeps the sign-in offer while the live workspace is still unresolved", () => {
+    // ⚠️ Duo review round 1 on !348, grounded but undeliverable. `partitionQueue`
+    // sends EVERY entry to the stranded branch while `liveWorkspaceId` is `""`,
+    // and a comparison against `blockedUnder` then reads any real workspace id as
+    // "the session changed" — which WITHDRAWS the sign-in offer for as long as the
+    // prop takes to settle.
+    //
+    // On the one screen whose whole job is "your captures are safe, here is how to
+    // get them saved", a flicker that removes the recovery affordance is not
+    // cosmetic: it tells the user the wrong thing about why they are stuck, and the
+    // wrong thing is the one with no remedy.
+    //
+    // The file already states the convention this broke — `applySweep` refuses to
+    // start the expiry clock on `""` because "a render that knows nothing" must not
+    // act. Not knowing the live workspace is not evidence that it changed.
+    const queue = [
+      capture({
+        clientKey: "a",
+        workspaceId: OTHER,
+        blockedBy: "session-expired",
+        blockedUnder: "ws-whatever-it-was",
+      }),
+    ];
+
+    const { stranded } = partitionQueue(queue, "");
+
+    expect(stranded[0]?.state).toBe("session-expired");
+  });
+
+  it("still withdraws it once a KNOWN live workspace differs", () => {
+    // The control. A fix that returned `session-expired` unconditionally would
+    // pass the case above and reopen the forever-promise bug `blockedUnder` exists
+    // to close.
+    const queue = [
+      capture({
+        clientKey: "a",
+        workspaceId: OTHER,
+        blockedBy: "session-expired",
+        blockedUnder: "ws-whatever-it-was",
+      }),
+    ];
+
+    expect(partitionQueue(queue, LIVE).stranded[0]?.state).toBe(
+      "session-changed",
+    );
+  });
+
   it("treats an unresolved live workspace as matching nothing, without throwing", () => {
     // The strip can render before the prop resolves. Showing nothing is right;
     // showing everything as "mine" would leak across the boundary.

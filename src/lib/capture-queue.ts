@@ -383,7 +383,20 @@ function strandedStateOf(
 ): StrandedState {
   if (entry.blockedBy === "account-revoked") return "account-revoked";
   if (entry.blockedBy === "session-expired") {
-    return entry.blockedUnder !== undefined &&
+    // ⚠️ **An unresolved live workspace (`""`) is not evidence that the session
+    // changed, and this guard is the whole point of the branch.** Found by Duo
+    // review round 1 on `!348`. `partitionQueue` sends EVERY entry down this path
+    // while the workspace is unknown, so without the check a comparison against
+    // any real `blockedUnder` reads as "changed" and **withdraws the sign-in
+    // offer** for as long as the prop takes to settle — on the one screen whose
+    // job is to say how the words get saved.
+    //
+    // Same rule `applySweep` states for the same sentinel: a render that knows
+    // nothing must not act. Withdrawal is a conclusion, and it is only ever
+    // reachable from a workspace this client has actually resolved.
+    const sessionKnown = liveWorkspaceId !== "";
+    return sessionKnown &&
+      entry.blockedUnder !== undefined &&
       entry.blockedUnder !== liveWorkspaceId
       ? "session-changed"
       : "session-expired";
