@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import fs from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   envNumberDefault,
@@ -30,10 +30,24 @@ import {
  * `docs/legal.md`'s Guest TTL row names the orphan window.
  */
 
-const REPO_ROOT = path.resolve(__dirname, "..", "..");
+/**
+ * The repo root, and the reason it is `process.cwd()` rather than a walk up from
+ * `__dirname`.
+ *
+ * Both resolve to the same directory under `npm test` — Vitest pins `root` to the
+ * repo root (#133) — but the `__dirname` form trips SAST's
+ * `detect-non-literal-fs-filename` (CWE-22) while this one does not, and every
+ * other file-reading hygiene test here already uses it (`log-retention.test.ts`,
+ * `write-notice-hygiene.test.ts`). **Matching them is a fix rather than a
+ * dismissal**, which matters because that finding's fingerprint includes the LINE
+ * NUMBER: `pick-one.ts` records one statement being dismissed five separate times
+ * as unrelated changes moved it down its file. A dismissal is a tax on every
+ * future MR that shifts the line; this is permanent.
+ */
+const REPO_ROOT = process.cwd();
 
 function read(relative: string): string {
-  return fs.readFileSync(path.join(REPO_ROOT, relative), "utf8");
+  return readFileSync(path.join(REPO_ROOT, relative), "utf8");
 }
 
 describe("orphan window — the server default parser (#175)", () => {

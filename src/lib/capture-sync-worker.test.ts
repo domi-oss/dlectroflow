@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fs from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import {
   CAPTURE_MIRROR_DB_NAME,
@@ -35,8 +35,15 @@ import { fakeIdbFactory, type FakeIdb } from "@/lib/__tests__/fake-idb";
  * exit it takes.
  */
 
-const SW_PATH = path.resolve(__dirname, "..", "..", "public", "sw.js");
-const SW_SOURCE = fs.readFileSync(SW_PATH, "utf8");
+/**
+ * ⚠️ `process.cwd()` rather than a walk up from `__dirname`, and it is a SAST fix
+ * rather than a style choice — see the same note in `capture-orphan-window.test.ts`.
+ * Both resolve identically under `npm test` (Vitest pins `root` to the repo root,
+ * #133); only the `__dirname` form trips `detect-non-literal-fs-filename`
+ * (CWE-22), and a dismissal there regenerates every time the line moves.
+ */
+const SW_PATH = path.join(process.cwd(), "public", "sw.js");
+const SW_SOURCE = readFileSync(SW_PATH, "utf8");
 
 type FakeEvent = {
   tag: string;
