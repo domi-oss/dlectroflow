@@ -47,14 +47,26 @@ const RELOADS = 4;
  *   E2E_HYDRATION_SLOW_RUNNER_MS=65000 npm run test:e2e -- \
  *     --project=chromium --no-deps e2e/smoke/inbox-hydration.spec.ts
  *
- * 65 000 is chosen to put ONE iteration past 60 s, which is where `formatAgo`
+ * 65 000 is enough for an iteration to cross 60 s, which is where `formatAgo`
  * stops rendering seconds and starts rendering minutes — the boundary #193 is
- * about. It is deliberately a plain wait rather than a higher
- * `CPU_THROTTLE_RATE`: the throttle is load-bearing evidence (see the header)
- * and must not be dialled around, and what this spec is sensitive to is ELAPSED
- * TIME between the server's render and the assertion that reads it, which is
- * exactly what a wait reproduces. A loaded CI runner spends that time doing
- * work; the effect on this spec is identical.
+ * about.
+ *
+ * Applied to EVERY iteration, not just one. #193's close condition is "a runner
+ * deliberately slowed so one iteration exceeds 60 s", and slowing only the last
+ * reload would satisfy that sentence while testing the crossing once; a genuinely
+ * loaded runner is slow on all four, and this spec's whole argument is that the
+ * guard must hold on every reload rather than on a lucky one. Raised in review on
+ * !346, where the suggestion was to gate it on `i === RELOADS - 1`: that is
+ * cheaper (65 s rather than ~260 s) and it is less evidence, and the knob is
+ * opt-in with a default of 0, so the cost is paid only by someone deliberately
+ * re-running the close condition.
+ *
+ * It is deliberately a plain wait rather than a higher `CPU_THROTTLE_RATE`: the
+ * throttle is load-bearing evidence (see the header) and must not be dialled
+ * around, and what this spec is sensitive to is ELAPSED TIME between the server's
+ * render and the assertion that reads it, which is exactly what a wait
+ * reproduces. A loaded CI runner spends that time doing work; the effect on this
+ * spec is identical.
  */
 const SLOW_RUNNER_MS = readSlowRunnerMs();
 
