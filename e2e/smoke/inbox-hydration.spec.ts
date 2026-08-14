@@ -74,6 +74,70 @@ function readSlowRunnerMs(): number {
 }
 
 /**
+ * The theme sampling window — see `expectThemeHolds`. Named constants rather
+ * than default parameters because the test's own time budget is DERIVED from
+ * them below: `samples × everyMs` is time this test spends deliberately doing
+ * nothing, on every iteration, and a budget that did not count it would go
+ * stale the moment either number changed.
+ */
+const THEME_SAMPLES = 10;
+const THEME_SAMPLE_EVERY_MS = 200;
+
+/**
+ * How long ONE throttled `/` load is allowed to take before its assertion gives
+ * up — the navigation, the stream, and React hydrating the whole board at
+ * `CPU_THROTTLE_RATE`.
+ *
+ * Playwright's default is 5 s, and that is what this spec ran on until #193.
+ * 5 s of a 20x-throttled main thread is ~250 ms of unthrottled work, which is
+ * not enough to hydrate this route on a runner that is also hosting Postgres and
+ * two standalone Next servers. That is the FIRST of the two failures in
+ * `e2e_test` #15771333861 (2026-08-07, `main`): the hydration check timed out at
+ * 5 s having resolved the toggle nine times, every time still reading the
+ * server's "Switch to dark mode".
+ *
+ * 20 s is ~4x the cost that runner actually incurred, and it does not weaken the
+ * assertion: a genuine #105 regression drops `html.dark` and re-labels the
+ * toggle back, so it fails on VALUE and reports in milliseconds. Only a slow
+ * runner spends the extra time.
+ */
+const HYDRATION_TIMEOUT_MS = 20_000;
+
+/**
+ * The per-iteration allowance the test's own timeout is built from: one throttled
+ * load, the hydration check above, and the precondition read.
+ *
+ * The second of the two 2026-08-07 failures was `Test timeout of 30000ms
+ * exceeded` — Playwright's DEFAULT, which this spec never overrode. Four
+ * throttled page loads plus `RELOADS × THEME_SAMPLES × THEME_SAMPLE_EVERY_MS`
+ * (8 s, over a quarter of the whole budget) do not fit in 30 s on a loaded
+ * runner, and the failure lands on whichever assertion happens to be in flight
+ * — which is how #193 came to be filed against the precondition. Measured here
+ * for scale: ~3.5 s per iteration on an idle developer machine.
+ *
+ * Deliberately an upper ENVELOPE, not a target. Every assertion inside the loop
+ * carries its own timeout, so a real regression still fails in seconds; this
+ * number only decides how long a comprehensively wedged run is allowed to hang
+ * before the runner reclaims it.
+ */
+const ITERATION_BUDGET_MS = 30_000;
+
+/** Seeding, the theme bootstrap, the CDP session and teardown. */
+const SETUP_BUDGET_MS = 30_000;
+
+/**
+ * Derived, never hard-coded: `RELOADS`, the sampling window and the opt-in slow
+ * runner all move this number, and a budget that has to be re-derived by hand is
+ * a budget that silently stops matching the work.
+ */
+const TEST_TIMEOUT_MS =
+  SETUP_BUDGET_MS +
+  RELOADS *
+    (ITERATION_BUDGET_MS +
+      THEME_SAMPLES * THEME_SAMPLE_EVERY_MS +
+      SLOW_RUNNER_MS);
+
+/**
  * React's hydration bailouts, as they appear in a PRODUCTION bundle: the message
  * text is stripped, so what surfaces is the numbered form plus the docs link.
  * 418 is the text mismatch this issue is about; 422/423/425 are the neighbouring
@@ -142,7 +206,11 @@ const themeToggle = (page: Page) =>
  * wrong — which is exactly how this shipped. Sample repeatedly and require every
  * sample to hold.
  */
-async function expectThemeHolds(page: Page, samples = 10, everyMs = 200) {
+async function expectThemeHolds(
+  page: Page,
+  samples = THEME_SAMPLES,
+  everyMs = THEME_SAMPLE_EVERY_MS,
+) {
   const seen: boolean[] = [];
   for (let i = 0; i < samples; i++) {
     seen.push(
@@ -164,6 +232,7 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
   test("a preloaded dark theme survives loading / with fresh sub-minute rows, throttled", async ({
     page,
   }) => {
+    test.setTimeout(TEST_TIMEOUT_MS);
     const marker = `${SEED_MARKER} dark`;
     const prisma = await seedFreshRows(marker);
     try {
@@ -205,6 +274,9 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
         // only come from a client render that saw the class.
         await expect(themeToggle(page)).toHaveAccessibleName(
           "Switch to light mode",
+          // Not the default 5 s — hydrating this route at CPU_THROTTLE_RATE on a
+          // loaded runner exceeded it, which is one half of #193.
+          { timeout: HYDRATION_TIMEOUT_MS },
         );
 
         // …and it is still there a moment later. This is the assertion the bug
