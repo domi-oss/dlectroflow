@@ -100,14 +100,17 @@
 /** Which of the two problems a raw byte is. */
 export type ControlByteKind =
   /**
-   * `file` classifies the file as `data`, so a scanner reading it as text skips
-   * it whole. This is the measured defect: absence of findings, not cleanliness.
+   * `file` classifies the file as `data` and Semgrep's parser fails on the byte.
+   * The file is still COUNTED as a scanned target, so what a SAST run reports
+   * for it is absence rather than cleanliness, and the coverage summary cannot
+   * show the difference. This is the measured defect — see the module comment.
    */
   | "binary-classifying"
   /**
-   * `file` still calls the file text, so nothing is blinded — but a raw control
-   * character in source is invisible in review and in a diff, and every string
-   * literal that wants one can say so with an escape instead.
+   * `file` still calls the file text, so this byte alone does not produce the
+   * `data` classification — but a raw control character in source is invisible
+   * in review and in a diff, and every string literal that wants one can say so
+   * with an escape instead.
    */
   | "escapable-control";
 
@@ -233,8 +236,30 @@ const C0_NAMES = [
 
 const DELETE_BYTE = 0x7f;
 
+/**
+ * Refuse anything that is not a byte, naming the caller.
+ *
+ * Every exported function here takes a raw file byte, and each one has a
+ * plausible-looking wrong answer for an out-of-range input: `"non-control"`,
+ * `false`, or an escape with six hex digits. Those are worse than a throw,
+ * because the caller has passed a CODE POINT where a byte was wanted — the one
+ * confusion this module exists to keep straight — and a confident answer hides
+ * it. Duo review on !347 caught `controlByteName` missing the check that
+ * `isBinaryClassifyingByte` already had; factored out here rather than pasted a
+ * third time, so the three cannot drift apart again.
+ */
+function assertByte(byte: number, caller: string): void {
+  if (!Number.isInteger(byte) || byte < 0 || byte > 0xff) {
+    throw new RangeError(
+      `${caller}: ${byte} is not a byte (0–255). These functions classify raw ` +
+        `file bytes; a code point is not a byte.`,
+    );
+  }
+}
+
 /** The mnemonic for a control byte, e.g. `NUL` for 0x00. */
 export function controlByteName(byte: number): string {
+  assertByte(byte, "controlByteName");
   if (byte === DELETE_BYTE) return "DEL";
   return C0_NAMES[byte] ?? "non-control";
 }
@@ -261,12 +286,7 @@ const REASONS: Record<ControlByteKind, string> = {
  * `false` there is how a guard stops guarding.
  */
 export function isBinaryClassifyingByte(byte: number): boolean {
-  if (!Number.isInteger(byte) || byte < 0 || byte > 0xff) {
-    throw new RangeError(
-      `isBinaryClassifyingByte: ${byte} is not a byte (0–255). This function ` +
-        `classifies raw file bytes; a code point is not a byte.`,
-    );
-  }
+  assertByte(byte, "isBinaryClassifyingByte");
   if (byte >= PRINTABLE_ASCII_FIRST && byte <= PRINTABLE_ASCII_LAST) {
     return false;
   }
@@ -290,8 +310,15 @@ function kindOf(byte: number): ControlByteKind | null {
  * `\xXX` because `\u0000` is the form #224 asks for and the only one that is
  * also valid inside a JSON string, which is what lets the test prove the escape
  * round-trips.
+ *
+ * Validated for the same reason as its two siblings, and it is the surface where
+ * a wrong answer would be least visible: `padStart` only pads, so a code point
+ * handed to this would come back as a SIX-digit escape (0x111100 renders as
+ * `\\u111100`), which looks like a valid escape and denotes something else
+ * entirely.
  */
 export function escapeForByte(byte: number): string {
+  assertByte(byte, "escapeForByte");
   return `\\u${byte.toString(16).padStart(4, "0")}`;
 }
 

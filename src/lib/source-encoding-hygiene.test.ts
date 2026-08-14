@@ -227,6 +227,45 @@ describe("isBinaryClassifyingByte — the measured `file` boundary", () => {
   });
 });
 
+describe("EVERY exported byte function refuses a non-byte", () => {
+  // Duo review on !347 found `controlByteName` missing the check its sibling
+  // already had, and the same gap was in `escapeForByte`. That is a parity
+  // defect, not one bug: three exported functions take a raw byte and each has a
+  // plausible-looking wrong answer for a code point — `"non-control"`, `false`,
+  // and a six-digit escape that reads as valid and denotes something else. This
+  // test is what stops the fourth one shipping without the check.
+  const NOT_BYTES = [
+    -1,
+    256,
+    1.5,
+    Number.NaN,
+    0x110000,
+    Number.POSITIVE_INFINITY,
+  ];
+
+  const BYTE_FUNCTIONS: [string, (byte: number) => unknown][] = [
+    ["isBinaryClassifyingByte", isBinaryClassifyingByte],
+    ["controlByteName", controlByteName],
+    ["escapeForByte", escapeForByte],
+  ];
+
+  it.each(BYTE_FUNCTIONS)(
+    "%s throws a RangeError naming itself",
+    (name, fn) => {
+      for (const notAByte of NOT_BYTES) {
+        expect(() => fn(notAByte), `${name}(${notAByte})`).toThrow(RangeError);
+        // The message names the caller, so a stack-less log still says which one.
+        expect(() => fn(notAByte), `${name}(${notAByte})`).toThrow(name);
+      }
+    },
+  );
+
+  it.each(BYTE_FUNCTIONS)("%s accepts both ends of the byte range", (_, fn) => {
+    expect(() => fn(0x00)).not.toThrow();
+    expect(() => fn(0xff)).not.toThrow();
+  });
+});
+
 describe("scanControlBytes — what it reports", () => {
   it("finds nothing in ordinary source, including tabs and CRLF", () => {
     const source = 'const a = "x";\r\n\tconst b = `y`;\n// — an em dash\n';
