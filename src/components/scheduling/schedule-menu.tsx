@@ -6,6 +6,7 @@ import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
+  restoreFocusToTrigger,
 } from "@/components/ui/anchored-popup";
 import { fromZonedDateInput, toZonedDateInput } from "@/lib/scheduling/hours";
 import { scheduleSummary } from "@/lib/scheduling/summary";
@@ -79,6 +80,9 @@ export function ScheduleMenu({
   trigger,
 }: ScheduleMenuProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
+  // `HTMLButtonElement` because Base UI's `Popover.Trigger` renders (and types)
+  // a native button, which is what every caller supplies through `trigger`.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const hoursLabelId = useId();
   // Unique per instance: two rows' menus must not share one radio group, or
   // picking "Personal" in either would uncheck the other's.
@@ -116,7 +120,26 @@ export function ScheduleMenu({
     setOpen(true);
   }, [intent]);
 
-  const close = useCallback(() => setOpen(false), []);
+  /**
+   * Every close route funnels through here — Escape and outside press (via
+   * `onOpenChange`), Cancel, and the primary Schedule press — so the focus
+   * hand-off is written once.
+   *
+   * #253 — the hand-off is explicit, and BEFORE `setOpen(false)`, because this
+   * dialog is now opened from an entry inside a row's ▾ popover: that enclosing
+   * popup out-races Base UI's own async restoration and parks focus on its own
+   * container, which is not a control. `restoreFocusToTrigger` carries the
+   * mechanism; e2e/smoke/schedule-menu.spec.ts is the assertion (WCAG 2.4.3 —
+   * "Focus comes back to the control that opened it"), and it failed 2 for 2 on
+   * CI, retry included, before this line existed.
+   *
+   * Correct for the icon variant too (`breakdown/task-schedule.tsx`, the task
+   * working view's pill), where it is what Base UI was already doing by default.
+   */
+  const close = useCallback(() => {
+    restoreFocusToTrigger(triggerRef.current);
+    setOpen(false);
+  }, []);
 
   const dueAt = fromZonedDateInput(dateText, intent.dueAt);
 
@@ -138,7 +161,7 @@ export function ScheduleMenu({
         open={open}
         onOpenChange={(nextOpen) => (nextOpen ? openWithPrefill() : close())}
       >
-        <Popover.Trigger render={trigger} />
+        <Popover.Trigger ref={triggerRef} render={trigger} />
         <Popover.Portal container={rootRef} render={<span />}>
           <Popover.Positioner {...ANCHORED_POSITIONER} render={<span />}>
             <Popover.Popup

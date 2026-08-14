@@ -440,3 +440,113 @@ describe("LibraryMultistep — the task note (#44)", () => {
     expect(screen.getByTestId("note-text").textContent).toBe("ring ahead");
   });
 });
+
+/**
+ * #205 (folded into #253) — the Multi-step hub's header controls carry the shared
+ * 44px floor. The second and last of the two files #205's audit found carrying
+ * **zero** `touchTarget`.
+ *
+ * Citation, stated as `row-menu-viewport-fit.spec.ts` and `note-field.tsx` state
+ * it because inverting it is a documented error here: 44x44 is **2.5.5 Target
+ * Size (Enhanced), AAA**; **2.5.8 (Minimum) is the AA one, at 24x24**, which
+ * these already met. A house convention (`touchTarget` in `@/lib/utils`), not a
+ * conformance fix.
+ *
+ * ⚠️ Two corrections to #205's table, both measured against this file rather than
+ * inherited from it:
+ *
+ *  1. It lists "5 `<button>`" — but the fifth is the ROW TITLE, a full-width
+ *     disclosure that is not a header control, and it is deliberately excluded
+ *     (see the reason written into `library-multistep.tsx`). So four buttons.
+ *  2. It misses "Open task", which is a `<Link>` and not a `<button>` — yet it is
+ *     a bordered pill sitting in the same header cluster, at the same `py-1`, and
+ *     #205's OWN method (grep `py-1`) flags its line. A count keyed to `<button`
+ *     cannot see it. Sized, because a control that looks identical to the one
+ *     beside it and measures 20px shorter is the visible inconsistency the issue
+ *     exists to remove.
+ *
+ * Both header states are asserted. Select mode REPLACES "Expand all" with
+ * "Select all" / "Cancel", so a guard rendering only the resting header leaves
+ * two of the four unmeasured — the blind spot #251 hit four times at row level,
+ * and the same reason `select-action-bar.test.tsx` measures its armed confirm.
+ */
+describe("LibraryMultistep — 44px targets (#205 leg)", () => {
+  const expect44 = (el: HTMLElement) => {
+    expect(el.className, `"${el.textContent}" is not ≥44px tall`).toContain(
+      "min-h-11",
+    );
+    expect(el.className, `"${el.textContent}" is not ≥44px wide`).toContain(
+      "min-w-11",
+    );
+  };
+
+  const renderHub = () =>
+    render(
+      <LibraryMultistep
+        items={items}
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+
+  it("the resting header's toggle and Select carry the 44px touch target", () => {
+    renderHub();
+    for (const name of [/^collapse all$/i, /^select$/i]) {
+      expect44(screen.getByRole("button", { name }));
+    }
+  });
+
+  it("the Open task link carries it too, though it is a Link and not a button", () => {
+    renderHub();
+    // Shown only while a row is expanded — the latest row opens by default, so
+    // it is present on first render. `next/link` is NOT mocked in this file, so
+    // this measures the real rendered anchor: the `task-steps.test.tsx` mock that
+    // silently dropped `className` is exactly why that matters.
+    const open = screen.getByRole("link", { name: "Open task" });
+    expect44(open);
+    expect(open).toHaveAttribute("href", "/tasks/Tnew?from=library");
+  });
+
+  it("select mode's Select all / Cancel pair carries it as well", () => {
+    renderHub();
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+    for (const name of [/^select all$/i, /^cancel$/i]) {
+      expect44(screen.getByRole("button", { name }));
+    }
+    // Guard the guard: these two are a genuinely different pair, not the ones
+    // already measured. `Select` is what they REPLACE, so its absence is the
+    // evidence that this state was actually entered.
+    expect(screen.queryByRole("button", { name: /^select$/i })).toBeNull();
+    // `Open task` is hidden here too, so all four header controls have now been
+    // measured across the two states, and none of them twice.
+    expect(screen.queryByRole("link", { name: "Open task" })).toBeNull();
+    // The expand/collapse toggle is NOT part of the swap — it renders in both
+    // states (asserted, because I assumed the opposite and this caught it).
+    expect44(screen.getByRole("button", { name: /^collapse all$/i }));
+  });
+
+  it("the row title is deliberately NOT squared up, and says so in the file", () => {
+    renderHub();
+    const title = screen.getByRole("button", { name: "task old" });
+    // Sizing this would add ~20px to EVERY collapsed row, which is the opposite
+    // of what #253 is doing to this surface — and `touchTarget`'s
+    // `justify-center` would centre a title that has to stay left-aligned.
+    // Pinned as an assertion rather than left implicit so that "make everything
+    // 44px" cannot be applied here without a test going red and pointing at the
+    // written reason.
+    expect(title.className).not.toContain("min-h-11");
+    expect(title.className).toMatch(/text-left/);
+    expect(title.className).toMatch(/w-full/);
+  });
+
+  it("select mode still suppresses expansion after the class change", () => {
+    renderHub();
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+    // The title button's onClick branches on `sel.selecting`; the exclusion above
+    // means its className expression was left alone, and this pins the behaviour
+    // that would break if a later edit reached for `cn` there.
+    fireEvent.click(screen.getByRole("button", { name: "task old" }));
+    expect(screen.queryByTestId("task-steps")).toBeNull();
+  });
+});

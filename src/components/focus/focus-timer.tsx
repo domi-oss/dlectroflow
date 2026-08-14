@@ -1446,7 +1446,8 @@ export function FocusTimer({
             unit, before the auto-advance announcement follows. tabIndex={-1}
             keeps it out of the tab order; it is a target, not a stop. The UA
             outline is deliberately NOT suppressed (a11y-class-hygiene Rule D /
-            WCAG 2.4.11): a visible ring around what just changed is correct. */}
+            WCAG 2.4.7 Focus Visible): a visible ring around what just changed is
+            correct. */}
         <div
           ref={doneSummaryRef}
           tabIndex={-1}

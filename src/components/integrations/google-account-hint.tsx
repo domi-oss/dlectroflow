@@ -31,8 +31,22 @@ export const GOOGLE_ACCOUNT_HINT =
  *
  * A `<span>` rather than a `<p>`: the ▾ row menu's popup is a span-only tree
  * (see row-actions.tsx, where a `<div>`/`<p>` would be invalid phrasing
- * content), and this component has to render identically in all four connect
- * surfaces rather than sprouting an element-type prop.
+ * content), and this component has to render identically in **every** connect
+ * surface rather than sprouting an element-type prop.
+ *
+ * ⚠️ This said "all four" and the number was wrong; it is now phrased without one,
+ * on `strings.ts`'s precedent for exactly this failure ("phrased without a count on
+ * purpose — this said 'all four' while five…"). A count in a comment is stale by
+ * design because nobody re-reads a comment to check it.
+ *
+ * Re-derive instead:
+ * `grep -rn 'GoogleAccountHint\|GOOGLE_ACCOUNT_HINT' src --include=*.tsx`, ignoring
+ * test files. Today that is SIX surfaces — `breakdown/breakdown-chat.tsx` (three
+ * states), `breakdown/task-schedule.tsx`, `settings/integrations-panel.tsx`, and
+ * `inbox/row-actions.tsx`. The last one is why the grep has to match the CONSTANT
+ * and not just this component: it renders the string directly as a
+ * `title`/`aria-describedby` on its `icon` variant, so a component-keyed search
+ * misses it — which is how the count came to be wrong in the first place.
  */
 export function GoogleAccountHint({
   id,

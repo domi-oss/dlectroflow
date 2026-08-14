@@ -153,9 +153,11 @@ describe("AppMenu", () => {
 });
 
 /**
- * #117 — WCAG 2.4.11 Focus Appearance, which is AA in WCAG 2.2 and which **axe
- * does not implement**. The repo's contrast gate, guest-surface scans and axe
- * baseline all passed on the broken version, so this is not a belt-and-braces
+ * #117 — a focus indicator faint enough that there is effectively none, which is
+ * **2.4.7 Focus Visible (AA)**, replaced by a ring that also clears **2.4.13
+ * Focus Appearance (AAA)**. **axe implements no rule for either.** The repo's
+ * contrast gate, guest-surface scans and axe baseline all passed on the broken
+ * version, so this is not a belt-and-braces
  * duplicate of an e2e assertion — it is the only run-time check that exists.
  *
  * `a11y-class-hygiene.test.ts` enforces the same thing on the source string. This

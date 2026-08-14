@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 
@@ -12,16 +18,20 @@ vi.mock("next/link", () => ({
   // depends on it. A mock that silently drops the ref makes a working focus fix
   // look broken — which is exactly what it did on the first run of that spec.
   // React 19 passes `ref` as an ordinary prop to function components.
+  //
+  // #253 — and it now forwards EVERYTHING ELSE too, `className` included, because
+  // this double dropped that prop and the hazard its own note describes happened a
+  // second time: the ▾ list's restored focus-timer entry is a `Link` carrying
+  // `rowMenuEntry()`, and the 44px guard read `className=""` and failed on markup
+  // that is correct in the browser. Enumerating props is what makes a double diverge
+  // from the thing it stands in for, so it stops enumerating them.
   default: ({
     children,
     href,
     ref,
-  }: {
-    children: React.ReactNode;
-    href: string;
-    ref?: React.Ref<HTMLAnchorElement>;
-  }) => (
-    <a href={href} ref={ref}>
+    ...rest
+  }: React.ComponentPropsWithRef<"a"> & { href: string }) => (
+    <a href={href} ref={ref} {...rest}>
       {children}
     </a>
   ),
@@ -109,9 +119,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   it("each not-done row renders Complete + Start Focus + the 🔽 dropdown trigger", () => {
     render(<TaskSteps taskId="t1" steps={steps()} />);
     // Shared CompleteButton (plain voice → "Complete") on each row.
-    expect(screen.getAllByRole("button", { name: "✓ Complete" })).toHaveLength(
-      2,
-    );
+    expect(screen.getAllByRole("button", { name: "Complete" })).toHaveLength(2);
     // Inline Start Focus CTA on each row.
     expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
@@ -122,15 +130,117 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     expect(screen.queryByTitle("Send to review")).not.toBeInTheDocument();
   });
 
-  it("the 🔽 dropdown lists all five entries", async () => {
+  // #253 — three entries, not five. "Start focus timer" pointed at the same
+  // `/focus/${id}` as the inline ▶ Start Focus and "Complete step" called the same
+  // `complete(id)` as the inline Complete, so both were height in a list that is
+  // now the only route to what is left. Asserted as an exact set rather than three
+  // `getByText` calls: a re-added mirror is the regression, and presence checks
+  // cannot see one.
+  /**
+   * #253 — the ▾ is this STEP's canonical action list, asserted as an exact ordered
+   * list because the claim is about sequence and completeness, which presence checks
+   * cannot see.
+   *
+   * `Send back to review` leads as the step-grain "where does this belong" question
+   * (`ejectStepToInbox` re-buckets the step into Needs review — it is this row's
+   * `Move to…`, not its Delete). Then the two twins of the inline bar, restored
+   * because the list is the complete set and the bar a shortcut subset of it. Then
+   * the property edit, which takes the tail slot only because a step has nothing
+   * destructive to put there.
+   *
+   * `Edit step title` is asserted ABSENT, and that is a tenth instance of the mirror
+   * class #253 has been removing: it fired `setEditEstId(null);
+   * setEditTitleId(s.id)`, character-for-character what the ✎ pencil fires, and the
+   * pencil's `aria-label` ("Edit First") names the step, so it is strictly clearer.
+   * `Edit time estimate` STAYS by the same test applied honestly — the estimate is a
+   * plain `<span>`, not a control, so that entry is its only route.
+   */
+  it("the 🔽 dropdown is the step's canonical actions, in order, and carries no Edit-title mirror", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
-    expect(screen.getByText("Start focus timer")).toBeInTheDocument();
-    expect(screen.getByText("Complete step")).toBeInTheDocument();
-    expect(screen.getByText("Edit time estimate")).toBeInTheDocument();
-    expect(screen.getByText("Edit step title")).toBeInTheDocument();
-    expect(screen.getByText("Send back to review")).toBeInTheDocument();
+    const popup = screen.getByRole("dialog", { name: "All options" });
+    expect(
+      Array.from(popup.querySelectorAll("a, button")).map((b) => b.textContent),
+    ).toEqual([
+      "Send back to review",
+      "Start focus timer",
+      "Complete step",
+      "Edit time estimate",
+    ]);
+    expect(
+      within(popup).queryByText("Edit step title"),
+      "the Edit-title mirror of the ✎ pencil is back",
+    ).toBeNull();
+    // Four groups' worth of entries in three intent groups → two rules, and they are
+    // decoration: no role, so they cannot be announced or counted as entries.
+    expect(
+      popup.querySelectorAll(":scope > [aria-hidden='true']"),
+    ).toHaveLength(2);
+  });
+
+  // Every ▾ entry is the sole route to its action now, so each carries the 44px
+  // minimum the row controls have always had (`rowMenuEntry`). Height only: a
+  // full-width entry is already far past 44px wide.
+  it("every 🔽 entry carries the 44px minimum height", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await openMenu(user);
+    // `a, button` rather than the button role: the focus-timer entry is a `Link`,
+    // and the restored twins are exactly the entries most likely to be given the
+    // 44px floor last, since each has an inline sibling that already has it.
+    const entries = Array.from(
+      screen
+        .getByRole("dialog", { name: "All options" })
+        .querySelectorAll<HTMLElement>("a, button"),
+    );
+    expect(entries).toHaveLength(4);
+    for (const entry of entries) {
+      expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+    }
+  });
+
+  /**
+   * #205's leg on this file, folded in because #253 is what makes it load-bearing.
+   *
+   * The ✎ pencil was a ~20px convenience (`px-1 text-xs`) while `Edit step title`
+   * sat in the ▾ at 44px. This issue removed that entry as a mirror — correctly,
+   * the two fired identical calls — which leaves the pencil as the SOLE route to
+   * renaming a step, at a fifth of the area of the entry it outlived.
+   *
+   * That is the line `anchored-popup.ts` draws for itself, applied here: "entries
+   * whose sole-route status THIS change creates". The pencil's status was created by
+   * this change, so this change sizes it, rather than deferring a control it just
+   * promoted.
+   *
+   * 44x44 is **2.5.5 Target Size (Enhanced), AAA**; **2.5.8 (Minimum) is the AA
+   * one, at 24x24**. A house convention, not a conformance fix — see
+   * `breakdown/note-field.tsx`, which records having had to undo that inversion.
+   *
+   * Both dimensions, unlike the ▾-entry test above: that one checks height only
+   * because a full-width entry is already far past 44px wide. This is an
+   * emoji-only glyph, so width is the dimension it actually fails.
+   */
+  it("the ✎ pencil carries the 44px minimum, being the only route to a rename now", () => {
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    const pencil = screen.getByRole("button", { name: "Edit First" });
+    expect(pencil.className, "the ✎ pencil is under 44px tall").toContain(
+      "min-h-11",
+    );
+    expect(pencil.className, "the ✎ pencil is under 44px wide").toContain(
+      "min-w-11",
+    );
+  });
+
+  it("the sized pencil still opens the title editor for its own step", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    // Pins the behaviour the class change rides on: the pencil's `onClick` clears
+    // the estimate editor and opens the title one for THIS step.
+    expect(
+      screen.getByRole("textbox", { name: "Edit step title" }),
+    ).toBeInTheDocument();
   });
 
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
@@ -140,6 +250,10 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     );
     expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
+    // #253 — BOTH halves again, and the resumable variant has to reach both: the
+    // dropdown twin is restored, and it takes its label from the same `s.resumable`
+    // the inline CTA does. A pass that wired the entry to the Start label on a
+    // resumable step would be invisible without this.
     await openMenu(user);
     expect(screen.getByText("Resume focus timer")).toBeInTheDocument();
     expect(screen.queryByText("Start focus timer")).not.toBeInTheDocument();
@@ -169,7 +283,7 @@ describe("TaskSteps — done steps", () => {
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -223,7 +337,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       screen.getByRole("button", { name: /mark not done/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -367,7 +481,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
 
     const undo = screen.getByRole("button", {
       name: /mark not done: second/i,
@@ -384,15 +498,18 @@ describe("TaskSteps — complete step", () => {
   it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
-    await user.click(screen.getAllByRole("button", { name: "✓ Complete" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Complete" })[0]);
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 
-  it("the dropdown Complete step entry calls completeStep", async () => {
+  // #253 replaced the dropdown mirror with the inline control it duplicated. The
+  // behaviour under test — a press reaches `completeStep` with this step's id —
+  // is kept and re-pointed rather than deleted, because that is the assertion, not
+  // the button it was made through.
+  it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Complete step"));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 });
@@ -451,11 +568,13 @@ describe("TaskSteps — send back to review (dropdown)", () => {
 });
 
 describe("TaskSteps — inline editors", () => {
+  // #253 — reached through the ✎ pencil, which is the row's only edit route now
+  // that the ▾ mirror of it is gone. The behaviour under test (renameStep on Enter)
+  // is unchanged; only the way in is.
   it("Edit step title saves the new text via renameStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.clear(input);
     await user.type(input, "Renamed step{Enter}");
@@ -472,8 +591,7 @@ describe("TaskSteps — inline editors", () => {
   it("Edit step title Escape cancels without saving", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.type(input, "nope{Escape}");
     expect(renameStep).not.toHaveBeenCalled();
@@ -522,7 +640,7 @@ describe("TaskSteps — inline editors", () => {
 describe("TaskSteps — the note trigger sits in the step's action group (#44)", () => {
   it("puts the trigger in the SAME action group as that step's Complete", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const complete = screen.getByRole("button", { name: "Complete" });
     const trigger = screen.getByRole("button", {
       name: "Note for step 1 of 2: First",
     });
@@ -554,7 +672,7 @@ describe("TaskSteps — the note trigger sits in the step's action group (#44)",
     });
     expect(box.closest("[data-row-actions]")).toBeNull();
     expect(box.closest("li")).toBe(
-      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+      screen.getByRole("button", { name: "Complete" }).closest("li"),
     );
   });
 });
@@ -850,9 +968,7 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     // NOT the Complete button: the user has just un-completed this step, so
     // landing focus on the one control that would re-complete it turns a stray
     // Enter into an undo of their undo.
-    expect(
-      screen.getByRole("button", { name: "✓ Complete" }),
-    ).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Complete" })).not.toHaveFocus();
   });
 
   it("hands off to BOTH rows when two undos are in flight at once", async () => {

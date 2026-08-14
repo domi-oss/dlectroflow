@@ -10,10 +10,46 @@
  *    and the app failed AA. Eight sites reached `main` this way, plus #95 and
  *    #99 before them, and a ninth (`task-schedule.tsx`) that neither issue had
  *    found.
- *  * #117 — a focus indicator that is only a background swap. axe does not
- *    implement **WCAG 2.4.11 Focus Appearance** at all, so no amount of seeding
- *    would have caught it. The contrast gate, the guest-surface scans and the
- *    axe baseline are all structurally incapable of seeing it.
+ *  * #117 — a focus indicator that is only a background swap. axe ships **no rule
+ *    for any focus criterion at all** — not 2.4.7 Focus Visible, which is AA and
+ *    has been since WCAG 2.0, and not 2.4.11 Focus Not Obscured or 2.4.13 Focus
+ *    Appearance, both new in 2.2; nor one for 1.4.11 Non-text Contrast. So no
+ *    amount of seeding would have caught it. The contrast gate, the guest-surface
+ *    scans and the axe baseline are all structurally incapable of seeing it.
+ *
+ *    2.4.7 is called out as 2.0 deliberately: a rule for it would carry `wcag2aa`
+ *    and *would* run under the tags below, so the gap there is axe's alone. Only
+ *    the two 2.2 criteria have two reasons to be invisible.
+ *
+ *    Measured against axe-core 4.12.1 on 2026-08-13: 105 rules, none carrying a
+ *    `wcag247`, `wcag2411`, `wcag2413` or `wcag1411` tag. **No rule exists** is
+ *    the load-bearing reason, and `axe.getRules()` re-takes the measurement in one
+ *    line, so re-measure rather than trust this sentence.
+ *
+ *    The tag list is a second and independent reason, not a redundant one:
+ *    `e2e/a11y/axe-helpers.ts` asks for `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`,
+ *    which are version-and-level tags, and a criterion new in WCAG 2.2 carries
+ *    `wcag22aa` instead — never `wcag2a`, because it did not exist in 2.0. So a
+ *    2.2 rule would not run here even if axe had one for these criteria. That is
+ *    shown rather than assumed, because axe does ship exactly one: `target-size`,
+ *    the only rule tagged `wcag22aa`, covering 2.5.8 Target Size (Minimum) at AA.
+ *    Those four tags do not select it, so it does not run — a different gap from
+ *    this module's, recorded rather than fixed, and the same 24x24 floor is cited
+ *    in `utils.ts`.
+ *
+ *    Do not re-derive any of this from a grep for `wcag22`. axe has two shapes of
+ *    tag and only one of them is a version: `wcagXYZ` names success criterion
+ *    X.Y.Z, so `wcag221`, `wcag222` and `wcag224` are SC 2.2.1, 2.2.2 and 2.2.4 —
+ *    all WCAG 2.0 — and `blink`, `marquee` and `meta-refresh` carry them next to
+ *    `wcag2a`. A grep counted those three as "2.2 rules that do run" and produced
+ *    a confident correction to this paragraph that was backwards; it was caught by
+ *    reading the paragraph against the tag list it cites. Reading a number as the
+ *    wrong *kind* of thing is #258's own defect one level down, which is why the
+ *    trap is written down instead of just removed.
+ *
+ *    The criteria and their levels are set out at {@link findWeakFocusIndicators};
+ *    they were read off the specification for #258, because the citation this
+ *    header used to carry was wrong in both the number and the level.
  *
  * Seeding fixtures per state is what !188 did for #95 and it works, but it costs
  * one fixture per state and catches the *instance*, not the class — which is why
@@ -58,7 +94,34 @@
  *     `outline-none` is present, because removing the browser's own outline is
  *     what makes an indicator the author's problem. `move-to-menu.tsx` styles
  *     `data-[highlighted]:bg-accent` with no `outline-none`, so the UA outline
- *     still draws and 2.4.11 is still satisfied — correctly not a finding.
+ *     still draws and 2.4.7 is still satisfied — correctly not a finding.
+ *  5. **WCAG 2.4.11 Focus Not Obscured (Minimum), which is AA — and which
+ *     NOTHING in this repo checks.** Named here because until #258 this module
+ *     claimed the number while measuring something else, so a coverage audit
+ *     against WCAG 2.2 would have ticked a criterion no check in the tree can
+ *     see. 2.4.11 asks that a focused component not be *entirely* hidden by
+ *     author content, which is a question about scroll position and stacking
+ *     order — nothing a class-string scanner can answer, and axe has no rule for
+ *     it either.
+ *
+ *     **The risk is not nil, and the surfaces are nameable:** `section-nav.tsx`
+ *     puts a `sticky top-0 z-[2]` bar over Settings and Help with a second
+ *     sticky layer (the section header) beneath it, and `select-action-bar.tsx`
+ *     is `sticky bottom-2 z-10` in the library. The mitigation that exists
+ *     covers *jump* targets only — `globals.css` sets a `scroll-margin-top` of
+ *     the bar's measured height on `[data-section-target]`, and
+ *     `legal-page.tsx` carries `scroll-mt-4` — so a sequential Tab that lands on
+ *     an ordinary control the browser scrolls flush under the bar is neither
+ *     mitigated nor observed.
+ *
+ *     **Decision, taken in #258: accepted as unchecked, explicitly rather than
+ *     by omission.** Checking it needs a keyboard walk in real layout, which is
+ *     a Playwright spec for the same reason `row-menu-viewport-fit.spec.ts` is
+ *     one — jsdom computes no layout and this module reads strings. That is a
+ *     separate piece of work with its own argument to make, and widening this
+ *     module toward it would produce a guard that cannot fail. What must not
+ *     happen again is 2.4.11 reading as covered: it is not, and this entry is
+ *     the record of that.
  */
 
 import ts from "typescript";
@@ -631,7 +694,9 @@ const FOCUS_VARIANTS = ["focus-visible", "focus", "focus-within"];
  *
  * Dropping it from this list would have created the precise false negative Rule D
  * exists to prevent: `outline-hidden focus-visible:bg-accent` would pass while
- * giving an ordinary user a 1.07:1 background swap and nothing else. Nothing in
+ * giving an ordinary user a background swap of the order `app-menu.tsx` measured
+ * at 1.07:1 and nothing else — `bg-accent` specifically is `account-menu.tsx`'s
+ * token, which measured 1.09:1, and neither figure is this scope's. Nothing in
  * the tree uses `outline-hidden` today, so this is future-proofing — and the
  * permissive direction is the expensive one to get wrong.
  */
@@ -639,8 +704,9 @@ const OUTLINE_KILLERS = ["outline-none", "outline-hidden", "outline-0"];
 
 /**
  * Base utilities that draw a focus indicator which is **not** solely a colour
- * change — the property 2.4.11 turns on. A ring, an inset ring, a restored
- * outline, an underline or a border *width* all add or move a visible edge.
+ * change — the property 2.4.13 puts an area and a focused/unfocused contrast
+ * floor under. A ring, an inset ring, a restored outline, an underline or a
+ * border *width* all add or move a visible edge.
  *
  * `ring-ring` and `border-ring` are excluded on purpose: they set the ring's or
  * border's *colour*, and a colour with no width is the very shape this rule
@@ -685,11 +751,89 @@ function drawsIndicator(base: string): boolean {
  * Rule D — any scope that removes the UA focus outline must draw an indicator
  * of its own that is not merely a colour swap.
  *
- * WCAG 2.4.11 Focus Appearance is **AA in WCAG 2.2**, and axe does not
- * implement it, so this is the only automated check that can see it. The
- * background swap the two header menus relied on measured **1.07:1 (light)** and
- * **1.17:1 (dark)** between the focused and unfocused entry — nowhere near the
- * 3:1 an indicator needs against adjacent colours.
+ * ── The three focus criteria, read off WCAG 2.2 rather than recalled ────────
+ *
+ *   2.4.7   Focus Visible                  **AA**   (since WCAG 2.0)
+ *           "a mode of operation where the keyboard focus indicator is visible"
+ *   2.4.11  Focus Not Obscured (Minimum)   **AA**   (new in 2.2)
+ *           the focused component is not entirely hidden by author content
+ *   2.4.13  Focus Appearance               **AAA**  (new in 2.2)
+ *           the indicator's area (a 2px perimeter) and 3:1 between the focused
+ *           and unfocused states
+ *
+ * This docblock used to name "Focus Appearance" while citing 2.4.11, and call the
+ * result AA — one criterion's number welded to another's name. #258 exists
+ * because **the level then follows the name**: it reported a AAA bar as an AA
+ * obligation, in a message a developer reads at the moment they are deciding
+ * whether a change is compliant. The correction is not repeated verbatim across
+ * the tree; `a11y-class-hygiene.test.ts` asserts the weld cannot come back.
+ *
+ * ── Which one this rule enforces, per branch ────────────────────────────────
+ *
+ *  * **Nothing replaces the outline** → **2.4.7 Focus Visible, AA.** There is no
+ *    indicator at all, so this branch is a plain AA failure and non-negotiable.
+ *  * **A colour swap replaces it** → this branch is **deliberately stronger than
+ *    the AA bar.** 2.4.7 sets no threshold of contrast or size, so a hue change
+ *    can be argued to satisfy it while being invisible in practice: the swap
+ *    `app-menu.tsx` relied on measured **1.07:1 (light)** and **1.17:1 (dark)**
+ *    on `--muted` against `--background`, and `account-menu.tsx`'s **1.09:1** and
+ *    **1.24:1** on `--accent` against the popup surface — so **1.07:1–1.24:1
+ *    across the two menus**, each figure belonging to the one that measured it.
+ *    That is the ratio *2.4.13* puts a
+ *    3:1 floor under, and 2.4.13 is AAA. (The same numbers read on 1.4.11
+ *    Non-text Contrast too, which *is* AA and asks 3:1 of the visual information
+ *    identifying a state: for a background-only indicator, the adjacent colour a
+ *    focused entry is measured against *is* its unfocused neighbour, so both
+ *    criteria happen to measure the same pair of pixels here. And 1.4.11's
+ *    exemption is for a focus style the author has not modified, while this
+ *    branch fires only where the author removed the UA outline — so the exemption
+ *    does not apply. It is still a measurement, though, and per gap 1 above this
+ *    module is not a photometer, so it names the criterion and leaves the
+ *    question open instead of asserting a failure.)
+ *
+ * So the colour-only branch is a house rule that reaches toward 2.4.13, chosen
+ * because a categorical "draw a real edge" is enforceable on class strings where
+ * a contrast threshold is not. The *rule* is not a conformance obligation, and
+ * the finding carries both levels so a developer can tell which is which: told
+ * they are failing AA they treat it as non-negotiable and look for the smallest
+ * thing that clears it; told AAA they know it is this project's choice and can
+ * argue about it. The same distinction
+ * `note-field.tsx` and `row-menu-viewport-fit.spec.ts` had to make for 2.5.5
+ * (Enhanced, AAA) against 2.5.8 (Minimum, AA).
+ *
+ * What the finding must not do is let "AAA" be read as "optional", because the
+ * defect it fires on is usually an AA failure as well — just one under a
+ * criterion nothing here can measure. #258's original mistake was a AAA bar
+ * reported as an AA obligation; reporting a likely AA failure as a purely AAA
+ * preference is that mistake with the sign flipped, and it is the one a developer
+ * would make next, having been told the rule is above the floor. So the message
+ * names 1.4.11 as well, at AA, and says the ratio is unmeasured here.
+ *
+ * ── Why the finding quotes no ratio ─────────────────────────────────────────
+ * The figures above stay here, where the surface each was measured on is named
+ * beside it — which is the whole point, and is why the earlier wording "the swap
+ * the two header menus relied on measured 1.07:1 and 1.17:1" was itself the same
+ * defect at file scope: that pair is `app-menu.tsx`'s, and `account-menu.tsx`
+ * measured 1.09:1 and 1.24:1 on a different token against a different surface.
+ * They are **not** in the message, which
+ * is one string returned for every colour-only violation the gate will ever
+ * report: a figure from one site, restated for a finding in an unrelated file, is
+ * a measurement nobody took, and nothing in the sentence shows the reader it was
+ * inherited. Duo review caught that on !340 — the wording ended "because #117's
+ * swap measured 1.07:1".
+ *
+ * It is #258's defect one level down, and the more dangerous half of it: a wrong
+ * criterion number still looks like something a reader could go and check, while
+ * an inherited ratio reads as evidence. Since this module measures no contrast at
+ * all (gap 1), **no** ratio in a per-finding message can be about that finding —
+ * not even a threshold, because a bare "3:1" beside a violation reads as a
+ * comparison the gate performed, and it performed none. The message states only
+ * what the scanner knows: the outline is gone, the replacement is a colour, which
+ * two criteria that engages, and that the measuring is a human's job.
+ * `a11y-class-hygiene.test.ts` pins the whole string rather than substrings of it.
+ *
+ * axe implements none of the three, so this is the only automated check in the
+ * repo that sees a **killed focus indicator** at all.
  */
 export function findWeakFocusIndicators(
   source: string,
@@ -737,9 +881,18 @@ export function findWeakFocusIndicators(
     findings.push({
       line: scope.line,
       token: killer,
+      // Two branches, two criteria, two levels — see the docblock. The level is
+      // in the message on purpose (#258): it is the difference between "fix this,
+      // it is AA" and "this project asks for more than AA here", and a developer
+      // reads one of these at the moment they are deciding which.
+      //
+      // What is deliberately NOT here is any ratio. This string is returned for
+      // every colour-only violation, so a figure measured at one site is a claim
+      // about findings nobody examined — see the docblock, and the control in
+      // `a11y-class-hygiene.test.ts` that pins the whole string.
       reason: colourOnly
-        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}), which does not satisfy WCAG 2.4.11 Focus Appearance; add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
-        : `\`${killer}\` removes the UA focus outline and nothing replaces it, so the element has no visible focus indicator (WCAG 2.4.7 / 2.4.11)`,
+        ? `\`${killer}\` removes the UA focus outline and the only focus treatment left is a colour swap (${colourOnly}); a hue change carries no indicator area and no focused/unfocused contrast, so it engages WCAG 2.4.13 Focus Appearance, which is AAA, and WCAG 1.4.11 Non-text Contrast, which is AA and therefore not optional. This gate cannot measure a contrast ratio, so whether either threshold is met here is unknown and a human has to check. Add \`focus-visible:inset-ring-2 focus-visible:inset-ring-ring\``
+        : `\`${killer}\` removes the UA focus outline and nothing replaces it, so the element has no visible focus indicator at all — WCAG 2.4.7 Focus Visible, which is AA`,
     });
   }
   return findings;

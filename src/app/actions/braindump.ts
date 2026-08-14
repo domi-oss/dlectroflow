@@ -8,7 +8,6 @@ import {
   logReward,
   awardBadge,
   touchStreakOnCompletion,
-  touchStreakOnEngagement,
   reverseItemCompletionRewards,
   revokeUnqualifiedBadges,
 } from "@/lib/rewards";
@@ -21,10 +20,8 @@ import {
 } from "@/lib/constants";
 import { countsTowardInboxZero } from "@/lib/inbox-zero-queue";
 import { currentWorkspaceId } from "@/lib/workspace";
-import {
-  splitInlineNote,
-  resolveInlineNoteEdit,
-} from "@/lib/braindump-note-syntax";
+import { resolveInlineNoteEdit } from "@/lib/braindump-note-syntax";
+import { writeCapture } from "@/lib/capture-write";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
 import {
@@ -43,26 +40,66 @@ const LIBRARY_PATH = "/library";
  * rule is end-anchored and deliberately strict — see
  * `src/lib/braindump-note-syntax.ts` for why that is the whole design.
  *
- * The note goes through `normalizeTaskNote` rather than being left to
- * `BrainDumpItem_notes_check`: the constraint is the backstop for a writer that
- * forgot, and reaching it from the writer that did not would surface to the
- * person as a capture that silently failed.
+ * ## The write itself moved to `writeCapture` (#175), and this is now a wrapper
  *
- * The empty guard reads the PARSED text, not the raw string. `{just a note}` is
- * refused by the parser and stored literally, so this cannot create a row whose
- * only content is hidden behind a note.
+ * The offline capture queue flushes through `POST /api/braindump`, and the spec
+ * puts the FOREGROUND capture on that same route — so there is one write path and
+ * one set of semantics to test. Rather than let the route grow a second copy of
+ * the note split, the empty guard and the streak touch, all three live in
+ * `src/lib/capture-write.ts` and both callers share them. What is left here is
+ * the two things a server action owns and a route handler does not: resolving the
+ * session's workspace, and invalidating the list.
+ *
+ * This action keeps its non-queued callers — the breakdown ejector
+ * (`src/components/breakdown/breakdown-chat.tsx`) — and takes no `clientKey`,
+ * deliberately. Idempotency belongs to a capture that can be REPLAYED, and only
+ * the queue replays; an unkeyed capture leaves the column null, which the unique
+ * index treats as distinct from every other null.
+ *
+ * `created` is therefore the only non-`empty` outcome reachable from here, so
+ * gating the revalidation on it is exactly the behaviour this action had before
+ * the extraction — not a narrowing of it. A revalidation is a consequence of a
+ * write, the same reading `ensureFocusStep` takes of its own.
+ *
+ * ## ⚠️ Sweeping this file for unguarded post-commit payouts: follow the call
+ *
+ * #257 is the rule that bookkeeping running AFTER a committed write must not be
+ * able to report the write as failed, and this file is the largest remaining
+ * source of that shape — so it gets swept, repeatedly, by whoever picks the
+ * follow-up up. **The method is the part worth writing down, because the obvious
+ * one is wrong here and wrong in the direction that costs work.**
+ *
+ * `grep "try {"` across this file returns **zero**. That is true and it is
+ * misleading: it makes THIS function read as an unguarded site, when the guard is
+ * simply in the callee — `writeCapture` wraps `touchStreakOnEngagement` itself and
+ * emits `capture_streak_touch_failed` (`src/lib/capture-write.ts`). A sweep that
+ * stops at the `await` therefore reports a false positive here, and a sweep run
+ * against `main` reports **seven** sites in this file where this branch has
+ * **six** — the difference is exactly this line, because on `main` the same
+ * function still calls `touchStreakOnEngagement` inline and unguarded. Both counts
+ * are honest about the tree they were taken on, which is precisely why a count is
+ * not a substitute for following the call.
+ *
+ * **Acting on that false positive is not harmless.** Wrapping this `writeCapture`
+ * call in a second best-effort would swallow a second time over a guard that
+ * already exists, and — worse — collapse the three-valued
+ * `CaptureOutcome` the next line branches on into `T | null`. `created`,
+ * `duplicate` and `empty` mean different things to a caller and only one of them
+ * revalidates; a wrapper that answers `null` for a failure it invented makes
+ * `outcome === "created"` false for a capture that was written. That is the
+ * original bug — a saved capture reported as not saved — reintroduced by the fix
+ * for it.
+ *
+ * So: for each `await` of a reward, badge, streak or sync helper that follows a
+ * committed write, **open the callee** and check whether the guard is already
+ * there. The sites in this file that genuinely still need one are waiting on
+ * #257's shared `bestEffort` wrapper rather than on a decision; they are not swept
+ * here because that helper's tag union is still moving.
  */
 export async function createBrainDumpItem(text: string) {
   const workspaceId = await currentWorkspaceId();
-  const { text: itemText, note } = splitInlineNote(text);
-  if (!itemText) return;
-  await prisma.brainDumpItem.create({
-    data: { text: itemText, notes: normalizeTaskNote(note), workspaceId },
-  });
-  // A capture is a qualifying engagement (Decision 1) — advances the streak at
-  // most once per working day.
-  await touchStreakOnEngagement(workspaceId);
-  revalidatePath(INBOX_PATH);
+  const outcome = await writeCapture({ workspaceId, text });
+  if (outcome === "created") revalidatePath(INBOX_PATH);
 }
 
 export async function triageBrainDumpItem(id: string) {

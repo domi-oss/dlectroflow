@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { t, type Voice } from "@/lib/strings";
 import { type AgingSettings } from "@/lib/aging";
 import type { Item } from "@/components/inbox/bucket";
@@ -81,11 +81,21 @@ export function LibraryMultistep({
               root) (#8 follow-up — Library "Open task" back-button bug). Sits to the
               LEFT of the expand/collapse toggle; shown only while a row is
               expanded, hidden entirely in select mode (moved from the panel to
-              the header in !83; positioned left of the toggle in its follow-up). */}
+              the header in !83; positioned left of the toggle in its follow-up).
+
+              #205 — sized even though it is a `<Link>`. That issue's table counts
+              `<button>` and so does not list this control, but it is a bordered
+              pill in the same header cluster at the same `py-1` as the toggle
+              beside it, and the issue's OWN method (grep `py-1`) does flag this
+              line. A control that looks identical to its neighbour and measures
+              20px shorter is precisely the visible inconsistency being removed. */}
           {!sel.selecting && expandedItem?.taskId && (
             <Link
               href={`/tasks/${expandedItem.taskId}?from=library`}
-              className="hover:bg-accent rounded-md border px-2.5 py-1"
+              className={cn(
+                touchTarget,
+                "hover:bg-accent rounded-md border px-2.5 py-1",
+              )}
             >
               {t("lib.openTask", voice)}
             </Link>
@@ -96,7 +106,10 @@ export function LibraryMultistep({
               every row — single-open is preserved either way. */}
           <button
             type="button"
-            className="hover:bg-accent rounded-md border px-2.5 py-1"
+            className={cn(
+              touchTarget,
+              "hover:bg-accent rounded-md border px-2.5 py-1",
+            )}
             onClick={() =>
               setExpandedId(expandedItem ? null : (items[0]?.id ?? null))
             }
@@ -107,13 +120,19 @@ export function LibraryMultistep({
         {sel.selecting ? (
           <div className="flex gap-2 text-sm">
             <button
-              className="hover:bg-accent rounded-md border px-2.5 py-1"
+              className={cn(
+                touchTarget,
+                "hover:bg-accent rounded-md border px-2.5 py-1",
+              )}
               onClick={() => sel.selectAll(ids)}
             >
               {t("lib.selectAll", voice)}
             </button>
             <button
-              className="text-muted-foreground rounded-md border px-2.5 py-1"
+              className={cn(
+                touchTarget,
+                "text-muted-foreground rounded-md border px-2.5 py-1",
+              )}
               onClick={sel.exit}
             >
               {t("action.cancel", voice)}
@@ -121,7 +140,10 @@ export function LibraryMultistep({
           </div>
         ) : (
           <button
-            className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm"
+            className={cn(
+              touchTarget,
+              "hover:bg-accent rounded-md border px-2.5 py-1 text-sm",
+            )}
             onClick={sel.enter}
           >
             {t("lib.select", voice)}
@@ -159,6 +181,23 @@ export function LibraryMultistep({
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
+                  {/* #205 — DELIBERATELY NOT given `touchTarget`, and the reason
+                      is written here because that issue's scope asks for it in
+                      the file rather than in the issue.
+
+                      Three reasons, in order of weight. It is a disclosure TITLE
+                      rather than a header control, and its target is already the
+                      full row width — the dimension a thumb actually misses on a
+                      phone. Sizing it would add ~20px to EVERY collapsed row,
+                      which is the direct opposite of what #253 is doing to this
+                      surface, and #205 says to check 390px before widening
+                      anything. And `touchTarget` carries `justify-center` plus
+                      `inline-flex`, either of which would centre a title that has
+                      to stay left-aligned and kill the `block w-full` beside it.
+
+                      `library-multistep.test.tsx` pins this as an assertion, so
+                      "make everything 44px" cannot be applied here without a test
+                      going red and pointing back at this comment. */}
                   <button
                     type="button"
                     className="block w-full text-left text-base font-semibold break-words"
