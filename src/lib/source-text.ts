@@ -49,8 +49,14 @@
  *     apostrophe anywhere in the pipeline file would otherwise stop every comment
  *     below it being stripped — which is #226's own defect, applied file-wide.
  *
- * So a fourth `#` variant is still worth pushing back on; collapsing these two
- * is not.
+ * So collapsing these two is not the tidying it looks like. A FURTHER `#` variant
+ * still is worth pushing back on — and one exists, measured while answering #226:
+ * `backup-hygiene.ts:343` declares its own function *also called*
+ * `stripShellComments`, deliberately narrower (whole-line comments only, no quote
+ * tracking) and with its own written reasoning. Left alone here because its
+ * narrowness is argued rather than accidental, and because reading a call site and
+ * assuming which one you are looking at is the only real hazard it carries. Noted
+ * so the next reader of this list knows the shadowed name is out there.
  */
 
 /**
