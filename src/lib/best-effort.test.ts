@@ -2,10 +2,13 @@
  * #257 — the shared post-commit swallow.
  *
  * What is pinned here is the primitive's contract, not any one call site: the
- * work's own answer comes back untouched on success, a rejection resolves to
- * `null` instead of propagating, and the failure leaves one greppable line
- * carrying the workspace. The five call sites and the reasoning for each are in
- * `src/app/actions/post-commit-bookkeeping.test.ts` and in `best-effort.ts`.
+ * work's own answer comes back untouched under `{ ok: true, value }`, a rejection
+ * becomes `{ ok: false }` instead of propagating, and the failure leaves one
+ * greppable line carrying the workspace. **`ok` rather than a bare `T | null`,
+ * because a thunk that succeeds by returning `null` is not a failure** — the
+ * contract test below carries the case that forced it. The five call sites and the
+ * reasoning for each are in `src/app/actions/post-commit-bookkeeping.test.ts` and
+ * in `best-effort.ts`.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -43,18 +46,61 @@ describe("bestEffort", () => {
       bestEffort("step_done_bookkeeping_failed", "ws-1", async () => ({
         current: 3,
       })),
-    ).resolves.toEqual({ current: 3 });
+    ).resolves.toEqual({ ok: true, value: { current: 3 } });
     expect(errorLog).not.toHaveBeenCalled();
   });
 
   // The whole point: the caller carries on, and carries on with a value it can
   // branch on rather than an exception it has to translate.
-  it("resolves to null on a rejection rather than propagating it", async () => {
+  it("reports not-ok on a rejection rather than propagating it", async () => {
     await expect(
       bestEffort("step_done_bookkeeping_failed", "ws-1", async () => {
         throw new Error(BOOM);
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ ok: false });
+  });
+
+  /**
+   * ── A SUCCESSFUL `null` is not a failure (Duo review, `!339`) ──────────────
+   *
+   * The primitive used to answer `T | null` and collapse the two, which was fine
+   * until a caller needed to tell them apart. `completeFocus` did: it reports a
+   * points figure, and the figure is only true if the payout actually banked.
+   * `rewardStepDone` returns `StreakUpdate | null` and `null` is a **success** —
+   * the streak was already credited today — so a caller reading the value could
+   * not distinguish "already credited" from "the write is gone", and either
+   * over-claimed points on a failure or zeroed them on an ordinary second session.
+   *
+   * Hence the outcome shape. This pair is the entire contract, and every other
+   * assertion in this file rests on it.
+   */
+  it("distinguishes a thunk that resolved null from one that threw", async () => {
+    await expect(
+      bestEffort("focus_step_reward_failed", "ws-1", async () => null),
+    ).resolves.toEqual({ ok: true, value: null });
+
+    await expect(
+      bestEffort("focus_step_reward_failed", "ws-1", async () => {
+        throw new Error(BOOM);
+      }),
+    ).resolves.toEqual({ ok: false });
+  });
+
+  // The failure branch carries no `value` at all, rather than `value: null` —
+  // otherwise a caller reading `.value` gets the same collapse back, one property
+  // deeper, and TypeScript would not stop it.
+  it("carries no value on the failure branch", async () => {
+    const outcome = await bestEffort(
+      "focus_step_reward_failed",
+      "ws-1",
+      async () => "banked",
+    );
+    expect(Object.hasOwn(outcome, "value")).toBe(true);
+
+    const failed = await bestEffort("focus_step_reward_failed", "ws-1", () =>
+      Promise.reject(new Error(BOOM)),
+    );
+    expect(Object.hasOwn(failed, "value")).toBe(false);
   });
 
   it("says so in the log, with the tag it was given and the workspace", async () => {
@@ -84,7 +130,7 @@ describe("bestEffort", () => {
   it("does not log when the work resolves with nothing", async () => {
     await expect(
       bestEffort("first_focus_badge_failed", "ws-1", async () => {}),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ ok: true, value: undefined });
     expect(errorLog).not.toHaveBeenCalled();
   });
 
@@ -95,7 +141,7 @@ describe("bestEffort", () => {
       bestEffort("task_complete_points_failed", "ws-1", () => {
         throw new Error(BOOM);
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ ok: false });
     expect(line().message).toContain(BOOM);
   });
 
@@ -132,7 +178,7 @@ describe("bestEffort", () => {
         const broken = undefined as unknown as { nope: () => void };
         broken.nope();
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ ok: false });
 
     expect(line().tag).toBe("bookkeeping_defect");
     // The site is still recoverable — it moves to its own field.
@@ -175,12 +221,12 @@ describe("bestEffort", () => {
   });
 
   // A defect must still not report the committed write as failed — #257 itself.
-  it("still resolves to null on a defect, so the write is not reported failed", async () => {
+  it("still reports not-ok on a defect, so the write is not reported failed", async () => {
     await expect(
       bestEffort("first_focus_badge_failed", "ws-2", () =>
         Promise.reject(new TypeError("not a function")),
       ),
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ ok: false });
   });
 });
 

@@ -299,13 +299,44 @@ function isDefect(error: unknown): boolean {
 }
 
 /**
- * Run one consequence of a committed write. A rejection is logged under `tag`
- * and resolved to `null`; anything the work returns comes back untouched.
+ * The answer {@link bestEffort} gives: whether the work ran, and its value if it
+ * did.
  *
- * `T | null` rather than `void`, so a caller that had a value to show can go on
- * showing it: `completeFocus` reports `streak` to the UI, and `null` is already
- * that field's word for "no streak update", so the failure needs no new vocabulary
- * at the call site. A caller with nothing to return ignores the result.
+ * **The failure branch carries no `value` at all**, so a caller cannot read one
+ * without narrowing on `ok` first — which is the whole property, enforced by the
+ * compiler rather than by a convention.
+ */
+export type BestEffortOutcome<T> =
+  { readonly ok: true; readonly value: T } | { readonly ok: false };
+
+/**
+ * Run one consequence of a committed write. A rejection is logged under `tag`
+ * and reported as `{ ok: false }`; anything the work returns comes back untouched
+ * under `{ ok: true, value }`.
+ *
+ * ## `ok` rather than `T | null`, because a successful `null` is not a failure
+ *
+ * This returned `T | null` until `!339`, on the reasoning that a caller with a
+ * value to show could go on showing it — `completeFocus` reports `streak`, and
+ * `null` is already that field's word for "no streak update", so the failure
+ * needed no new vocabulary at the call site.
+ *
+ * **That was true of the streak field and quietly false of the action's other
+ * fields, which is a worse kind of wrong than being false outright**, because it
+ * reads as a general property and holds only by coincidence. `rewardStepDone`
+ * returns `StreakUpdate | null` and its `null` means *the streak was already
+ * credited today* — a success. So `T | null` collapsed "already credited" into
+ * "the write is gone", and any caller needing to tell them apart could not.
+ * `completeFocus` needed exactly that: it reports a **points** figure, and a
+ * figure is either true or a lie. Under the old shape it answered a hardcoded 15
+ * over payouts that never landed (Duo review), and the obvious repair — read the
+ * value, zero the points when it is `null` — would have zeroed the points of
+ * every second session of the day instead.
+ *
+ * The discriminated outcome removes the choice: `ok` answers "did it run", `value`
+ * answers "with what", and neither can stand in for the other. A caller with
+ * nothing to report still ignores the result entirely, which is what eight of the
+ * nine call sites do.
  *
  * `work` is a thunk rather than a promise so that a synchronous throw while
  * building the call — `() => logReward(ws, TYPES[k])` on a bad `k`, say — is
@@ -367,11 +398,13 @@ export async function bestEffort<T>(
   tag: BookkeepingTag,
   workspaceId: string,
   work: () => Promise<T>,
-): Promise<T | null> {
+): Promise<BestEffortOutcome<T>> {
   try {
-    return await work();
+    // The `await` is inside the object literal's argument, so a thunk that
+    // rejects never reaches the `{ ok: true }` construction.
+    return { ok: true, value: await work() };
   } catch (error) {
     recordBookkeepingFailure(tag, workspaceId, error);
-    return null;
+    return { ok: false };
   }
 }

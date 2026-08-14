@@ -14,6 +14,7 @@ import {
 import {
   BadgeKey,
   FocusOutcome,
+  RewardPoints,
   RewardType,
   TaskStatus,
 } from "@/lib/constants";
@@ -608,12 +609,20 @@ export async function completeFocus(
   // an undo does not take back (`reverseStepCompletionRewards`), so a failed step
   // payout must not silently cost it, and a failed bonus must not hide a streak
   // that did advance. The residual is at most one of the two, never both.
-  const streak = await bestEffort("focus_step_reward_failed", workspaceId, () =>
-    rewardStepDone(workspaceId),
+  //
+  // Both outcomes are kept, not just the step payout's value, because `points`
+  // below may only claim what actually banked — see the return statement.
+  const stepPayout = await bestEffort(
+    "focus_step_reward_failed",
+    workspaceId,
+    () => rewardStepDone(workspaceId),
   );
-  await bestEffort("focus_session_bonus_failed", workspaceId, () =>
-    logReward(workspaceId, RewardType.SessionFinished),
+  const bonusPayout = await bestEffort(
+    "focus_session_bonus_failed",
+    workspaceId,
+    () => logReward(workspaceId, RewardType.SessionFinished),
   );
+  const streak = stepPayout.ok ? stepPayout.value : null;
 
   const next = await prisma.step.findFirst({
     where: {
@@ -650,7 +659,26 @@ export async function completeFocus(
   return {
     ok: true,
     nextStepId: next?.id ?? null,
-    points: 15,
+    // Only what banked (#257, Duo review on `!339`). This was the literal `15`,
+    // and the swallow above is what made that a lie the person could read: a
+    // payout that failed no longer aborts the action, so the done screen would
+    // render "+15 points" over rewards that were never written while the
+    // dashboard total stayed put.
+    //
+    // Per payout rather than all-or-nothing, because the two are independent
+    // `bestEffort` calls and either can fail alone — so all four combinations
+    // are truthful. Read from `RewardPoints` rather than restated, so the figure
+    // cannot drift from the map `logReward` actually writes.
+    //
+    // Under-claims by design in one case: `rewardStepDone` is a legitimate
+    // bundle, so `ok: false` means "something in it failed", not "nothing
+    // banked" — if the points landed and the streak touch then threw, those 10
+    // are real and go unclaimed. Under-claiming is the only direction that
+    // cannot tell someone their work earned something it did not, which is the
+    // same principle as #257 itself pointed the other way.
+    points:
+      (stepPayout.ok ? RewardPoints[RewardType.StepDone] : 0) +
+      (bonusPayout.ok ? RewardPoints[RewardType.SessionFinished] : 0),
     googleSynced,
     streak: streak?.current ?? null,
     freshStart: streak?.freshStart ?? false,

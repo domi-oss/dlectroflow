@@ -94,7 +94,12 @@ vi.mock("@/lib/rewards", () => ({
   reverseStepCompletionRewards: vi.fn(),
 }));
 
-import { BadgeKey, RewardType, TaskStatus } from "@/lib/constants";
+import {
+  BadgeKey,
+  RewardPoints,
+  RewardType,
+  TaskStatus,
+} from "@/lib/constants";
 
 const WS = "ws-1";
 const BOOM = "reward store went away";
@@ -472,6 +477,89 @@ describe("completeFocus — a payout that fails after the session closed", () =>
     expect(errorLog).toHaveBeenCalledTimes(1);
     expect(loggedLine().tag).toBe("focus_step_reward_failed");
     expect(loggedLine().workspaceId).toBe(WS);
+  });
+
+  /**
+   * ── The timer may only claim points that actually banked (Duo, `!339`) ─────
+   *
+   * `points` was the literal `15` — `step_done` (10) plus `session_finished` (5)
+   * — returned whatever the payouts did. The swallow this MR added is what made
+   * that reachable: before it, a failing payout threw and the client never saw a
+   * success at all. After it, `completeFocus` could resolve
+   * `{ ok: true, points: 15 }` over rewards that were never written, and
+   * `focus-timer.tsx` renders `+{result.points} points` on the done screen.
+   *
+   * The user action is ordinary: finish a focus session while the reward write is
+   * having a bad moment. The person is told "+15 points" and the dashboard total
+   * does not move — a smaller lie than #257's, in the opposite direction, but the
+   * same kind.
+   *
+   * **The figure is now derived per payout, from `RewardPoints` rather than a
+   * literal**, because the two payouts are two independent `bestEffort` calls and
+   * either can fail alone. So all four combinations are truthful, and the
+   * hardcoded total can no longer drift from the map it was copied out of.
+   *
+   * **Deriving it from `streak === null` was not available, and that is the whole
+   * reason `bestEffort` grew a discriminated result.** `rewardStepDone` returns
+   * `StreakUpdate | null`, and `null` is a SUCCESS value — the day was already
+   * credited. Duo suggested "0 when the underlying `bestEffort` call returned
+   * `null`", which would have zeroed the points of every second session of the
+   * day; the CONTROL below is the case that catches it.
+   *
+   * The residual, stated rather than implied: `rewardStepDone` is a legitimate
+   * bundle, so a rejection means "something in the bundle failed", not "nothing
+   * banked" — if `logReward` succeeded and the streak touch then threw, 10 points
+   * did land and are not claimed. Under-claiming is the direction that cannot lie
+   * to someone about their own data, so that is the direction taken.
+   */
+  it("does not claim the step points when the step payout failed", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(finish()).resolves.toMatchObject({
+      ok: true,
+      // The bonus banked and is still claimed; the step payout's 10 is not.
+      points: RewardPoints[RewardType.SessionFinished],
+    });
+  });
+
+  it("does not claim the bonus when only the bonus failed", async () => {
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(finish()).resolves.toMatchObject({
+      ok: true,
+      points: RewardPoints[RewardType.StepDone],
+    });
+  });
+
+  it("claims nothing at all when both payouts failed", async () => {
+    rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    // Zero, so the done screen shows the session as finished with no points
+    // line — rather than a figure nobody was credited.
+    await expect(finish()).resolves.toMatchObject({ ok: true, points: 0 });
+  });
+
+  /**
+   * THE CONTROL, and the case that made the old `T | null` shape look reasonable:
+   * a second session on a day the streak already credited. `rewardStepDone`
+   * resolves `null` there, which is a success, and both payouts banked — so the
+   * full figure is owed and `streak: null` means "no streak update to show",
+   * not "the write failed".
+   *
+   * This is green before and after the change by design. It is not vacuous: it is
+   * the assertion that reds under the naive fix of reading the payout's value
+   * instead of its outcome, which was the suggested one.
+   */
+  it("CONTROL: a day already credited still claims the full figure", async () => {
+    rewardStepDoneMock.mockResolvedValueOnce(null);
+    await expect(finish()).resolves.toMatchObject({
+      ok: true,
+      points:
+        RewardPoints[RewardType.StepDone] +
+        RewardPoints[RewardType.SessionFinished],
+      streak: null,
+      freshStart: false,
+    });
+    // Nothing failed, so nothing was logged — the other half of "this is success".
+    expect(errorLog).not.toHaveBeenCalled();
   });
 
   /**
