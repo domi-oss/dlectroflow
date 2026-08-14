@@ -311,14 +311,32 @@ function kindOf(byte: number): ControlByteKind | null {
  * also valid inside a JSON string, which is what lets the test prove the escape
  * round-trips.
  *
- * Validated for the same reason as its two siblings, and it is the surface where
- * a wrong answer would be least visible: `padStart` only pads, so a code point
- * handed to this would come back as a SIX-digit escape (0x111100 renders as
- * `\\u111100`), which looks like a valid escape and denotes something else
- * entirely.
+ * ── The 0x80 ceiling is ENFORCED, not just documented (Duo review, !347) ────
+ * The paragraph above states the sub-0x80 invariant, and stating an invariant is
+ * not keeping one. `escapeForByte(0x80)` would return `\u0080`, which as a string
+ * literal denotes U+0080 — and U+0080 encodes in UTF-8 as TWO bytes, 0xc2 0x80,
+ * not as the single byte 0x80. So for anything at or above 0x80 the escape is
+ * silently NOT byte-identical, which is the one guarantee this whole module
+ * exists to provide. `kindOf` never reports a high byte today, so nothing reaches
+ * it — but this function is exported, and "no caller does that yet" is how the
+ * guarantee gets quietly broken by the next refactor.
+ *
+ * The general range check is kept as well, because the two failures have
+ * different causes and deserve different messages: 256 or a fraction is not a
+ * byte at all, while 0x80 is a perfectly good byte that this escape cannot
+ * represent. `padStart` only pads, so an out-of-range value would otherwise come
+ * back as a SIX-digit escape that looks valid and denotes something else.
  */
 export function escapeForByte(byte: number): string {
   assertByte(byte, "escapeForByte");
+  if (byte >= HIGH_BYTE_FIRST) {
+    throw new RangeError(
+      `escapeForByte: 0x${byte.toString(16)} is at or above 0x80, where a ` +
+        `\\uXXXX escape denotes a CODE POINT that UTF-8 encodes as two or more ` +
+        `bytes — so the escape would not be byte-identical to the byte, which ` +
+        `is the only property that makes this substitution safe (#224).`,
+    );
+  }
   return `\\u${byte.toString(16).padStart(4, "0")}`;
 }
 

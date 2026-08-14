@@ -243,10 +243,15 @@ describe("EVERY exported byte function refuses a non-byte", () => {
     Number.POSITIVE_INFINITY,
   ];
 
-  const BYTE_FUNCTIONS: [string, (byte: number) => unknown][] = [
-    ["isBinaryClassifyingByte", isBinaryClassifyingByte],
-    ["controlByteName", controlByteName],
-    ["escapeForByte", escapeForByte],
+  // `highest` is the largest value each one legitimately accepts, and it is NOT
+  // the same for all three — see the `escapeForByte` case below, which is a
+  // second Duo finding on !347 and a sharper one. Carrying it per function is
+  // what keeps this table honest instead of asserting a range that is wrong for
+  // one of them.
+  const BYTE_FUNCTIONS: [string, (byte: number) => unknown, number][] = [
+    ["isBinaryClassifyingByte", isBinaryClassifyingByte, 0xff],
+    ["controlByteName", controlByteName, 0xff],
+    ["escapeForByte", escapeForByte, 0x7f],
   ];
 
   it.each(BYTE_FUNCTIONS)(
@@ -260,9 +265,51 @@ describe("EVERY exported byte function refuses a non-byte", () => {
     },
   );
 
-  it.each(BYTE_FUNCTIONS)("%s accepts both ends of the byte range", (_, fn) => {
-    expect(() => fn(0x00)).not.toThrow();
-    expect(() => fn(0xff)).not.toThrow();
+  it.each(BYTE_FUNCTIONS)(
+    "%s accepts 0x00 and its own highest legitimate value",
+    (name, fn, highest) => {
+      expect(() => fn(0x00), `${name}(0x00)`).not.toThrow();
+      expect(() => fn(highest), `${name}(${highest})`).not.toThrow();
+    },
+  );
+});
+
+describe("escapeForByte refuses 0x80 and above", () => {
+  // Duo review on !347, and it goes further than the range check above: 0x80 is
+  // a perfectly good BYTE that this escape cannot represent. The module's own
+  // docblock stated the sub-0x80 invariant in prose, and stating an invariant is
+  // not keeping one.
+  it("would not be byte-identical, which is the only property that matters", () => {
+    // The proof, not the assertion: U+0080 encodes as TWO bytes in UTF-8, so an
+    // escape naming that code point does not name the byte 0x80.
+    expect([...new TextEncoder().encode("\u0080")]).toEqual([0xc2, 0x80]);
+    // The contrast: the BYTE is one byte, the escape naming that code point
+    // is two. That gap is the whole reason the ceiling is 0x80.
+    expect(Uint8Array.from([0x80])).toHaveLength(1);
+  });
+
+  it("throws for every byte from 0x80 to 0xff", () => {
+    for (let byte = 0x80; byte <= 0xff; byte += 1) {
+      expect(() => escapeForByte(byte), `0x${byte.toString(16)}`).toThrow(
+        RangeError,
+      );
+    }
+  });
+
+  it("still accepts the whole sub-0x80 range, 0x7f included", () => {
+    for (let byte = 0x00; byte <= 0x7f; byte += 1) {
+      expect(() => escapeForByte(byte), `0x${byte.toString(16)}`).not.toThrow();
+    }
+    expect(escapeForByte(0x7f)).toBe("\\u007f");
+  });
+
+  it("is unreachable from the scanner today, which is why it needed a test", () => {
+    // `kindOf` never reports a byte at or above 0x80, so no scan can hit the
+    // throw — the guarantee was being upheld by a caller rather than by the
+    // function. A high byte in a real file stays unreported, as the `file`
+    // measurement requires.
+    const scan = scanControlBytes(Uint8Array.from([0x80, 0xff, 0xc2, 0x80]));
+    expect(scan).toEqual({ findings: [], total: 0 });
   });
 });
 
