@@ -55,11 +55,15 @@
  * `main` sat at offsets 10518 and 12814, so `git grep` printed their lines
  * normally the whole time, which is confirmed against `origin/main` itself.
  *
- * `file` has no such window, which is exactly why this is a scanner problem
- * rather than a grep problem: the SAST blind spot is total and position-
- * independent, and the grep symptom that would have made it visible to a human
- * only appears when the byte lands early. That asymmetry is the reason this had
- * to be found by fixing something else.
+ * `file` has no such window, and neither does the analyzer's parser — it failed
+ * on the byte at offset 10518, well past anything git would have looked at. That
+ * is the asymmetry, and it is the reason this had to be found by fixing
+ * something else: the scanner problem does not depend on where the byte lands,
+ * while the grep symptom that would have shown it to a human only appears when
+ * the byte lands early.
+ *
+ * "Total" would be the wrong word for the scanner side, per refinement 1 above:
+ * the file is not dropped, it is counted as scanned and then not parsed.
  *
  * ── The rule is `file`'s text table, NOT "valid UTF-8" ──────────────────────
  * #224's scope line asked for a check that a tracked file "is not valid UTF-8
