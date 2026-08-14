@@ -403,6 +403,39 @@ describe("the deliberately-bundled exception list stays complete", () => {
     expect([...parsed].sort()).toEqual([...members].sort());
   });
 
+  /**
+   * ── The parser was blind to its own defect class (Duo review, `!339`) ───────
+   *
+   * `CALL_SITE`'s body capture is non-greedy and ends at the first `)` followed by
+   * `,` or `;`, so a **block-bodied** thunk truncates at its first statement:
+   *
+   * ```
+   * bestEffort(tag, ws, async () => {
+   *   await logReward(ws, RewardType.StepDone);   // <- capture stops inside here
+   *   await rewardStepDone(ws);                   // <- never seen
+   * });
+   * ```
+   *
+   * Measured: the captured body is `'{ await logReward(workspaceId, RewardType.StepDone'`
+   * and `includes("rewardStepDone(")` is `false`. The site is still *matched*, so
+   * the completeness count above is satisfied and the tag↔member bijection holds —
+   * the marker requirement is simply never applied to it.
+   *
+   * **That shape is not a hypothetical: a block body with two statements is
+   * exactly the bundle this whole block exists to catch**, so the one call-site
+   * form the guard most needed to see was the one it could not read.
+   *
+   * Forbidden rather than parsed, because the one-call-per-consequence rule on
+   * `bestEffort` forbids it anyway — a thunk with two statements is two
+   * consequences under one tag. If a single-consequence block body is ever
+   * genuinely wanted, the fix is to teach the parser, not to delete this.
+   */
+  it("has no block-bodied thunk, which the body capture cannot read", () => {
+    const blockThunk =
+      /bestEffort\(\s*"[a-z0-9_]+"\s*,\s*\w+\s*,\s*(?:async\s*)?\(\)\s*=>\s*\{/;
+    expect(actionSources()).not.toMatch(blockThunk);
+  });
+
   it("marks every tag that wraps a bundling callee", () => {
     const marked = markedTags(read("./best-effort.ts"));
     // The control for the OTHER side: the marker extraction must find some.
