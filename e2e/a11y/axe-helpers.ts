@@ -79,7 +79,19 @@ const BLOCKING_IMPACTS = new Set(["serious", "critical"]);
 // stable route key (NOT the live URL — dynamic ids are normalised away). The
 // gate fails only on fingerprints that are NOT in this file, so it starts green
 // and then catches regressions per-MR.
-const BASELINE_PATH = path.join(process.cwd(), "e2e/a11y/axe-baseline.json");
+//
+// Exported for `axe-wcag22-coverage.spec.ts`, whose `records no synthetic
+// fixture` test reads this file to prove no fixture key was ever baselined.
+// That spec carried its own copy of this path until review on !341, and a second
+// literal is the wrong shape for a guard: the day this one moves or becomes
+// configurable, the copy keeps resolving, the guard reads a file nobody writes,
+// and it passes vacuously. That is the #263 defect one level up — a green result
+// that means nothing was looked at — so there is one definition and the guard
+// cannot drift away from the thing it guards.
+export const BASELINE_PATH = path.join(
+  process.cwd(),
+  "e2e/a11y/axe-baseline.json",
+);
 
 // Refresh mode: `A11Y_UPDATE_BASELINE=1 npx playwright test e2e/a11y` rewrites
 // the baseline from the current run instead of asserting against it. Used to

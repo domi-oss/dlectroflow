@@ -1,8 +1,7 @@
 import fs from "node:fs";
-import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import { WCAG_TAGS, scanA11y } from "./axe-helpers";
+import { BASELINE_PATH, WCAG_TAGS, scanA11y } from "./axe-helpers";
 
 /**
  * #263 — the gate must actually EVALUATE WCAG 2.2, and be shown to bite.
@@ -125,6 +124,53 @@ const PRE_22_TAGS = WCAG_TAGS.filter((tag) => !tag.startsWith("wcag22"));
 const TARGET_SIZE = "target-size";
 
 /**
+ * The two CHECKS the `target-size` RULE is composed of, joined by axe with
+ * `any`.
+ *
+ * ⚠️ axe reuses the string `"target-size"` for the rule AND for its size check,
+ * so `TARGET_SIZE` above and `SIZE_CHECK` here are the same literal naming two
+ * different things. Kept as separate constants deliberately: the assertions
+ * below read per-CHECK data off a node, which is a different axis from the rule
+ * lookup in `bucketFor`, and collapsing them would hide that.
+ */
+const SIZE_CHECK = "target-size";
+const OFFSET_CHECK = "target-offset";
+
+/**
+ * The criterion tags axe stamps on the rule it reports.
+ *
+ * This is what makes the positive control evidence about **WCAG 2.2** rather
+ * than about "some rule that happens to be named `target-size`": axe labels each
+ * result with the success criterion it implements, and the reported rule carries
+ * `["cat.sensory-and-visual-cues", "wcag22aa", "wcag258"]` — measured, not
+ * recalled. `wcag258` is 2.5.8 Target Size (Minimum) and `wcag22aa` is its
+ * conformance level, which together are the whole claim #263 makes.
+ *
+ * Stable for the same reason `WCAG_TAGS` is: this is the tag taxonomy
+ * `withTags()` selects on, so axe cannot rename it without breaking the
+ * widening itself — at which point the first test in this file fails and says so.
+ */
+const TARGET_SIZE_TAGS = ["wcag22aa", "wcag258"] as const;
+
+/**
+ * 2.5.8's normative floor, in CSS pixels — and axe's default `minSize` /
+ * `minOffset` for both halves of the rule.
+ *
+ * <https://www.w3.org/TR/WCAG22/#target-size-minimum>. NOT 44, which is 2.5.5
+ * Target Size (Enhanced), Level AAA — see the file docblock.
+ */
+const WCAG_258_MIN_PX = 24;
+
+/**
+ * The fixture size that violates 2.5.8, named because an assertion below reads
+ * it back out of axe's measurement.
+ *
+ * A literal in both places would let the fixture and the assertion drift apart,
+ * and the assertion would then be checking a number nothing renders.
+ */
+const UNDERSIZED_PX = 20;
+
+/**
  * Route keys for the synthetic fixtures.
  *
  * A colon can never appear in a real route key (they are paths — see
@@ -134,8 +180,6 @@ const TARGET_SIZE = "target-size";
  */
 const UNDERSIZED_KEY = "fixture:wcag22-undersized-targets";
 const CORRECTED_KEY = "fixture:wcag22-corrected-targets";
-
-const BASELINE_PATH = path.join(process.cwd(), "e2e/a11y/axe-baseline.json");
 
 /**
  * Two adjacent activatable controls of `size`px with NO gap between them.
@@ -173,6 +217,14 @@ async function render(page: Page, html: string): Promise<void> {
 
 type Outcome = "violations" | "passes" | "incomplete" | "inapplicable";
 
+// Derived from AxeBuilder.analyze() rather than imported from axe-core, matching
+// what `axe-helpers.ts` does at the same spot and for the same reason: nothing
+// here should depend on the exact shape of axe-core's exported type names.
+type AxeResults = Awaited<
+  ReturnType<InstanceType<typeof AxeBuilder>["analyze"]>
+>;
+type ResultNode = AxeResults["violations"][number]["nodes"][number];
+
 /**
  * Which axe bucket `ruleId` landed in, or `null` when axe never evaluated it.
  *
@@ -181,12 +233,23 @@ type Outcome = "violations" | "passes" | "incomplete" | "inapplicable";
  * a compliant page and by a rule that never ran, and those two are the whole
  * distinction under test. `inapplicable` is a real evaluation (axe looked and
  * found no matching element); absence from all four is not.
+ *
+ * `ruleTags` and `nodes` are returned raw alongside the rendered `detail` so the
+ * callers can assert on axe's STRUCTURED output — the criterion tags and the
+ * per-check `data` — instead of on the prose in `detail`, which exists only to
+ * make a failure message readable (!341).
  */
 async function bucketFor(
   page: Page,
   tags: string[],
   ruleId: string,
-): Promise<{ bucket: Outcome | null; impact?: string | null; detail: string }> {
+): Promise<{
+  bucket: Outcome | null;
+  impact?: string | null;
+  ruleTags: string[];
+  nodes: ResultNode[];
+  detail: string;
+}> {
   const results = await new AxeBuilder({ page }).withTags(tags).analyze();
   const buckets: Outcome[] = [
     "violations",
@@ -200,6 +263,8 @@ async function bucketFor(
     return {
       bucket,
       impact: "impact" in hit ? hit.impact : null,
+      ruleTags: hit.tags,
+      nodes: hit.nodes,
       detail: hit.nodes
         .map(
           (node) =>
@@ -208,7 +273,12 @@ async function bucketFor(
         .join("\n"),
     };
   }
-  return { bucket: null, detail: `axe never evaluated "${ruleId}"` };
+  return {
+    bucket: null,
+    ruleTags: [],
+    nodes: [],
+    detail: `axe never evaluated "${ruleId}"`,
+  };
 }
 
 test.describe("#263 WCAG 2.2 rule coverage", () => {
@@ -232,7 +302,7 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     // violation, a pass, an incomplete OR an inapplicable — the rule is simply
     // absent from the run. Without this half, the positive control below could
     // not distinguish "the widening turned a rule on" from "the fixture is bad".
-    await render(page, twoAdjacentTargets("undersized", 20));
+    await render(page, twoAdjacentTargets("undersized", UNDERSIZED_PX));
     const { bucket, detail } = await bucketFor(page, PRE_22_TAGS, TARGET_SIZE);
     expect(
       bucket,
@@ -249,8 +319,8 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     // BLOCKING_IMPACTS is `{serious, critical}`, so a rule reported at
     // moderate/minor would appear in the output and never fail CI — evaluated
     // but toothless, which is a subtler version of the same blind spot.
-    await render(page, twoAdjacentTargets("undersized", 20));
-    const { bucket, impact, detail } = await bucketFor(
+    await render(page, twoAdjacentTargets("undersized", UNDERSIZED_PX));
+    const { bucket, impact, ruleTags, nodes, detail } = await bucketFor(
       page,
       WCAG_TAGS,
       TARGET_SIZE,
@@ -258,8 +328,8 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     expect(
       bucket,
       `"${TARGET_SIZE}" did not report a violation on a fixture with two ` +
-        "adjacent 20px controls and no spacing, which violates both halves of " +
-        `WCAG 2.5.8. axe-core may have changed the rule:\n${detail}`,
+        `adjacent ${UNDERSIZED_PX}px controls and no spacing, which violates ` +
+        `both halves of WCAG 2.5.8. axe-core may have changed the rule:\n${detail}`,
     ).toBe("violations");
     expect(
       impact,
@@ -267,11 +337,82 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
         "axe-helpers' BLOCKING_IMPACTS, so the rule now runs without being " +
         "able to fail the gate.",
     ).toBe("serious");
+
+    // That the criterion under test is the one that fired. The rule id alone
+    // cannot say this — it names an implementation, not a conformance level —
+    // and it is the level that #263 is about.
+    for (const tag of TARGET_SIZE_TAGS) {
+      expect(
+        ruleTags,
+        `the rule reported without the "${tag}" tag (got ` +
+          `${JSON.stringify(ruleTags)}), so this is no longer evidence that ` +
+          "the WCAG 2.2 AA criterion 2.5.8 was evaluated — which is the only " +
+          "claim #263 makes. Check what axe re-tagged the rule as before " +
+          "touching this list.",
+      ).toContain(tag);
+    }
+
+    // Both controls violate both halves, so an empty or short list means the
+    // fixture stopped working and the per-node loop below would pass vacuously
+    // — the exact failure shape this file exists to prevent, so it is asserted
+    // rather than assumed.
     expect(
-      detail,
-      "the violation carried no per-node 24px diagnostic, so a failing CI job " +
-        "would not say what to fix",
-    ).toContain("24px");
+      nodes.map((node) => node.target.join(" ")),
+      "the fixture renders exactly two adjacent undersized controls and each " +
+        "one violates both the size and the spacing half of 2.5.8, so axe " +
+        `should report two nodes:\n${detail}`,
+    ).toHaveLength(2);
+
+    for (const node of nodes) {
+      // The 24-CSS-pixel floor and the measured geometry, read from axe's
+      // STRUCTURED per-check `data` rather than by substring-matching the prose
+      // of `failureSummary`.
+      //
+      // This used to be `expect(detail).toContain("24px")`, which coupled the
+      // gate's own regression test to axe-core's English wording: a release that
+      // reworded "24px by 24px" to "24 CSS pixels" would have reddened CI on a
+      // copy-only dependency bump, with nothing about the rule's behaviour
+      // having changed — the unexplained red pipeline this MR is otherwise
+      // careful to avoid (raised in review on !341).
+      //
+      // `data` is the contract axe interpolates those very messages FROM
+      // (`should be at least ${data.minSize}px by ${data.minSize}px`), so this
+      // is stabler AND strictly stronger than the substring was: `"24px"`
+      // matched anywhere in either half's sentence, so the offset half's own
+      // figure satisfied it and it could not say which half reported the floor.
+      // Here each half is named and each figure is a number.
+      const checkData: Record<string, unknown> = Object.fromEntries(
+        node.any.map((check) => [check.id, check.data]),
+      );
+      expect(
+        checkData,
+        `axe's structured check data for ${node.target.join(" ")} no longer ` +
+          `reports the ${WCAG_258_MIN_PX}px floor against the rendered ` +
+          `${UNDERSIZED_PX}px geometry. Either axe changed its default ` +
+          "minSize/minOffset (a real change to what the gate enforces) or it " +
+          "changed the shape of `data` (update the keys, not the figures).",
+      ).toMatchObject({
+        [SIZE_CHECK]: {
+          minSize: WCAG_258_MIN_PX,
+          width: UNDERSIZED_PX,
+          height: UNDERSIZED_PX,
+        },
+        [OFFSET_CHECK]: { minOffset: WCAG_258_MIN_PX },
+      });
+
+      // …and that the per-node summary is populated at all, which is the
+      // precondition the reporting half of this MR rests on: axe-helpers'
+      // `report()` appends it only `if (summary.trim())`, so an empty one costs
+      // a failing CI job its diagnostic without failing anything. Asserted as
+      // non-empty rather than by content — the content is what the structured
+      // assertion above already covers, without the coupling.
+      expect(
+        (node.failureSummary ?? "").trim(),
+        `${node.target.join(" ")} reported no failureSummary, so axe-helpers' ` +
+          "report() would print the rule's generic `help` sentence and nothing " +
+          "about what this page actually did",
+      ).not.toBe("");
+    }
   });
 
   test("the real gate rejects the undersized fixture", async ({ page }) => {
@@ -284,7 +425,7 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
       "refresh mode WRITES the scanned violations into axe-baseline.json, and " +
         "a synthetic fixture must never be recorded there",
     );
-    await render(page, twoAdjacentTargets("undersized", 20));
+    await render(page, twoAdjacentTargets("undersized", UNDERSIZED_PX));
     let message: string | null = null;
     try {
       await scanA11y(page, UNDERSIZED_KEY);
@@ -293,7 +434,8 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
     }
     expect(
       message,
-      "scanA11y PASSED a page with two adjacent 20px controls and no spacing. " +
+      `scanA11y PASSED a page with two adjacent ${UNDERSIZED_PX}px controls ` +
+        "and no spacing. " +
         "The WCAG 2.2 tags are in the list but the gate does not bite, which " +
         "is the exact false-pass shape #263 is about.",
     ).not.toBeNull();
