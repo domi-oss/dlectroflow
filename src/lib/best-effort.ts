@@ -199,9 +199,10 @@ export function recordBookkeepingFailure(
   workspaceId: string,
   error: unknown,
 ): void {
-  // Outside the `try` deliberately: `instanceof` cannot throw for any value,
-  // including a hostile one, so the fallback below can still tell a bug from a
-  // blip even when building the payload fails.
+  // Outside the `try` deliberately, so the fallback below can still tell a bug
+  // from a blip when building the payload is the thing that failed. Safe there
+  // because `isDefect` is total — it owns that guarantee rather than borrowing
+  // it from `instanceof`, which is not total (see its docblock).
   const defect = isDefect(error);
   const lineTag = defect ? DEFECT_TAG : tag;
 
@@ -265,7 +266,28 @@ export const DEFECT_TAG = "bookkeeping_defect";
  * invalid date both produce one from *data*, so it is not reliably a bug.
  *
  * `instanceof` rather than reading `.constructor.name`, because a hostile getter
- * cannot make `instanceof` throw and this runs before the guarded block.
+ * cannot make `instanceof` throw.
+ *
+ * ## WHY THIS IS TOTAL, and why that is not defensive habit (`!339` review)
+ *
+ * It runs before the guarded block in {@link recordBookkeepingFailure}, so it is
+ * the one place in this module where a throw has nothing above it to catch — and
+ * an earlier version claimed `instanceof` could not throw "for any value,
+ * including a hostile one", which is false. `instanceof` walks the value's
+ * prototype chain, and on a `Proxy` with a `getPrototypeOf` trap that walk is
+ * user code: `new Proxy({}, { getPrototypeOf() { throw … } }) instanceof TypeError`
+ * throws.
+ *
+ * That throw did not stay local. It escaped this function, then `bestEffort`'s
+ * own `catch` — a throw raised *inside* a `catch` block is not caught by it — and
+ * then the server action, reporting a committed write as failed. #257, from
+ * inside the module that exists to prevent it, so the `catch` here buys the
+ * module's central guarantee rather than tidiness.
+ *
+ * `false` is the right answer for an unreadable value on the same one-sided bet
+ * the residual below rests on: it keeps the per-site tag, so the failure is still
+ * logged and nothing is lost silently, and it cannot send an operator hunting a
+ * defect that was never shown to exist.
  *
  * ## THE RESIDUAL: a plain `Error` reads as operational, on purpose (`!339`)
  *
@@ -291,11 +313,18 @@ export const DEFECT_TAG = "bookkeeping_defect";
  * `instanceof` here, not a wider net.
  */
 function isDefect(error: unknown): boolean {
-  return (
-    error instanceof TypeError ||
-    error instanceof ReferenceError ||
-    error instanceof SyntaxError
-  );
+  try {
+    return (
+      error instanceof TypeError ||
+      error instanceof ReferenceError ||
+      error instanceof SyntaxError
+    );
+  } catch {
+    // The prototype walk itself threw, so the value's type is unknowable and
+    // cannot be shown to be a defect. See the docblock: this is the module's
+    // last catch, and without it #257 is reachable from inside the fix.
+    return false;
+  }
 }
 
 /**

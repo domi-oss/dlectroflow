@@ -226,6 +226,48 @@ describe("bestEffort", () => {
     expect(line().tag).toBe("breakdown_badge_failed");
   });
 
+  /**
+   * ── The one hostile value that got PAST the outer guard (`!339` review) ────
+   *
+   * `isDefect` runs deliberately outside `recordBookkeepingFailure`'s guarded
+   * block, so a line can still be labelled bug-or-blip when building the payload
+   * is what failed. That placement is right; the reason given for it was wrong.
+   * It read "`instanceof` cannot throw for any value, including a hostile one",
+   * and a `Proxy` whose `getPrototypeOf` trap throws is a value for which it
+   * does — `instanceof` performs a prototype walk, and on a proxy that walk is
+   * user code.
+   *
+   * **Where it landed is what made it worth a test rather than a note.** The
+   * throw escaped `recordBookkeepingFailure`, then `bestEffort`'s own `catch`
+   * (a throw inside a `catch` block is not caught by it), then the server
+   * action — reporting a committed write as failed. That is #257 itself,
+   * produced from inside the module written to prevent it, and it was the only
+   * value class that reached past every guard here.
+   *
+   * Obscurity is not the discriminator, and this module already settled that: it
+   * guards a throwing `.message` getter, a throwing `toString` and a
+   * null-prototype bag, none of which Prisma or Node produces either. The
+   * difference is that all three of those are survived and this one was not.
+   */
+  it("survives a rejection whose prototype cannot be read", async () => {
+    const hostile = new Proxy({} as object, {
+      getPrototypeOf() {
+        throw new Error("no prototype for you");
+      },
+    });
+
+    await expect(
+      bestEffort("focus_step_reward_failed", "ws-6", () =>
+        Promise.reject(hostile),
+      ),
+    ).resolves.toEqual({ ok: false });
+
+    // Nothing about the value could be read, so nothing about it can be
+    // asserted: it keeps its per-site tag rather than being called a defect.
+    expect(line().tag).toBe("focus_step_reward_failed");
+    expect(line().site).toBeUndefined();
+  });
+
   // A defect must still not report the committed write as failed — #257 itself.
   it("still reports not-ok on a defect, so the write is not reported failed", async () => {
     await expect(
