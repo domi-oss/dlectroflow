@@ -91,6 +91,32 @@
  * round-tripped through a lossy decode no longer carries the offending byte at a
  * knowable offset.
  *
+ * ── How the byte gets IN, measured on !347 ──────────────────────────────────
+ * Everything above says why the byte is harmful and what to replace it with.
+ * None of it said how the byte ARRIVES, and a fixture author who does not know
+ * that reintroduces it on the next fixture — so it is recorded here.
+ *
+ * A `\uXXXX` escape typed into a file-authoring tool whose input is carried as
+ * JSON is DECODED on the way to disk: the file receives the raw byte, not the
+ * six ASCII characters of the escape. Measured twice, not inferred:
+ *
+ *   1. The pre-fix `breakdown.test.ts` held 0x00, 0x07 and 0x1b at offsets
+ *      10518, 10523 and 10528 — byte for byte, and in the exact positions,
+ *      what a `"call…the…vet…"` fixture written with those three escapes
+ *      becomes once they are decoded.
+ *   2. Reproduced deliberately while proving this guard bites: a scratch script
+ *      authored with the escapes typed landed holding two raw NULs and a raw
+ *      BEL, and `file -b` reported `binary data` for it. Rewritten with each
+ *      escape assembled from a backslash byte plus `"u0000"` it is clean, and
+ *      two separate authoring tools were seen decoding it the same way in one
+ *      session.
+ *
+ * The consequence is that this guard's own remediation is a hazard: apply
+ * "write it as the escape instead" using the tool that decoded the escape the
+ * first time, and the raw byte comes straight back — in a diff that renders
+ * identically either way, which is why nobody catches it by reading. That is
+ * what {@link formatControlByteFinding} ends by addressing.
+ *
  * ── What it does NOT do ─────────────────────────────────────────────────────
  * It does not decide which files are legitimately binary. That allowlist is a
  * repo fact and lives in the colocated test next to the sweep, the same place
@@ -386,6 +412,13 @@ export function scanControlBytes(
  * `file:line:column` first because that is the form an editor and a CI log
  * reader both jump to, and the byte offset after it because a file `file` calls
  * binary is one whose lines a plain `git grep` will not print.
+ *
+ * It closes by sending the reader back to this test, which is not boilerplate:
+ * naming the escape ALONE is advice that can reproduce the defect, because an
+ * escape decoded on the way to disk is how the byte arrives in the first place
+ * — see the measurement in the module docblock. Re-running the sweep is the
+ * only step that distinguishes the fixed form from the unfixed one, because a
+ * rendered diff cannot.
  */
 export function formatControlByteFinding(
   file: string,
@@ -396,7 +429,9 @@ export function formatControlByteFinding(
     `${file}:${finding.line}:${finding.column} — raw ${hex} ` +
     `${controlByteName(finding.byte)} at byte offset ${finding.offset}. ` +
     `Write it as ${finding.escape} instead, which is the identical run-time ` +
-    `character: ${finding.reason}.`
+    `character: ${finding.reason}. Then re-run this test rather than reading ` +
+    `the diff: a tool or editor that DECODES the escape as it writes puts the ` +
+    `raw byte straight back, and both forms render identically.`
   );
 }
 

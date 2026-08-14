@@ -460,6 +460,23 @@ describe("formatControlByteFinding", () => {
     expect(message).toContain("byte offset 4");
     expect(message).toContain("\\u0000");
   });
+
+  it("sends the fixer back to this sweep, not only to the escape", () => {
+    // The remediation this message prints is a hazard in its own right, which
+    // is the mechanism the module docblock now records: an escape DECODED on
+    // the way to disk is how the raw byte arrived in the first place, and the
+    // raw and escaped forms are indistinguishable in a rendered diff. A
+    // message stopping at "write it as the escape" is therefore
+    // complete-looking advice that can reproduce the defect it is fixing, so
+    // it has to name re-running this sweep as the step that tells them apart.
+    //
+    // Built from BYTES rather than from a typed escape, deliberately: a test
+    // for this defect must not be capable of introducing it.
+    const [finding] = scanControlBytes(Uint8Array.from([0x00])).findings;
+    const message = formatControlByteFinding("src/lib/x.test.ts", finding);
+    expect(message).toContain("re-run this test");
+    expect(message).toMatch(/decod/i);
+  });
 });
 
 describe("fileExtensionOf", () => {
