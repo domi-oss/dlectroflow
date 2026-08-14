@@ -251,7 +251,7 @@ describe("scanControlBytes — what it reports", () => {
         byte: 0x00,
         kind: "binary-classifying",
         escape: "\\u0000",
-        reason: expect.stringContaining("Semgrep skips it whole"),
+        reason: expect.stringContaining("Semgrep's parser fails at this byte"),
       },
     ]);
   });
@@ -266,7 +266,7 @@ describe("scanControlBytes — what it reports", () => {
       [0x1b, "escapable-control"],
     ]);
     for (const finding of findings) {
-      expect(finding.reason).toContain("no scanner is blinded");
+      expect(finding.reason).toContain("does not produce");
     }
   });
 

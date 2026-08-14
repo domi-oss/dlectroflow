@@ -3,19 +3,44 @@
  * BYTE, which stops a scanner reading the file at all?
  *
  * A single raw NUL inside a TypeScript string literal makes `file(1)` classify
- * the whole file as `data`. Semgrep then skips it entirely and SAST reports zero
- * findings for it — not because it is clean, but because nothing looked. That
- * was MEASURED on !292, not inferred: pipelines 2188, 2250 and 2264 all reported
- * 0 findings for `migration-data-harness.ts`, and 3 the moment the NUL was
- * removed, with the flagged code unchanged for the whole period. All three were
- * false positives, but a real finding would have been equally invisible. Two
- * more files (`breakdown.test.ts`, `breakdown-context.test.ts`) carried one on
- * `main` for weeks.
+ * the whole file as `data`, and Semgrep's parser then fails on it, so SAST
+ * reports nothing for the file — not because it is clean, but because nothing
+ * read it. #224 recorded this on !292: pipelines 2188, 2250 and 2264 reported 0
+ * findings for `migration-data-harness.ts` and 3 the moment the NUL was removed,
+ * with the flagged code unchanged throughout. Two more files
+ * (`breakdown.test.ts`, `breakdown-context.test.ts`) carried one on `main` for
+ * weeks.
  *
  * This is the sharpest instance of the class where a green signal means nothing
  * was examined, and nobody investigates a clean SAST report — so a test is the
  * only thing that can see it. Same argument `fetch-host-hygiene`,
  * `regexp-source-hygiene` and `a11y-class-hygiene` were built on.
+ *
+ * ── The mechanism, measured HERE rather than inherited ──────────────────────
+ * Two adjacent commits on !347 make this observable directly, same branch, same
+ * ruleset, same analyzer (GitLab Semgrep analyzer v6.19.1). Before the escapes,
+ * the `semgrep-sast` job log carried exactly two of these:
+ *
+ *   [WARN] tool notification warning: Syntax error at line
+ *     src/lib/breakdown-context.test.ts:317:
+ *   [WARN] tool notification warning: Syntax error at line
+ *     src/lib/breakdown.test.ts:292:
+ *
+ * — the two lines holding the raw bytes. After the escapes, neither file appears
+ * in the log at all.
+ *
+ * Two refinements to the mechanism as #224 describes it, both worth having:
+ *
+ *   1. The analyzer does NOT drop the file from its target list. `Scanning 796
+ *      files`, `ts … 655`, `Targets scanned: 678` and `Findings: 37` were
+ *      IDENTICAL across the two commits. So the file is counted as scanned while
+ *      its contents are not parsed, which is the worst possible combination for
+ *      anyone auditing coverage from the summary.
+ *   2. Because of that, a FINDING COUNT is the wrong evidence surface — #224's
+ *      own scope line says "an unchanged 0 proves nothing", and here it stayed 0
+ *      on both sides. The per-file `Syntax error` warning is the signal, and it
+ *      was present in every SAST run this repo has ever done. It sits in the job
+ *      log rather than the security report, which is why nobody read it.
  *
  * ── One claim in #224 does not survive measurement, and it is recorded here ──
  * #224 says the two files were also invisible to `git grep`, because git prints
@@ -212,12 +237,15 @@ export function controlByteName(byte: number): string {
 
 const REASONS: Record<ControlByteKind, string> = {
   "binary-classifying":
-    "`file` reports this file as `data`, so Semgrep skips it whole and SAST " +
-    "reports zero findings for it whatever the code says (#224)",
+    "`file` reports this file as `data` and Semgrep's parser fails at this " +
+    "byte, so SAST reports nothing for the file whatever the code says. The " +
+    "analyzer still counts it as a scanned target, so the coverage summary " +
+    "cannot show the gap either (#224)",
   "escapable-control":
-    "`file` still calls this file text, so no scanner is blinded — but a raw " +
-    "control character is invisible in review and in a diff, and the string " +
-    "literal holding it means exactly the same thing written as an escape",
+    "`file` still calls this file text, so this byte alone does not produce " +
+    "the `data` classification — but a raw control character is invisible in " +
+    "review and in a diff, and the string literal holding it means exactly " +
+    "the same thing written as an escape",
 };
 
 /**
