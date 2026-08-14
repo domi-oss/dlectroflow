@@ -176,6 +176,31 @@ const WCAG_258_MIN_PX = 24;
 const UNDERSIZED_PX = 20;
 
 /**
+ * The fixture size that SATISFIES 2.5.8, for the opposite-direction control.
+ *
+ * The same *kind* of quantity as {@link UNDERSIZED_PX} — both are the `size`
+ * argument to {@link twoAdjacentTargets}, i.e. a rendered control dimension —
+ * which is why this is a sibling constant rather than anything shared with
+ * {@link WCAG_258_MIN_PX}. ⚠️ Those two are **different quantities that must not
+ * be welded**: 24 is the floor the gate enforces, 44 is what a fixture happens
+ * to be drawn at. Collapsing a fixture dimension into a criterion floor is the
+ * 2.5.5-vs-2.5.8 confusion this repo has already had to correct in two separate
+ * files, and it would make this fixture read as a conformance requirement.
+ *
+ * 44 rather than 24 on purpose, and the gap is the whole point: the gate's floor
+ * is 24 ({@link WCAG_258_MIN_PX}, **2.5.8 Target Size (Minimum), Level AA**),
+ * while 44x44 is the house convention `a11y-class-hygiene` enforces (#205) —
+ * which is **2.5.5 Target Size (Enhanced), Level AAA**, NOT the criterion under
+ * test. A fixture is a statement about what this repo considers correct, so it is
+ * drawn at the house bar rather than at the weaker figure it would also pass.
+ *
+ * Deliberately NOT named for a floor or a minimum: nothing here asserts 44 of
+ * anything, and a name like `MIN_TARGET_PX` would read as though the gate
+ * required it — which is the misreading the paragraph above exists to prevent.
+ */
+const CORRECTED_PX = 44;
+
+/**
  * Route keys for the synthetic fixtures.
  *
  * A colon can never appear in a real route key (they are paths — see
@@ -453,15 +478,15 @@ test.describe("#263 WCAG 2.2 rule coverage", () => {
 
   test("the real gate passes the corrected fixture", async ({ page }) => {
     // The other direction, so the test above cannot be satisfied by a gate that
-    // simply fails everything. 44px rather than 24px on purpose: 24 is 2.5.8's
-    // Level AA floor, 44 is what `a11y-class-hygiene` enforces here (#205), and
-    // a fixture is a statement about what this repo considers correct.
+    // simply fails everything. Why the fixture is drawn at CORRECTED_PX rather
+    // than at the gate's own floor is on that constant, stated once so the two
+    // places cannot drift into disagreeing.
     test.skip(
       UPDATE_BASELINE,
       "refresh mode would DELETE this key from the baseline; harmless, but the " +
         "assertion below is not the thing refresh mode is for",
     );
-    await render(page, twoAdjacentTargets("corrected", 44));
+    await render(page, twoAdjacentTargets("corrected", CORRECTED_PX));
     await scanA11y(page, CORRECTED_KEY);
   });
 
