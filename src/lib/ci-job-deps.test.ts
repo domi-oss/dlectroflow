@@ -204,6 +204,41 @@ describe("declaresStopAction", () => {
   });
 });
 
+/**
+ * The real file with an inline comment appended to each of the three lines these
+ * matchers read, and a count of how many landed so the caller can prove the
+ * mutation happened rather than assert against an unchanged file.
+ *
+ * Scoped to the job's own block by tracking column 0, not by a `/m` regex over
+ * the whole file: the first `needs: []` in `.gitlab-ci.yml` need not be this
+ * job's, and mutating some other job's line would leave the test green while
+ * testing nothing here.
+ */
+function withInlineComments(
+  yml: string,
+  job: string,
+): { annotated: string; applied: number } {
+  const out: string[] = [];
+  let inside = false;
+  let applied = 0;
+  for (const line of yml.split("\n")) {
+    if (line === `${job}:`) {
+      inside = true;
+      applied += 1;
+      out.push(`${job}: # tears the review app down`);
+      continue;
+    }
+    if (inside && /^\S/.test(line)) inside = false;
+    if (inside && /^\s+(needs: \[\]|action: stop)$/.test(line)) {
+      applied += 1;
+      out.push(`${line} # load-bearing, and #226 is why this is tested`);
+      continue;
+    }
+    out.push(line);
+  }
+  return { annotated: out.join("\n"), applied };
+}
+
 describe("the repo's own .gitlab-ci.yml", () => {
   it("every job listed as a teardown job really does tear an environment down", () => {
     // Guards the list itself: if a job is renamed or stops being a teardown,
@@ -232,6 +267,32 @@ describe("the repo's own .gitlab-ci.yml", () => {
         needs?.kind,
         `${job} must declare needs: explicitly — without it GitLab depends on all earlier stages, and artifact expiry makes teardown permanently unrunnable (#145)`,
       ).not.toBe("absent");
+    }
+  });
+
+  it("every assertion above survives an inline comment on the lines it reads (#226)", () => {
+    // #226's recurring cost, reproduced against the real file instead of a
+    // fixture. `.gitlab-ci.yml` is in `.prettierignore` *because* it "relies on
+    // hand-aligned inline comments", so this is an edit someone will make and no
+    // formatter will undo. Before the fix each of the three annotations broke a
+    // different assertion above, and each broke it by reporting something untrue
+    // about the file — that the job is missing, that a teardown job depends on a
+    // job that does not exist, that it declares no stop action.
+    for (const job of TEARDOWN_JOBS) {
+      const { annotated, applied } = withInlineComments(gitlabCiYml, job);
+
+      // The mutation has to be shown to have happened. A helper that silently
+      // matched nothing would leave every assertion below passing against the
+      // unmodified file — green, and testing the opposite of what it claims.
+      expect(
+        applied,
+        `expected to annotate ${job}:, its needs: [] and its action: stop — annotated ${applied}. Has the block been reformatted?`,
+      ).toBe(3);
+      expect(annotated).not.toBe(gitlabCiYml);
+
+      expect(jobBlock(annotated, job)).not.toBeNull();
+      expect(parseJobNeeds(annotated, job)).toEqual({ kind: "empty" });
+      expect(declaresStopAction(annotated, job)).toBe(true);
     }
   });
 
