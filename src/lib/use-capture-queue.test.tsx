@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -575,5 +575,64 @@ describe("useCaptureQueue — scoping and the sweep (#175)", () => {
     await waitFor(() =>
       expect(screen.getByTestId("mine")).not.toHaveTextContent("0"),
     );
+  });
+});
+
+/**
+ * Duo review round 2 on `!348` traced the strip's focus defect to these two arrays
+ * being reallocated on every render. The strip's own fix is the real one — an
+ * effect must be correct however often it runs — but a derived value that changes
+ * identity without changing value is a trap laid for the next consumer, so the
+ * memoisation gets its own guard rather than being left as a comment.
+ */
+describe("useCaptureQueue — derived arrays keep their identity (#175)", () => {
+  /** Publishes `mine`/`stranded` per render, plus a way to force one. */
+  function IdentityHost() {
+    const [tick, setTick] = useState(0);
+    const api = useCaptureQueue(LIVE);
+    useEffect(() => {
+      seen.push({ mine: api.mine, stranded: api.stranded });
+    });
+    return <button onClick={() => setTick(tick + 1)}>rerender {tick}</button>;
+  }
+  let seen: { mine: unknown; stranded: unknown }[] = [];
+
+  beforeEach(() => {
+    seen = [];
+  });
+
+  it("hands the same arrays to a render the queue did not change", async () => {
+    seed([capture()]);
+    render(<IdentityHost />);
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    const before = seen[seen.length - 1]!;
+
+    // A render caused by state that has nothing to do with the queue — the shape
+    // of every keystroke in `inbox-view.tsx`'s controlled capture field.
+    await userEvent.click(screen.getByRole("button", { name: /rerender/ }));
+
+    const after = seen[seen.length - 1]!;
+    expect(after.mine).toBe(before.mine);
+    expect(after.stranded).toBe(before.stranded);
+  });
+
+  /**
+   * The non-vacuous control. `toBe` passing above would also be satisfied by a
+   * hook that had stopped re-reading storage at all, which is a far worse bug —
+   * so prove a real change still produces a new array.
+   */
+  it("hands over a NEW array once the queue actually changes", async () => {
+    seed([capture()]);
+    render(<IdentityHost />);
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0));
+    const before = seen[seen.length - 1]!;
+
+    seed([capture(), capture({ clientKey: "k2", text: "and the bins" })]);
+    await act(async () => {
+      window.dispatchEvent(new Event(CAPTURE_QUEUE_EVENT));
+      await Promise.resolve();
+    });
+
+    expect(seen[seen.length - 1]!.mine).not.toBe(before.mine);
   });
 });

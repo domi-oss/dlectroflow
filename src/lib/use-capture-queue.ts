@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -487,7 +488,28 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
     [announce],
   );
 
-  const { mine, stranded } = partitionQueue(queue, workspaceId);
+  /**
+   * Memoised, and it is a correctness property for the consumer rather than a
+   * micro-optimisation.
+   *
+   * `partitionQueue` allocates two fresh arrays per call, so without this every
+   * render of whatever mounts the hook handed the strip new identities — including
+   * renders that have nothing to do with the queue, which in `inbox-view.tsx`
+   * means every keystroke in the controlled capture field. Anything downstream
+   * that keys an effect on `mine`/`stranded` therefore fired constantly, and one
+   * did: the strip's focus hand-off re-stole focus onto an open Discard confirm
+   * (Duo review round 2 on `!348`).
+   *
+   * The strip's own fix is the real one — an effect must be correct however often
+   * it runs, and `onReturnFocus` alone can still change identity. This is the other
+   * half: `queue` is already referentially stable per raw string (see
+   * `getSnapshot`), so these can be too, and a derived value that changes identity
+   * without changing value is a trap laid for the next reader.
+   */
+  const { mine, stranded } = useMemo(
+    () => partitionQueue(queue, workspaceId),
+    [queue, workspaceId],
+  );
 
   return {
     mine,

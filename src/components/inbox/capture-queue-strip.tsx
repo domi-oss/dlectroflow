@@ -109,19 +109,46 @@ export function CaptureQueueStrip({
   const { mine, stranded } = api;
   const total = mine.length + stranded.reduce((n, g) => n + g.count, 0);
 
-  // ONE effect for every focus hand-off, and that is deliberate rather than
-  // tidy: the two arms fire on different state changes — a confirm OPENING
-  // changes `confirming`, a confirm RESOLVING changes `mine`/`stranded`, and a
-  // CANCEL changes only `confirming` back to null. Split across two effects keyed
-  // on their "own" state, the cancel arm never runs and focus lands on `<body>`
-  // — measured, and it is the arm a reader is least likely to think about.
+  // ── Two effects, and the split between them is the whole subtlety ──────────
+  //
+  // A confirm that appears without taking focus is invisible to a screen reader
+  // until it is hunted for. So opening one moves focus — but ONLY on the render
+  // where it opened.
+  //
+  // ⚠️ This used to be one effect keyed on `[confirming, mine, stranded,
+  // onReturnFocus]`, re-focusing the confirm on every run where `confirming !==
+  // null`. `mine`/`stranded` are derived arrays and `onReturnFocus` is a callback,
+  // so **any** re-render of whatever mounts the hook re-ran it — and in
+  // `inbox-view.tsx` that includes every keystroke in the capture field, because
+  // the input is controlled. Open a Discard confirm, click back into the capture
+  // box, type: focus is yanked onto "Discard for good". WCAG 3.2.2 On Input, on
+  // the most ordinary keypress in the app. Found by Duo review round 2 on `!348`,
+  // and reachable only once the strip has a caller — which is this MR's wiring.
+  //
+  // Nothing here traps focus inside the confirm, deliberately: the user may leave
+  // it open and come back. That is exactly why the re-focus has to be keyed on the
+  // confirm OPENING and not on anything the queue derives.
   useEffect(() => {
-    // A confirm that appears without taking focus is invisible to a screen
-    // reader until it is hunted for.
-    if (confirming !== null) {
-      confirmRef.current?.focus();
-      return;
-    }
+    if (confirming !== null) confirmRef.current?.focus();
+  }, [confirming]);
+
+  // The hand-off, which cannot be keyed on `confirming` alone. Its three arms fire
+  // on different state changes — a confirm RESOLVING changes `mine`/`stranded`,
+  // and a CANCEL changes only `confirming` back to null. Keyed on the cancel's
+  // state alone the resolve arm never runs, and vice versa the cancel arm never
+  // does and focus lands on `<body>` — measured, and it is the arm a reader is
+  // least likely to think about.
+  //
+  // Running on an unrelated re-render is harmless here, and that asymmetry with
+  // the effect above is the reason they can be split at all: this arm is gated on
+  // `focusAfter`, a ref set only by a cancel or a confirm resolution and cleared
+  // the moment it is read. There is no "current state" it could act on twice.
+  useEffect(() => {
+    // An open confirm owns focus; a hand-off queued behind it would fight the
+    // effect above. Cannot happen today — `focusAfter` is only ever set alongside
+    // `setConfirming(null)` — and kept because it costs one line and the
+    // alternative is a focus fight that no test would name.
+    if (confirming !== null) return;
     const owed = focusAfter.current;
     if (owed === null) return;
     focusAfter.current = null;

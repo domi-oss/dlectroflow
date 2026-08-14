@@ -426,6 +426,107 @@ describe("capture queue strip — Discard takes a two-step confirm (#175)", () =
     await waitFor(() => expect(onReturnFocus).toHaveBeenCalled());
   });
 
+  /**
+   * Duo review round 2 on `!348` — and it becomes reachable the moment the strip
+   * has a caller, which is what this MR's wiring does.
+   *
+   * The hand-off effect was keyed on `[confirming, mine, stranded, onReturnFocus]`
+   * and re-focused the confirm on **every** run where `confirming !== null`.
+   * `mine`/`stranded` are derived arrays, so any re-render of whatever mounts the
+   * hook changed their identity — and in `inbox-view.tsx` that includes **every
+   * keystroke in the capture field**, because the input is controlled. So: open a
+   * Discard confirm, click into the capture box, type one character, and focus is
+   * yanked out of the box and back onto "Discard for good". WCAG 3.2.2 On Input —
+   * an unrequested change of context — and it fires on the most ordinary keypress
+   * in the app.
+   *
+   * Nothing here traps focus inside the confirm, deliberately: the user is allowed
+   * to leave it and come back. That is precisely why re-focusing has to be keyed on
+   * the confirm OPENING rather than on anything the queue derives.
+   *
+   * The sibling input stands in for the capture field. Asserting on a sibling
+   * rather than on `document.body` is the point — dropping to `<body>` is the other
+   * focus defect, and a test that only checked "focus left the confirm" would pass
+   * on it.
+   */
+  it("does not re-steal focus to an open confirm on an unrelated re-render", async () => {
+    const props = (over: Partial<CaptureQueueApi> = {}) => (
+      <>
+        <input aria-label="Brain dump" />
+        <CaptureQueueStrip
+          api={api({ mine: [capture()], ...over })}
+          voice="plain"
+          savingRegionId="saving-region"
+          now={100_000}
+          onReturnFocus={vi.fn()}
+        />
+      </>
+    );
+    const { rerender } = render(props());
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard: ring mum/ }),
+    );
+    const confirm = screen.getByRole("button", {
+      name: /^Discard for good: ring mum/,
+    });
+    await waitFor(() => expect(confirm).toHaveFocus());
+
+    // The user changes their mind about answering right now and goes back to
+    // typing — the confirm stays open behind them, which is allowed.
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    await userEvent.click(input);
+    expect(input).toHaveFocus();
+
+    // One keystroke in the capture field. Identical queue contents, fresh derived
+    // arrays — exactly what the real hook hands down on every render.
+    rerender(props());
+
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(confirm).not.toHaveFocus();
+  });
+
+  /**
+   * The non-vacuous control for the case above. Both assertions there are about
+   * focus NOT moving, which is also what a strip that had stopped focusing its
+   * confirm at all would produce — and that regression would reintroduce
+   * "a confirm invisible to a screen reader until it is hunted for".
+   *
+   * So: the same unrelated re-render, with the confirm opened AFTER it. Focus must
+   * still arrive.
+   */
+  it("still focuses a confirm opened after an unrelated re-render", async () => {
+    const props = () => (
+      <>
+        <input aria-label="Brain dump" />
+        <CaptureQueueStrip
+          api={api({ mine: [capture()] })}
+          voice="plain"
+          savingRegionId="saving-region"
+          now={100_000}
+          onReturnFocus={vi.fn()}
+        />
+      </>
+    );
+    const { rerender } = render(props());
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    rerender(props());
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard: ring mum/ }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Discard for good: ring mum/ }),
+      ).toHaveFocus(),
+    );
+  });
+
   it("can empty a queue of 20 permanently-blocked entries back to a usable state", async () => {
     // The dead-end this control exists to prevent: without it a stranded long
     // capture consumes the origin-wide byte cap for ever, and the next offline
