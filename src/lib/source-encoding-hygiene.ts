@@ -17,10 +17,24 @@
  * only thing that can see it. Same argument `fetch-host-hygiene`,
  * `regexp-source-hygiene` and `a11y-class-hygiene` were built on.
  *
- * A second-order cost makes it worth catching even where no scanner is involved:
- * `git grep` does not report matching LINES from a file it considers binary, so
- * such a file is partly invisible to the repo's own greps and to any refactor
- * that works by finding every call site.
+ * ── One claim in #224 does not survive measurement, and it is recorded here ──
+ * #224 says the two files were also invisible to `git grep`, because git prints
+ * only "Binary file X matches" instead of the matching lines. The mechanism is
+ * real; it did NOT apply to these two files, and the difference is a number
+ * worth knowing.
+ *
+ * git decides "binary" by looking for a NUL in roughly the FIRST 8000 BYTES
+ * only. Measured on a throwaway repo: a NUL at offset 112 produced "Binary file
+ * early.ts matches", while the same NUL at offset 9012 produced ordinary
+ * `file:line:text` output — and `file -b` said `data` for both. The two NULs on
+ * `main` sat at offsets 10518 and 12814, so `git grep` printed their lines
+ * normally the whole time, which is confirmed against `origin/main` itself.
+ *
+ * `file` has no such window, which is exactly why this is a scanner problem
+ * rather than a grep problem: the SAST blind spot is total and position-
+ * independent, and the grep symptom that would have made it visible to a human
+ * only appears when the byte lands early. That asymmetry is the reason this had
+ * to be found by fixing something else.
  *
  * ── The rule is `file`'s text table, NOT "valid UTF-8" ──────────────────────
  * #224's scope line asked for a check that a tracked file "is not valid UTF-8
