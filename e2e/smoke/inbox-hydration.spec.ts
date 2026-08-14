@@ -195,32 +195,52 @@ async function cleanupSeed(prisma: PrismaClient, marker: string) {
 }
 
 /**
- * Every `captured … ago` label in a served HTML document, in document order.
- *
- * Two details make this a whole-element read rather than a substring search, and
- * both were verified against the real streamed response before being relied on:
- *
- *  * React separates adjacent text children with an EMPTY COMMENT, so `AgeLabel`
- *    streams as `<p …>captured <!-- -->0s ago</p>`, and the label text is not
- *    contiguous in the bytes. Only that exact comment form is removed, so nothing
- *    else in the document is altered by the normalisation.
- *  * Anchoring on `>` and `<` requires the match to be an element's ENTIRE text,
- *    which is what the old DOM locator's `^…$` gave. It matters: `/` also serves
- *    the prose "Everything you have captured lives in your Library", and a
- *    substring search would count it. The measured response carries seven
- *    occurrences of "captured" for six rows — that sentence is the seventh.
- *
- * The unit is captured rather than assumed so the caller can tell "the server
- * rendered minutes" (precondition genuinely absent) apart from "there is no label
- * at all" (the row metadata line is gone) and report the difference.
+ * React separates adjacent text children with an EMPTY COMMENT, so `AgeLabel`
+ * streams as `<p …>captured <!-- -->0s ago</p>` and its text is not contiguous in
+ * the bytes. Only that exact comment form is matched, so normalising it away
+ * alters nothing else in the document.
  */
-const SERVED_AGE_LABEL = />captured (\d+)([smhd]) ago</g;
 const REACT_TEXT_SEPARATOR = /<!--\s*-->/g;
 
-function servedAgeLabels(html: string): { value: number; unit: string }[] {
-  return [
-    ...html.replace(REACT_TEXT_SEPARATOR, "").matchAll(SERVED_AGE_LABEL),
-  ].map(([, value, unit]) => ({ value: Number(value), unit }));
+/**
+ * One `captured … ago` label, as an element's ENTIRE text.
+ *
+ * Anchoring on `>` and `<` is what the old DOM locator's `^…$` gave, and it
+ * matters here: `/` also serves the prose "Everything you have captured lives in
+ * your Library", so the measured response carries SEVEN occurrences of "captured"
+ * for six rows, and a substring search would count the sentence as a label.
+ * Non-global deliberately — a module-level `/g` regex carries `lastIndex` between
+ * calls, and this one is called `SEED_COUNT × RELOADS` times per run.
+ */
+const SERVED_AGE_LABEL = />captured (\d+[smhd]) ago</;
+
+/** What `formatAgo` must have rendered: whole seconds, so under a minute. */
+const SUB_MINUTE_AGE = /^\d{1,2}s$/;
+
+/**
+ * The age the server rendered for ONE seeded row, or null if that row is not in
+ * the markup at all.
+ *
+ * Per row rather than per document because the owner workspace is SHARED and not
+ * emptied between specs — `e2e/smoke/brain-dump.spec.ts`,
+ * `complete-task.spec.ts`, `focus-timer.spec.ts` and `e2e/a11y/axe-core-flow.
+ * spec.ts` all capture rows and none of them delete one, so by the time this spec
+ * runs (test ~106 of 231) the board also holds rows that are minutes old. A
+ * document-wide count would either fail on their presence or be satisfied by
+ * them; neither is a claim about the rows this spec seeded.
+ *
+ * `AgeLabel` renders AFTER the row's title inside the same `<li>`, so the first
+ * label following the row's own text is that row's. Verified against the real
+ * streamed response: the seeded text occurs five times per row (title, drag grip,
+ * the aria-labels) and every occurrence is inside its own `<li>`, so taking the
+ * FIRST is unambiguous, and the label sat a constant 521 bytes further on for all
+ * six rows.
+ */
+function servedAgeForRow(html: string, rowText: string): string | null {
+  const normalised = html.replace(REACT_TEXT_SEPARATOR, "");
+  const rowAt = normalised.indexOf(rowText);
+  if (rowAt === -1) return null;
+  return SERVED_AGE_LABEL.exec(normalised.slice(rowAt))?.[1] ?? null;
 }
 
 /** The header's theme control, located the way an AT user reaches it (#103). */
@@ -307,28 +327,29 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
         // zero matches for the old locator, while the served markup still read
         // [0,0,0,0,0,0]. The served bytes are a frozen artefact, so this is now
         // time-independent by construction rather than by being fast enough.
-        const servedAges = servedAgeLabels(servedHtml);
-        expect(
-          servedAges.map(({ value, unit }) => `${value}${unit}`),
-          `fewer than the ${SEED_COUNT} seeded rows carried an age label in the markup the server sent — the repro precondition never existed on this reload, so nothing below is evidence about hydration`,
-        ).toHaveLength(SEED_COUNT);
+        //
         // Second granularity is the precondition itself: `formatAgo` renders
         // whole seconds only under a minute, and that is the only band in which
-        // two clocks a tick apart produce two different strings. Asserted on the
-        // rendered text rather than a class hook so it also fails loudly if the
-        // label ever loses that granularity, which would make this spec moot.
+        // two clocks a tick apart produce two different strings. Read from the
+        // rendered text rather than from a class hook so it also fails loudly if
+        // the label ever loses that granularity, which would make this spec moot.
+        // `\d{1,2}` is kept from the assertion this replaces — unchanged in
+        // strictness, now applied at the one instant where it is a valid claim.
+        const servedAges = Array.from({ length: SEED_COUNT }, (_, row) =>
+          servedAgeForRow(servedHtml, `${marker} ${row}`),
+        );
+        // One assertion for both halves, so a failure prints all six values
+        // instead of stopping at the first bad one: null means the row never
+        // reached the markup (the precondition did not exist), and a non-matching
+        // string means the server rendered it outside the sub-minute band.
         expect(
-          servedAges.filter(({ unit }) => unit !== "s"),
-          "the server rendered a coarser-than-seconds age — nothing for the two clocks to disagree about",
-        ).toEqual([]);
-        // The rows in the markup are OURS. Six fresh labels could in principle
-        // come from someone else's fixture; the seeded text pins them.
-        for (let row = 0; row < SEED_COUNT; row++) {
-          expect(
-            servedHtml,
-            `seeded row "${marker} ${row}" is missing from the served markup`,
-          ).toContain(`${marker} ${row}`);
-        }
+          servedAges,
+          `the repro precondition did not hold in the markup the server sent (null = row absent, "Nm ago" = past formatAgo's 60s boundary), so nothing below would be evidence about hydration`,
+        ).toEqual(
+          Array.from({ length: SEED_COUNT }, () =>
+            expect.stringMatching(SUB_MINUTE_AGE),
+          ),
+        );
         // …and the labels really are on screen, which the served bytes cannot
         // tell you. Granularity-agnostic on purpose: the band is asserted above,
         // at the only instant it is meaningful, and repeating it here is exactly
