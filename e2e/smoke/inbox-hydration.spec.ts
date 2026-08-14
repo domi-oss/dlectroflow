@@ -194,6 +194,35 @@ async function cleanupSeed(prisma: PrismaClient, marker: string) {
   }
 }
 
+/**
+ * Every `captured … ago` label in a served HTML document, in document order.
+ *
+ * Two details make this a whole-element read rather than a substring search, and
+ * both were verified against the real streamed response before being relied on:
+ *
+ *  * React separates adjacent text children with an EMPTY COMMENT, so `AgeLabel`
+ *    streams as `<p …>captured <!-- -->0s ago</p>`, and the label text is not
+ *    contiguous in the bytes. Only that exact comment form is removed, so nothing
+ *    else in the document is altered by the normalisation.
+ *  * Anchoring on `>` and `<` requires the match to be an element's ENTIRE text,
+ *    which is what the old DOM locator's `^…$` gave. It matters: `/` also serves
+ *    the prose "Everything you have captured lives in your Library", and a
+ *    substring search would count it. The measured response carries seven
+ *    occurrences of "captured" for six rows — that sentence is the seventh.
+ *
+ * The unit is captured rather than assumed so the caller can tell "the server
+ * rendered minutes" (precondition genuinely absent) apart from "there is no label
+ * at all" (the row metadata line is gone) and report the difference.
+ */
+const SERVED_AGE_LABEL = />captured (\d+)([smhd]) ago</g;
+const REACT_TEXT_SEPARATOR = /<!--\s*-->/g;
+
+function servedAgeLabels(html: string): { value: number; unit: string }[] {
+  return [
+    ...html.replace(REACT_TEXT_SEPARATOR, "").matchAll(SERVED_AGE_LABEL),
+  ].map(([, value, unit]) => ({ value: Number(value), unit }));
+}
+
 /** The header's theme control, located the way an AT user reaches it (#103). */
 const themeToggle = (page: Page) =>
   page
@@ -253,20 +282,61 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
 
       for (let i = 0; i < RELOADS; i++) {
         await refreshAges(prisma, marker);
-        await page.goto("/");
+        const nav = await page.goto("/");
+        // The markup hydration has to match, captured at the instant it was
+        // served — read here, before anything is allowed to elapse, because that
+        // is the whole point (#193).
+        expect(nav, "the navigation to / returned no response").not.toBeNull();
+        const servedHtml = await nav!.text();
         await waitForShell(page);
         if (SLOW_RUNNER_MS > 0) await page.waitForTimeout(SLOW_RUNNER_MS);
 
         // Guard the repro precondition. Without a row whose age is rendered in
         // SECONDS there is nothing for the two clocks to disagree about, and a
         // green run would mean nothing.
-        // ("captured Ns ago" — the whole <p> AgeLabel renders. Matched on the
-        // rendered text rather than a class hook so it fails loudly if the label
-        // ever loses its second granularity, which would make this spec moot.)
+        //
+        // #193 — asserted against WHAT THE SERVER SENT, not against the live
+        // DOM. `AgeLabel` re-renders off a `setInterval`, so the label on screen
+        // is a reading of the CLIENT's clock at the moment the assertion happens
+        // to run, while the precondition is a claim about the moment the SERVER
+        // rendered the markup. Those were the same instant only while a
+        // throttled reload stayed under `formatAgo`'s 60 s boundary; past it
+        // every row reads "captured 1m ago" and the guard failed with its own
+        // message on a spec that was working perfectly. Measured on this branch:
+        // one throttled load then 65 s gave dom=["captured 1m ago", ...x6] and
+        // zero matches for the old locator, while the served markup still read
+        // [0,0,0,0,0,0]. The served bytes are a frozen artefact, so this is now
+        // time-independent by construction rather than by being fast enough.
+        const servedAges = servedAgeLabels(servedHtml);
+        expect(
+          servedAges.map(({ value, unit }) => `${value}${unit}`),
+          `fewer than the ${SEED_COUNT} seeded rows carried an age label in the markup the server sent — the repro precondition never existed on this reload, so nothing below is evidence about hydration`,
+        ).toHaveLength(SEED_COUNT);
+        // Second granularity is the precondition itself: `formatAgo` renders
+        // whole seconds only under a minute, and that is the only band in which
+        // two clocks a tick apart produce two different strings. Asserted on the
+        // rendered text rather than a class hook so it also fails loudly if the
+        // label ever loses that granularity, which would make this spec moot.
+        expect(
+          servedAges.filter(({ unit }) => unit !== "s"),
+          "the server rendered a coarser-than-seconds age — nothing for the two clocks to disagree about",
+        ).toEqual([]);
+        // The rows in the markup are OURS. Six fresh labels could in principle
+        // come from someone else's fixture; the seeded text pins them.
+        for (let row = 0; row < SEED_COUNT; row++) {
+          expect(
+            servedHtml,
+            `seeded row "${marker} ${row}" is missing from the served markup`,
+          ).toContain(`${marker} ${row}`);
+        }
+        // …and the labels really are on screen, which the served bytes cannot
+        // tell you. Granularity-agnostic on purpose: the band is asserted above,
+        // at the only instant it is meaningful, and repeating it here is exactly
+        // what made this spec time-dependent.
         await expect(
-          page.getByText(/^captured \d{1,2}s ago$/).first(),
-          "no sub-minute row on screen — the repro precondition is gone",
-        ).toBeVisible();
+          page.getByText(/^captured \d+[smhd] ago$/).first(),
+          "no captured-age label on screen — the row metadata line is gone",
+        ).toBeVisible({ timeout: HYDRATION_TIMEOUT_MS });
 
         // Hydration has definitely happened once the control re-labels itself:
         // it renders from the `dark` class on <html>, and its SERVER snapshot is
