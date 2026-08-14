@@ -118,7 +118,26 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  privacy: "164dc0d1436e1792993e09a1605d4c8d1152ed700a84bb7769451bbec9ca8ad1",
+  // ── 2026-08-14, #85 — /privacy only, and classified COPY, so
+  // LEGAL_EFFECTIVE_DATE is deliberately NOT bumped. ──
+  // The theme setting became three-state (follow my system / light / dark), so
+  // the sentence naming the stored value as a "light/dark theme choice" no
+  // longer described what can be in `df-theme`. Everything the paragraph
+  // DISCLOSES is unchanged: same key, same location (the browser's local
+  // storage), same category (a UI preference), same retention, same recipients
+  // (none), and the same promise that it never leaves the device. No new
+  // processing exists to disclose either — following the OS is a `matchMedia`
+  // read, which sends nothing anywhere.
+  //
+  // A first draft of this change also added a sentence asserting that reading
+  // the OS setting stores and transmits nothing. It was dropped rather than
+  // pinned: a claimed ABSENCE of processing is the one shape this file's own
+  // docblock records having had to retract (#154's "no log of when it was
+  // fetched", false on both deploy targets), and it earns nothing a reader does
+  // not already get from the sentence above it.
+  privacy: "0fe73291b1fd5c8f0725c8df88348118a753834f88d47f2644de98b4accce936",
+  // Untouched by #85, and unchanged — the evidence that this change reaches one
+  // document and not both.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 
