@@ -116,23 +116,48 @@ const THEME_SAMPLE_EVERY_MS = 200;
 const HYDRATION_TIMEOUT_MS = 20_000;
 
 /**
- * The per-iteration allowance the test's own timeout is built from: one throttled
- * load, the hydration check above, and the precondition read.
- *
- * The second of the two 2026-08-07 failures was `Test timeout of 30000ms
- * exceeded` — Playwright's DEFAULT, which this spec never overrode. Four
- * throttled page loads plus `RELOADS × THEME_SAMPLES × THEME_SAMPLE_EVERY_MS`
- * (8 s, over a quarter of the whole budget) do not fit in 30 s on a loaded
- * runner, and the failure lands on whichever assertion happens to be in flight
- * — which is how #193 came to be filed against the precondition. Measured here
- * for scale: ~3.5 s per iteration on an idle developer machine.
- *
- * Deliberately an upper ENVELOPE, not a target. Every assertion inside the loop
- * carries its own timeout, so a real regression still fails in seconds; this
- * number only decides how long a comprehensively wedged run is allowed to hang
- * before the runner reclaims it.
+ * The age label and the shell link are in the markup the SERVER sent, so waiting
+ * for them is waiting on parse and paint, not on hydration — a smaller job than
+ * `HYDRATION_TIMEOUT_MS` covers, and given its own name so the budget below can
+ * count the two separately instead of conflating them.
  */
-const ITERATION_BUDGET_MS = 30_000;
+const SERVER_MARKUP_TIMEOUT_MS = 10_000;
+
+/**
+ * The navigation itself, capped so it is a countable term below. Playwright's
+ * `navigationTimeout` defaults to 0 — meaning "spend the whole test timeout" —
+ * which makes any per-iteration sum a fiction.
+ */
+const NAVIGATION_TIMEOUT_MS = 20_000;
+
+/**
+ * One iteration's worst case, as the SUM of every bounded wait it contains:
+ * `page.goto`, `waitForShell`, the age label on screen, and the hydration check.
+ *
+ * ⚠️ The invariant, and the whole reason this is a sum rather than a round
+ * number: **the outer test timeout must exceed the total of the inner ones.**
+ * Otherwise the outer one fires first and the failure is reported against
+ * whichever assertion happened to be in flight rather than the one that actually
+ * ran out — which is exactly how #193 came to be filed against the precondition
+ * when the cause was the budget. `e2e_test` #15771333861 (2026-08-07, `main`)
+ * failed its retry on `Test timeout of 30000ms exceeded` and surfaced it as the
+ * precondition's `toBeVisible()` with `Received: undefined`.
+ *
+ * Raised in review on !346: the first version of this constant was a flat 30 s
+ * and counted `HYDRATION_TIMEOUT_MS` once, while two assertions per iteration
+ * could each spend it — so a wedged run could burn 40 s of inner budget inside a
+ * 30 s allowance and reproduce the very ambiguity above. Enumerated instead, so
+ * adding another timed assertion means adding its term here.
+ *
+ * Deliberately an upper ENVELOPE, not a target: measured at ~3.5 s per iteration
+ * on an idle developer machine. A real #105 regression fails on VALUE in
+ * milliseconds; only a comprehensively wedged run approaches this.
+ */
+const ITERATION_BUDGET_MS =
+  NAVIGATION_TIMEOUT_MS + // page.goto("/")
+  SERVER_MARKUP_TIMEOUT_MS + // waitForShell
+  SERVER_MARKUP_TIMEOUT_MS + // the age label is on screen
+  HYDRATION_TIMEOUT_MS; // the toggle has re-labelled
 
 /** Seeding, the theme bootstrap, the CDP session and teardown. */
 const SETUP_BUDGET_MS = 30_000;
@@ -230,6 +255,13 @@ const SERVED_AGE_LABEL = />captured (\d+[smhd]) ago</;
 const SUB_MINUTE_AGE = /^\d{1,2}s$/;
 
 /**
+ * Where one inbox row's markup ends and the next begins. Every row is an `<li>`
+ * (`needsReview.map` over `<ItemRow>`), so this is what bounds a per-row search
+ * to the row it is about.
+ */
+const ROW_ELEMENT_START = "<li";
+
+/**
  * The age the server rendered for ONE seeded row, or null if that row is not in
  * the markup at all.
  *
@@ -252,7 +284,15 @@ function servedAgeForRow(html: string, rowText: string): string | null {
   const normalised = html.replace(REACT_TEXT_SEPARATOR, "");
   const rowAt = normalised.indexOf(rowText);
   if (rowAt === -1) return null;
-  return SERVED_AGE_LABEL.exec(normalised.slice(rowAt))?.[1] ?? null;
+  // Bounded to this row's own <li>. Raised in review on !346: searching forward
+  // to the end of the document would make a row that rendered NO label silently
+  // report its NEIGHBOUR's age instead of null — borrowing a value to satisfy the
+  // very guard that exists to catch a missing one. Falsified before fixing:
+  // deleting one row's label from a real captured response returned "0s" for it
+  // unbounded and null bounded.
+  const nextRowAt = normalised.indexOf(ROW_ELEMENT_START, rowAt);
+  const row = normalised.slice(rowAt, nextRowAt === -1 ? undefined : nextRowAt);
+  return SERVED_AGE_LABEL.exec(row)?.[1] ?? null;
 }
 
 /** The header's theme control, located the way an AT user reaches it (#103). */
@@ -314,13 +354,13 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
 
       for (let i = 0; i < RELOADS; i++) {
         await refreshAges(prisma, marker);
-        const nav = await page.goto("/");
+        const nav = await page.goto("/", { timeout: NAVIGATION_TIMEOUT_MS });
         // The markup hydration has to match, captured at the instant it was
         // served — read here, before anything is allowed to elapse, because that
         // is the whole point (#193).
         expect(nav, "the navigation to / returned no response").not.toBeNull();
         const servedHtml = await nav!.text();
-        await waitForShell(page);
+        await waitForShell(page, SERVER_MARKUP_TIMEOUT_MS);
         if (SLOW_RUNNER_MS > 0) await page.waitForTimeout(SLOW_RUNNER_MS);
 
         // Guard the repro precondition. Without a row whose age is rendered in
@@ -369,7 +409,8 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
         await expect(
           page.getByText(/^captured \d+[smhd] ago$/).first(),
           "no captured-age label on screen — the row metadata line is gone",
-        ).toBeVisible({ timeout: HYDRATION_TIMEOUT_MS });
+          // Server markup, not hydration — see SERVER_MARKUP_TIMEOUT_MS.
+        ).toBeVisible({ timeout: SERVER_MARKUP_TIMEOUT_MS });
 
         // Hydration has definitely happened once the control re-labels itself:
         // it renders from the `dark` class on <html>, and its SERVER snapshot is
