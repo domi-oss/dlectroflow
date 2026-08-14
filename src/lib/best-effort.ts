@@ -266,6 +266,29 @@ export const DEFECT_TAG = "bookkeeping_defect";
  *
  * `instanceof` rather than reading `.constructor.name`, because a hostile getter
  * cannot make `instanceof` throw and this runs before the guarded block.
+ *
+ * ## THE RESIDUAL: a plain `Error` reads as operational, on purpose (`!339`)
+ *
+ * A bug that throws `new Error("unreachable state")` inside a payout is a defect
+ * and is **not** detected here. That is a deliberate one-sided bet rather than an
+ * oversight, because the alternative is not available: a
+ * `PrismaClientKnownRequestError`, a connection reset and a statement timeout are
+ * all `Error` too, so widening the test to `Error` would relabel every operational
+ * blip a defect and collapse the very split this exists to make. `CONTROL: an
+ * operational rejection keeps its own per-site tag` in `best-effort.test.ts`
+ * forbids exactly that.
+ *
+ * The bet is one-sided in the safe direction. A missed defect still emits a line
+ * under its per-site tag, so nothing is lost silently; a false defect would send
+ * an operator hunting a bug that does not exist.
+ *
+ * And it has no site to apply to today: `rewards.ts` contains no `throw`
+ * statement at all, and the one plain `Error` reachable through a wrapped payout
+ * is `firstUseByWorkspace`'s in `src/lib/db.ts` — "the workspace was deleted
+ * concurrently", which is environmental, so the answer this function already
+ * gives for it is the correct one. If a payout callee ever does grow a genuine
+ * invariant check, the fix is a named `Error` subclass at that site and one more
+ * `instanceof` here, not a wider net.
  */
 function isDefect(error: unknown): boolean {
   return (
