@@ -33,7 +33,16 @@
  * unit-testable on synthetic input, so it can be *shown* to fail, and the
  * colocated test reads the real file. A guard whose parser can only be exercised
  * against the repo cannot be trusted to fail when it should.
+ *
+ * ── `stripYamlComment` moved out in #226 ─────────────────────────────────────
+ * It was local here, and this docblock used to justify that by citing
+ * `source-text.ts`'s own rule for what earns a move — a SECOND caller. #226 is
+ * that caller: `ci-job-deps` had the identical trailing-comment hole in three
+ * matchers, which is exactly the "two sibling parsers disagree about one file"
+ * failure this module was written to stop. It now lives in `source-text.ts`
+ * unchanged, so the two readers of `.gitlab-ci.yml` cannot drift apart again.
  */
+import { stripYamlComment } from "./source-text";
 
 /** A top-level YAML block — a job, or an anchor/template like `.deploy_base`. */
 export interface CiBlock {
@@ -91,55 +100,6 @@ export function topLevelBlocks(yml: string): CiBlock[] {
   }
   flush();
   return blocks;
-}
-
-/**
- * `line` with a YAML inline comment removed, quote state respected (#191).
- *
- * Needed because the one file this parser exists to read is the file where an
- * inline comment is idiomatic: `.gitlab-ci.yml` is listed in `.prettierignore`,
- * and the reason recorded there is that it "relies on hand-aligned inline
- * comments". It carries dozens; the exact count is re-measurable and was wrong the first time it was written down. So no formatter will ever normalise one away, and
- * annotating a guard is an edit no reviewer would question.
- *
- * Stripping happens before any matching, which closes both directions at once —
- * and both were silent:
- *
- *     when: never # why           a real guard read as NO guard. Worse than it
- *                                 sounds: `guardParityGaps` skips blocks that
- *                                 guard nothing, so the block leaves the check
- *                                 altogether and passes while asserting nothing.
- *     if: '…'  # was $FLAG_A …    a flag read out of prose, which then enters
- *                                 `allGuardedFlags` and reports every properly
- *                                 guarded block as missing a flag that does not
- *                                 exist.
- *
- * YAML's comment rule is narrower than shell's: an unquoted `#` opens a comment
- * only at the start of a line or after whitespace. `a#b` is the scalar `a#b`,
- * and a `/ #191/` regex inside a quoted `if:` is data, not a comment — hence
- * tracking quotes rather than cutting at the first `#`.
- *
- * Local rather than in `src/lib/source-text.ts` on purpose: that module's own
- * doc records what earns a move there — a SECOND caller — and explains that
- * relocating early buys coupling with no reason for it. This has one caller.
- */
-function stripYamlComment(line: string): string {
-  let quote: '"' | "'" | null = null;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quote !== null) {
-      if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
-      return line.slice(0, i);
-    }
-  }
-  return line;
 }
 
 /**

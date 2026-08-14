@@ -28,7 +28,25 @@
  * Kept free of `fs` so the parsing is unit-testable on synthetic YAML, matching
  * `ci-docs-only`, `dockerfile-hygiene` and `lockfile-hygiene`; the caller reads
  * the file.
+ *
+ * ── Comments are stripped before anything is matched (#226) ───────────────────
+ * `.gitlab-ci.yml` is in `.prettierignore` *because* it "relies on hand-aligned
+ * inline comments", so no formatter will ever normalise one away and annotating a
+ * line here is an ordinary edit. Every matcher below used to break on one, in
+ * three separate ways, and #226 reported only the third:
+ *
+ *     stop_review: # teardown       the job became unfindable, so the test said
+ *                                   it was MISSING from the file
+ *     needs: [] # load-bearing      read as `{ kind: "list", jobs: ["] # …"] }`,
+ *                                   a dependency on a job that cannot exist
+ *     action: stop # why            read as declaring no stop action
+ *
+ * All three fail loud, which is why #226 sat in Backlog — the opposite of the
+ * identical hole in `guardedFlags` (#191), where the miss was silent. The cost is
+ * a red pipeline accusing the file of something untrue, and the time it takes to
+ * notice the `#`.
  */
+import { stripYamlComment } from "./source-text";
 
 /**
  * Jobs whose purpose is to destroy an environment, keyed by job name.
@@ -49,19 +67,55 @@ export type NeedsDeclaration =
   /** `needs:` with at least one entry. */
   | { kind: "list"; jobs: string[] };
 
-/** The lines of one top-level job block, excluding the `name:` line itself. */
+/**
+ * The lines of one top-level job block, excluding the `name:` line itself.
+ *
+ * The start line must be the job key at column 0 with nothing after the colon but
+ * an optional comment — the same test `ci-docs-only`'s own extractor applies, and
+ * for the same two reasons. A bare equality check rejects `stop_review: # why`
+ * (#226); a `startsWith` would accept `stop_review: some-value`, which is a
+ * scalar binding and not a block at all.
+ *
+ * **Returns the body RAW, comments included**, and that is a contract rather than
+ * an oversight: `deploy-values.ts` imports this and runs `stripShellComments` over
+ * the same lines, because the helm invocation inside a `script:` is shell and the
+ * two languages disagree about where a comment starts. The matchers below strip
+ * for themselves.
+ */
 export function jobBlock(gitlabCiYml: string, job: string): string[] | null {
   const lines = gitlabCiYml.split("\n");
-  const start = lines.findIndex((l) => l === `${job}:`);
+  const start = lines.findIndex(
+    (l) => /^[^\s#]/.test(l) && stripYamlComment(l).trimEnd() === `${job}:`,
+  );
   if (start === -1) return null;
   const body: string[] = [];
   for (const line of lines.slice(start + 1)) {
     // A new top-level key ends the block. Blank lines and comments inside it
     // are kept: a comment can sit between `needs:` and its first item.
+    //
+    // A column-0 COMMENT also ends it, which is deliberate and was re-checked in
+    // #226 rather than aligned with `topLevelBlocks`' pending-comment handling. In
+    // YAML a column-0 line does end an indented block, and the shape that would
+    // make this wrong — a column-0 comment sitting between a job's own keys —
+    // appears nowhere in the file. Getting it wrong truncates the block, which is
+    // a false negative in every caller and therefore loud; chasing it would mean
+    // a second YAML parser here for no reachable defect.
     if (/^\S/.test(line)) break;
     body.push(line);
   }
   return body;
+}
+
+/**
+ * A job's body with YAML inline comments removed, which is what every matcher
+ * below wants and what `jobBlock` deliberately does not return.
+ *
+ * Line count is preserved because `stripYamlComment` only ever shortens a line —
+ * a comment-only line arrives as whitespace, not as a deleted entry — so the
+ * block-form scan below can still reason about indentation and ordering.
+ */
+function strippedJobBlock(gitlabCiYml: string, job: string): string[] | null {
+  return jobBlock(gitlabCiYml, job)?.map(stripYamlComment) ?? null;
 }
 
 /**
@@ -77,7 +131,7 @@ export function parseJobNeeds(
   gitlabCiYml: string,
   job: string,
 ): NeedsDeclaration | null {
-  const body = jobBlock(gitlabCiYml, job);
+  const body = strippedJobBlock(gitlabCiYml, job);
   if (!body) return null;
 
   for (let i = 0; i < body.length; i++) {
@@ -102,7 +156,11 @@ export function parseJobNeeds(
     // Block form: subsequent more-indented `- job: x` / `- x` entries.
     const jobs: string[] = [];
     for (const line of body.slice(i + 1)) {
-      if (!line.trim() || line.trim().startsWith("#")) continue;
+      // A comment-only line has already been stripped to whitespace, so it
+      // arrives here as blank — the same tolerance the explicit `#` check used to
+      // give, now covering a comment appended to an item as well (#226). The same
+      // simplification `guardedFlags` made when it started stripping first.
+      if (!line.trim()) continue;
       const itemIndent = /^(\s*)/.exec(line)![1].length;
       if (itemIndent <= indent.length) break;
       const named = /^\s*-\s*job:\s*(\S+)/.exec(line);
@@ -118,9 +176,16 @@ export function parseJobNeeds(
   return { kind: "absent" };
 }
 
-/** Does this job's block set `environment.action: stop`? */
+/**
+ * Does this job's block set `environment.action: stop`?
+ *
+ * Anchored on the whole line rather than searched for anywhere in it, so prose
+ * describing the key is not mistaken for the key. Comments are gone by the time
+ * this runs, which closes the direction #226 reported — `action: stop # why` — and
+ * keeps the other one shut whether or not the anchor happens to help.
+ */
 export function declaresStopAction(gitlabCiYml: string, job: string): boolean {
-  const body = jobBlock(gitlabCiYml, job);
+  const body = strippedJobBlock(gitlabCiYml, job);
   if (!body) return false;
   return body.some((l) => /^\s+action:\s*stop\s*$/.test(l));
 }
