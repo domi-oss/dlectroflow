@@ -39,6 +39,41 @@ const CPU_THROTTLE_RATE = 20;
 const RELOADS = 4;
 
 /**
+ * Extra wall-clock time to burn inside every iteration, between the navigation
+ * and the assertions that read the page. Zero by default, so CI behaviour is
+ * unchanged; it exists so #193's close condition is a command anyone can run
+ * rather than a state a runner has to happen to be in:
+ *
+ *   E2E_HYDRATION_SLOW_RUNNER_MS=65000 npm run test:e2e -- \
+ *     --project=chromium --no-deps e2e/smoke/inbox-hydration.spec.ts
+ *
+ * 65 000 is chosen to put ONE iteration past 60 s, which is where `formatAgo`
+ * stops rendering seconds and starts rendering minutes — the boundary #193 is
+ * about. It is deliberately a plain wait rather than a higher
+ * `CPU_THROTTLE_RATE`: the throttle is load-bearing evidence (see the header)
+ * and must not be dialled around, and what this spec is sensitive to is ELAPSED
+ * TIME between the server's render and the assertion that reads it, which is
+ * exactly what a wait reproduces. A loaded CI runner spends that time doing
+ * work; the effect on this spec is identical.
+ */
+const SLOW_RUNNER_MS = readSlowRunnerMs();
+
+function readSlowRunnerMs(): number {
+  const raw = process.env.E2E_HYDRATION_SLOW_RUNNER_MS;
+  if (raw === undefined || raw.trim() === "") return 0;
+  const ms = Number(raw);
+  // Fail at collection time rather than silently running unslowed: a typo here
+  // would make the close condition report a green that proves nothing, which is
+  // the failure class this whole spec exists to avoid.
+  if (!Number.isFinite(ms) || ms < 0) {
+    throw new Error(
+      `E2E_HYDRATION_SLOW_RUNNER_MS must be a non-negative number of milliseconds; got ${JSON.stringify(raw)}`,
+    );
+  }
+  return ms;
+}
+
+/**
  * React's hydration bailouts, as they appear in a PRODUCTION bundle: the message
  * text is stripped, so what surfaces is the numbered form plus the docs link.
  * 418 is the text mismatch this issue is about; 422/423/425 are the neighbouring
@@ -151,6 +186,7 @@ test.describe("#105 the inbox hydrates without discarding the server tree", () =
         await refreshAges(prisma, marker);
         await page.goto("/");
         await waitForShell(page);
+        if (SLOW_RUNNER_MS > 0) await page.waitForTimeout(SLOW_RUNNER_MS);
 
         // Guard the repro precondition. Without a row whose age is rendered in
         // SECONDS there is nothing for the two clocks to disagree about, and a
