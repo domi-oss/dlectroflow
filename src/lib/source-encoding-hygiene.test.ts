@@ -71,6 +71,11 @@ const NEVER_ALLOWLISTED_EXTENSIONS = [
   ".css",
   ".prisma",
   ".svg",
+  // `.env.example` and `.env.prod.example` resolve to `.example`, NOT to the
+  // empty string — a multi-dot dotfile takes its last extension. Added on Duo's
+  // review of !347, which caught a test comment claiming otherwise. Both are
+  // text an operator copies and edits, so they must stay scanned.
+  ".example",
 ] as const;
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
@@ -382,15 +387,30 @@ describe("fileExtensionOf", () => {
     expect(fileExtensionOf("archive.tar.gz")).toBe(".gz");
   });
 
-  it("treats a dotfile as having no extension, so it gets scanned", () => {
-    // `.gitignore`, `.gitattributes` and `.env.example` are text and a scanner
-    // is expected to read them; a rule that read `.gitignore`'s extension as
-    // `.gitignore` would be harmless, but one that read it as an allow-listable
-    // extension would not.
+  it("treats a leading-dot-only name as having no extension", () => {
+    // A name whose only dot is the leading one has no extension: the dot marks
+    // it hidden rather than typing it. Getting this wrong would be harmless in
+    // one direction (reading `.gitignore`'s extension as `.gitignore`, which
+    // nothing allow-lists) and not in the other, so it is pinned.
     expect(fileExtensionOf(".gitignore")).toBe("");
+    expect(fileExtensionOf(".gitattributes")).toBe("");
     expect(fileExtensionOf("docker/.dockerignore")).toBe("");
     expect(fileExtensionOf("Dockerfile")).toBe("");
     expect(fileExtensionOf("a/b/no-extension")).toBe("");
+  });
+
+  it("gives a MULTI-dot dotfile its last extension, not the empty string", () => {
+    // Duo review on !347 caught the comment above claiming `.env.example`
+    // behaved like `.gitignore`. It does not: the leading-dot rule only covers a
+    // name whose ONLY dot is the first one, so these resolve to `.example`.
+    //
+    // That is the correct answer and the reason it is safe is worth stating
+    // rather than leaving to be re-derived: `.example` is not in
+    // BINARY_ASSET_EXTENSIONS and is refused entry to it by
+    // NEVER_ALLOWLISTED_EXTENSIONS, so both tracked env templates are scanned.
+    // The property that matters is not "has no extension", it is "is scanned".
+    expect(fileExtensionOf(".env.example")).toBe(".example");
+    expect(fileExtensionOf(".env.prod.example")).toBe(".example");
   });
 
   it("ignores a dot in a directory name", () => {
