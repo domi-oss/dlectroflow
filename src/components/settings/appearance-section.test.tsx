@@ -136,22 +136,38 @@ describe("AppearanceSection", () => {
     ).toBeInTheDocument();
   });
 
-  // #103 — the header went icon-only; this row deliberately did NOT. A bare
-  // icon in a settings row would be worse than the label it replaced, so the
-  // words stay (and with them the accessible name, un-overridden).
+  // #103 — the header went icon-only; this row deliberately did NOT, and the
+  // words are still here. #85 turned the row into a three-state radiogroup
+  // (`system` became the default and the two-state toggle could not express
+  // it), so the words are now the three option labels rather than one button's
+  // text — and, as before, they are the accessible names, un-overridden.
   it("keeps the theme control's visible words", () => {
     render(<AppearanceSection {...base} />);
-    const toggle = screen.getByRole("button", { name: /mode/i });
-    expect(toggle).toHaveTextContent("Dark mode");
-    expect(toggle).not.toHaveAttribute("aria-label");
+    const group = screen.getByRole("group", { name: /theme/i });
+    expect(group).toBeInTheDocument();
+    for (const name of [/follow my system/i, /^light$/i, /^dark$/i]) {
+      const radio = screen.getByRole("radio", { name });
+      expect(radio).toBeInTheDocument();
+      expect(radio).not.toHaveAttribute("aria-label");
+    }
   });
 
-  it("toggling the theme flashes the shared Appearance save indicator", async () => {
+  // #85 — `system` is the default, so it is what the group comes up on for
+  // anyone who has not chosen. A section that opened on "Light" would be
+  // claiming a choice the user never made.
+  it("comes up on Follow my system when nothing has been chosen", () => {
+    render(<AppearanceSection {...base} />);
+    expect(
+      screen.getByRole("radio", { name: /follow my system/i }),
+    ).toBeChecked();
+  });
+
+  it("choosing a theme flashes the shared Appearance save indicator", async () => {
     const user = userEvent.setup();
     render(<AppearanceSection {...base} />);
     // The indicator is idle (renders nothing) until a change is saved.
     expect(screen.queryByRole("status")).toBeNull();
-    await user.click(screen.getByRole("button", { name: /mode/i }));
+    await user.click(screen.getByRole("radio", { name: /^dark$/i }));
     expect(await screen.findByRole("status")).toBeInTheDocument();
   });
 

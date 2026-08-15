@@ -1,20 +1,58 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ThemeToggle } from "./theme-toggle";
+import { ThemeToggle, ThemePreferenceChoice } from "./theme-toggle";
+import {
+  PREFERS_DARK_QUERY,
+  THEME_ATTRIBUTE,
+  THEME_STORAGE_KEY,
+} from "@/lib/theme";
 
 /** Let a queued MutationObserver callback (a microtask) flush into React. */
 const flush = () => act(async () => {});
 
+// This jsdom build provides no window.localStorage (same constraint
+// appearance-section.test.tsx records), and #85 made the toggle's persistence
+// observable — it now writes a three-state value and only calls `onPersist` when
+// the write succeeds. So stand up the repo's Map-backed stub and read it.
+let store: Map<string, string>;
+beforeEach(() => {
+  store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
+    clear: () => store.clear(),
+  });
+});
+
+/** Pin the OS setting for one test. */
+function stubOsPrefersDark(prefersDark: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === PREFERS_DARK_QUERY ? prefersDark : false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
+
+const storedTheme = () => store.get(THEME_STORAGE_KEY) ?? null;
+const htmlPref = () => document.documentElement.getAttribute(THEME_ATTRIBUTE);
+
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   document.documentElement.classList.remove("dark");
-  try {
-    localStorage.clear();
-  } catch {
-    /* jsdom */
-  }
+  document.documentElement.removeAttribute(THEME_ATTRIBUTE);
 });
 
 describe("ThemeToggle", () => {
@@ -183,5 +221,216 @@ describe("ThemeToggle — text variant (Settings > Appearance) (#103)", () => {
   it("is what you get when no variant is passed", () => {
     render(<ThemeToggle />);
     expect(screen.getByRole("button")).toHaveTextContent("Dark mode");
+  });
+});
+
+// ── #85 — the setting became three-state ─────────────────────────────────────
+
+/**
+ * The header button stays a two-state control on purpose: in a menu bar, "the
+ * obvious thing" is "give me the other one", and a three-way picker there would
+ * cost width the bar does not have at 360px (#252). Pressing it is therefore an
+ * OVERRIDE — it writes an explicit `light`/`dark`, which is what makes the
+ * manual toggle keep working now that `system` is the default.
+ */
+describe("ThemeToggle — writes an explicit override (#85)", () => {
+  it("stores 'dark', not a boolean, when switching to dark", async () => {
+    stubOsPrefersDark(false);
+    render(<ThemeToggle />);
+    await userEvent.click(screen.getByRole("button"));
+    expect(storedTheme()).toBe("dark");
+    expect(htmlPref()).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("stores 'light' when switching back", async () => {
+    stubOsPrefersDark(false);
+    document.documentElement.classList.add("dark");
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "dark");
+    render(<ThemeToggle />);
+    await flush();
+    await userEvent.click(screen.getByRole("button"));
+    expect(storedTheme()).toBe("light");
+    expect(htmlPref()).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  // The defect the issue opens with, at the control's level: on a dark OS the
+  // app comes up dark, so the button offers LIGHT rather than offering to switch
+  // to a theme already on screen.
+  it("comes up offering light when the OS is dark and nothing was chosen", async () => {
+    stubOsPrefersDark(true);
+    // What THEME_BOOTSTRAP_SCRIPT leaves behind for a first visit on a dark OS.
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "system");
+    document.documentElement.classList.add("dark");
+    render(<ThemeToggle variant="icon" />);
+    await flush();
+    expect(screen.getByRole("button")).toHaveAccessibleName(
+      "Switch to light mode",
+    );
+  });
+
+  // Overriding a `system` preference must pin the OPPOSITE of what is on
+  // screen, not the opposite of the stored preference — otherwise pressing the
+  // button on a dark-OS device appears to do nothing.
+  it("overriding from system pins the opposite of the RESOLVED theme", async () => {
+    stubOsPrefersDark(true);
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "system");
+    document.documentElement.classList.add("dark");
+    render(<ThemeToggle />);
+    await flush();
+    await userEvent.click(screen.getByRole("button"));
+    expect(storedTheme()).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  it("only reports a successful persist (private mode says nothing saved)", async () => {
+    stubOsPrefersDark(false);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("SecurityError");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    });
+    const onPersist = vi.fn();
+    render(<ThemeToggle onPersist={onPersist} />);
+    await userEvent.click(screen.getByRole("button"));
+    // The theme still applies for this session…
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    // …but nothing claims it was remembered.
+    expect(onPersist).not.toHaveBeenCalled();
+  });
+
+  it("reports a successful persist", async () => {
+    stubOsPrefersDark(false);
+    const onPersist = vi.fn();
+    render(<ThemeToggle onPersist={onPersist} />);
+    await userEvent.click(screen.getByRole("button"));
+    expect(onPersist).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The three-state control, which is where `system` is reachable. A radiogroup
+ * rather than a cycling button: three mutually exclusive options is what a
+ * radiogroup is for, `aria-pressed` cannot express three states, and it matches
+ * the two radiogroups Settings > Appearance already renders (tick colour,
+ * typeface).
+ */
+describe("ThemePreferenceChoice (#85)", () => {
+  it("offers exactly system / light / dark, in that order", () => {
+    stubOsPrefersDark(false);
+    render(<ThemePreferenceChoice voice="plain" />);
+    const radios = screen.getAllByRole("radio");
+    expect(radios).toHaveLength(3);
+    expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+      "system",
+      "light",
+      "dark",
+    ]);
+  });
+
+  it("is a labelled group, and every option has visible words", () => {
+    stubOsPrefersDark(false);
+    render(<ThemePreferenceChoice voice="plain" />);
+    expect(screen.getByRole("group", { name: /theme/i })).toBeInTheDocument();
+    for (const name of [/follow my system/i, /^light$/i, /^dark$/i]) {
+      expect(screen.getByRole("radio", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("checks system when nothing has been chosen", async () => {
+    stubOsPrefersDark(false);
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "system");
+    render(<ThemePreferenceChoice voice="plain" />);
+    await flush();
+    expect(
+      screen.getByRole("radio", { name: /follow my system/i }),
+    ).toBeChecked();
+  });
+
+  it("checks the explicit choice a returning user made", async () => {
+    stubOsPrefersDark(false);
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "dark");
+    document.documentElement.classList.add("dark");
+    render(<ThemePreferenceChoice voice="plain" />);
+    await flush();
+    expect(screen.getByRole("radio", { name: /^dark$/i })).toBeChecked();
+  });
+
+  // Choosing `system` on a dark device must actually go dark — the whole point.
+  it("choosing system adopts the OS setting immediately", async () => {
+    stubOsPrefersDark(true);
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, "light");
+    render(<ThemePreferenceChoice voice="plain" />);
+    await flush();
+    await userEvent.click(screen.getByRole("radio", { name: /follow my/i }));
+    expect(storedTheme()).toBe("system");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("choosing dark overrides a light OS", async () => {
+    stubOsPrefersDark(false);
+    render(<ThemePreferenceChoice voice="plain" />);
+    await userEvent.click(screen.getByRole("radio", { name: /^dark$/i }));
+    expect(storedTheme()).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  });
+
+  it("stays in sync with the header toggle mounted alongside it", async () => {
+    stubOsPrefersDark(false);
+    render(
+      <>
+        <ThemeToggle variant="icon" />
+        <ThemePreferenceChoice voice="plain" />
+      </>,
+    );
+    await userEvent.click(screen.getByRole("button"));
+    await flush();
+    expect(screen.getByRole("radio", { name: /^dark$/i })).toBeChecked();
+  });
+
+  it("flags a successful save, and stays quiet when storage refuses", async () => {
+    stubOsPrefersDark(false);
+    const onPersist = vi.fn();
+    render(<ThemePreferenceChoice voice="plain" onPersist={onPersist} />);
+    await userEvent.click(screen.getByRole("radio", { name: /^dark$/i }));
+    expect(onPersist).toHaveBeenCalledTimes(1);
+
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("SecurityError");
+      },
+      removeItem: () => {},
+      clear: () => {},
+    });
+    await userEvent.click(screen.getByRole("radio", { name: /^light$/i }));
+    expect(onPersist).toHaveBeenCalledTimes(1);
+  });
+
+  // The group carries a description, the same way the typeface radiogroup does —
+  // and it is the sentence that answers the request this issue came from ("dark
+  // mode automatic with time of day"), so it has to actually reach AT rather
+  // than sit next to the control as unassociated prose.
+  it("describes the group, so 'Follow my system' explains itself (a11y)", () => {
+    stubOsPrefersDark(false);
+    render(<ThemePreferenceChoice voice="plain" />);
+    expect(
+      screen.getByRole("group", { name: /theme/i }),
+    ).toHaveAccessibleDescription(/device|system/i);
+  });
+
+  // One radiogroup per name, or a second instance would steal the first's
+  // selection. Only Settings renders it today; this pins the assumption.
+  it("groups its options under one radio name", () => {
+    stubOsPrefersDark(false);
+    render(<ThemePreferenceChoice voice="plain" />);
+    const names = new Set(
+      screen.getAllByRole("radio").map((r) => (r as HTMLInputElement).name),
+    );
+    expect(names.size).toBe(1);
   });
 });

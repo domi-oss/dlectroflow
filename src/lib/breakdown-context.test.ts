@@ -313,8 +313,21 @@ describe("gatherBreakdownContext — the current task's note", () => {
     // Control characters are stripped and the column bound is re-applied, even
     // though the CHECK constraint already holds — a row that predates the
     // constraint must not become the one value nothing bounds.
+    // Written as an ESCAPE, never as a raw byte (#224). A raw NUL here made
+    // `file` classify this file as `data`, so Semgrep skipped it whole and every
+    // SAST run reported zero findings for it — absence, not cleanliness.
+    // `source-encoding-hygiene.test.ts` is what stops the raw form coming back.
+    //
+    // Byte-identity is ASSERTED rather than assumed: the fixture exists to feed
+    // a control character to the sanitiser, so a "fix" that changed which
+    // character arrives would be a broken fix that still looked green.
+    const RAW_NOTE = "  call\u0000 the vet  ";
+    expect(RAW_NOTE).toBe("  call" + String.fromCharCode(0x00) + " the vet  ");
+    expect(RAW_NOTE).toHaveLength(17);
+    expect(RAW_NOTE.charCodeAt(6)).toBe(0x00);
+
     prismaMock.task.findFirst.mockResolvedValue({
-      notes: `  call  the vet  ${"x".repeat(TASK_NOTE_MAX_LENGTH)}`,
+      notes: RAW_NOTE + "x".repeat(TASK_NOTE_MAX_LENGTH),
     });
     const note = (await gatherBreakdownContext(GUEST, TASK)).note!;
     expect(note.startsWith("call the vet")).toBe(true);
