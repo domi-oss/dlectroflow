@@ -178,17 +178,66 @@ export function CaptureQueueStrip({
    * confirm is a human pause of exactly the length a flush trigger needs and
    * `visibilitychange` fires on the very tab-switch a hesitating user makes.
    */
-  const resolveDiscard = async (keys: readonly string[], anchor: string) => {
+  const resolveDiscard = async (
+    keys: readonly string[],
+    /** Where focus goes if these keys leave the list. */
+    anchor: string,
+    /** Where it goes if they do not: the control the user actually pressed. */
+    stayAnchor: string,
+  ) => {
     setConfirming(null);
-    focusAfter.current = anchor;
+    // ⚠️ **A refusal removes nothing, so the removal anchor is wrong by
+    // construction** — and every anchor in this strip is a *destructive* control,
+    // so the user's next Enter would open a confirm over words they never chose.
+    //
+    // This is the ordinary path, not a narrow one. The two-step confirm is a human
+    // pause of exactly the length a flush trigger needs, and `visibilitychange`
+    // fires on the very tab-switch a hesitating user makes — so the hook answers
+    // `refused-in-flight`, the row stays, and the copy tells them to try again. The
+    // press-time courtesy check cannot cover it: it ran before the flush started.
+    //
+    // Decided here rather than from `discard`'s return value, because the anchor
+    // has to be in place before the re-render `setConfirming(null)` causes. That is
+    // sound rather than a guess: `inFlight` reads the same ref `discard`'s own
+    // guard reads, synchronously in the same tick, so it agrees with the outcome.
+    const refused = keys.some((key) => api.inFlight(key));
+    focusAfter.current = refused ? stayAnchor : anchor;
     await api.discard(keys);
   };
 
-  /** Which anchor is owed focus once these keys leave the list. */
+  /** Which anchor is owed focus once one of `mine` leaves the list. */
   const anchorAfter = (index: number): string => {
     if (mine.length > index + 1) return mine[index + 1]!.clientKey;
-    if (mine.length > 1) return mine[index - 1]!.clientKey;
+    // `index > 0` rather than `mine.length > 1`: the same condition for this
+    // caller — the branch above only falls through on the last entry — but stated
+    // as what it actually needs, so it cannot be borrowed by a caller for whom
+    // "there is more than one entry" and "there is an entry before this one" come
+    // apart. That is precisely how the group path below went wrong.
+    if (index > 0) return mine[index - 1]!.clientKey;
     if (stranded.length > 0) return stranded[0]!.state;
+    return "input";
+  };
+
+  /**
+   * The same question for a stranded **group**, which `anchorAfter` cannot answer.
+   *
+   * ⚠️ It used to be called as `anchorAfter(0)`, and that walks `mine`. With no
+   * live entries its third branch returns `stranded[0].state` — **the group being
+   * removed** — so discarding the first of two groups left the anchor pointing at
+   * a row that no longer existed and focus fell back to the toggle, past a group
+   * still on screen. Discarding the *last* group happened to be right, which is
+   * why it read as working. Duo review round 3 on `!348`; verified against the
+   * code, then measured red.
+   *
+   * The remaining group is the destination because it is the thing still needing
+   * the same action, on the one screen whose purpose is reclaiming the byte cap.
+   */
+  const anchorAfterGroup = (index: number): string => {
+    if (stranded.length > index + 1) return stranded[index + 1]!.state;
+    if (index > 0) return stranded[index - 1]!.state;
+    // The groups render BELOW the entries, so the adjacent survivor is the last of
+    // `mine` rather than the first.
+    if (mine.length > 0) return mine[mine.length - 1]!.clientKey;
     return "input";
   };
 
@@ -310,6 +359,7 @@ export function CaptureQueueStrip({
                         void resolveDiscard(
                           [entry.clientKey],
                           anchorAfter(index),
+                          entry.clientKey,
                         )
                       }
                       className={cn(
@@ -368,7 +418,7 @@ export function CaptureQueueStrip({
             );
           })}
 
-          {stranded.map((group) => (
+          {stranded.map((group, groupIndex) => (
             <StrandedRow
               key={group.state}
               group={group}
@@ -380,7 +430,11 @@ export function CaptureQueueStrip({
                 setConfirming(null);
               }}
               onConfirm={() =>
-                void resolveDiscard(group.clientKeys, anchorAfter(0))
+                void resolveDiscard(
+                  group.clientKeys,
+                  anchorAfterGroup(groupIndex),
+                  group.state,
+                )
               }
               confirmRef={confirming === group.state ? confirmRef : undefined}
             />

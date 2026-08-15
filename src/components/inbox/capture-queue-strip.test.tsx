@@ -557,6 +557,206 @@ describe("capture queue strip — Discard takes a two-step confirm (#175)", () =
   });
 });
 
+/**
+ * Where the hand-off points, which is a different question from whether it fires.
+ *
+ * Both cases here are one mistake seen twice: **the anchor is computed for a
+ * removal, and then used on a press that may not remove what it was computed
+ * for.** The consequence is not a lost keystroke — every anchor in this strip is a
+ * *destructive* control, so a hand-off to the wrong one leaves the user's next
+ * Enter aimed at words they never chose.
+ */
+describe("capture queue strip — the hand-off points at what SURVIVES (#175)", () => {
+  const stripOf = (over: Partial<CaptureQueueApi>) => (
+    <CaptureQueueStrip
+      api={api(over)}
+      voice="plain"
+      savingRegionId="saving-region"
+      now={100_000}
+      onReturnFocus={vi.fn()}
+    />
+  );
+
+  const groups = (): StrandedGroup[] => [
+    { state: "session-expired", count: 2, clientKeys: ["s1", "s2"] },
+    { state: "account-revoked", count: 1, clientKeys: ["r1"] },
+  ];
+
+  /**
+   * Duo's round-3 finding on `!348`, verified against the real code: the stranded
+   * confirm calls `anchorAfter(0)`, which knows only how to walk `mine`. With
+   * `mine` empty its third branch returns `stranded[0].state` — **the group being
+   * removed** — so the anchor is gone by the time the effect looks for it and
+   * focus falls all the way back to the toggle, past a group still on screen.
+   *
+   * ⚠️ It reads as harmless only because the fallback is not `<body>`. The user
+   * has just cleared one of two blocked groups and is put back at the strip's
+   * expander rather than at the remaining group's own control, so clearing the
+   * second means finding it again by hand — on the screen whose entire purpose is
+   * reclaiming the byte cap that is refusing their captures.
+   */
+  it("hands focus to the group that REMAINS when the first of two is discarded", async () => {
+    const { rerender } = render(stripOf({ stranded: groups() }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Discard: 2" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard for good: 2" }),
+    );
+
+    // The first group leaves; the second is still there and still needs clearing.
+    rerender(stripOf({ stranded: [groups()[1]!] }));
+
+    await waitFor(() => {
+      expect(document.activeElement).not.toBe(document.body);
+      expect(screen.getByRole("button", { name: "Discard: 1" })).toHaveFocus();
+    });
+  });
+
+  /**
+   * The other end of the same array, which the fix must not break: discarding the
+   * LAST group has nothing after it, so the previous one is the answer.
+   */
+  it("hands focus backwards when the LAST of two groups is discarded", async () => {
+    const { rerender } = render(stripOf({ stranded: groups() }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Discard: 1" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard for good: 1" }),
+    );
+
+    rerender(stripOf({ stranded: [groups()[0]!] }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Discard: 2" })).toHaveFocus(),
+    );
+  });
+
+  /**
+   * A lone group leaving takes the strip with it only if nothing else is waiting.
+   * With a live entry present the strip stays, so the hand-off has somewhere real
+   * to go — and `anchorAfter(0)`'s `mine.length > 1` guard skips `mine[0]`, which
+   * is the very entry adjacent to the row being removed.
+   */
+  it("hands focus to the one live entry when the only group is discarded", async () => {
+    const only: StrandedGroup[] = [
+      { state: "account-revoked", count: 3, clientKeys: ["r1", "r2", "r3"] },
+    ];
+    const { rerender } = render(stripOf({ mine: [capture()], stranded: only }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Discard: 3" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Discard for good: 3" }),
+    );
+
+    rerender(stripOf({ mine: [capture()], stranded: [] }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Discard: ring mum/ }),
+      ).toHaveFocus(),
+    );
+  });
+
+  /**
+   * ⚠️ **A REFUSED discard removes nothing, so the removal anchor is wrong by
+   * construction** — and this is the ordinary case, not a narrow one: the hook's
+   * own words are that the two-step confirm is *"a human pause of exactly the
+   * length a flush trigger needs"*, and `visibilitychange` fires on the very
+   * tab-switch a hesitating user makes. So a flush starting while the dialog is
+   * open is expected, `discard` answers `refused-in-flight`, the row stays put —
+   * and focus lands on the NEXT capture's *Discard* button.
+   *
+   * The user is told *"This one is being saved right now. Give it a moment and try
+   * again"*, does exactly that, and opens a confirm over a different thought. The
+   * press-time courtesy check cannot prevent it: it runs on the first press, and
+   * the flush starts after it.
+   */
+  it("keeps focus on the entry the user acted on when the discard is REFUSED", async () => {
+    const entries = [
+      capture({ clientKey: "a", text: "first" }),
+      capture({ clientKey: "b", text: "second" }),
+      capture({ clientKey: "c", text: "third" }),
+    ];
+    // False at the first press so the confirm opens, true by the second: the
+    // flush trigger fired during the human pause, which is the whole point.
+    let flushStarted = false;
+    const value = api({
+      mine: entries,
+      inFlight: (key) => flushStarted && key === "b",
+      discard: vi.fn().mockResolvedValue("refused-in-flight" as DiscardOutcome),
+    });
+    render(
+      <CaptureQueueStrip
+        api={value}
+        voice="plain"
+        savingRegionId="saving-region"
+        now={100_000}
+        onReturnFocus={vi.fn()}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard: second/ }),
+    );
+    flushStarted = true;
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard for good: second/ }),
+    );
+
+    // Nothing was removed, so no re-render with a shorter list: this is the list
+    // the user is still looking at.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Discard: second/ }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.getByRole("button", { name: /^Discard: third/ }),
+    ).not.toHaveFocus();
+  });
+
+  /**
+   * The non-vacuous control for the case above. "Focus is on `second`" would also
+   * be satisfied by a strip that had stopped handing off at all, or by one that
+   * always returned to the pressed row — and that second regression would undo
+   * `"moves focus to a NAMED control after a discard"`, because a *successful*
+   * discard unmounts the pressed row and focus would drop to `<body>`.
+   */
+  it("still moves ON when the same press is honoured", async () => {
+    const entries = [
+      capture({ clientKey: "a", text: "first" }),
+      capture({ clientKey: "b", text: "second" }),
+      capture({ clientKey: "c", text: "third" }),
+    ];
+    const { rerender } = render(stripOf({ mine: entries }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /waiting to save/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard: second/ }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Discard for good: second/ }),
+    );
+
+    rerender(stripOf({ mine: [entries[0]!, entries[2]!] }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^Discard: third/ }),
+      ).toHaveFocus(),
+    );
+  });
+});
+
 describe("capture queue strip — a restored refusal is static text (#175)", () => {
   it("renders the sentence with the entry rather than announcing it", async () => {
     // `blockedBy` is persisted so the reason survives the reload a discarded tab
