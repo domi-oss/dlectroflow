@@ -501,9 +501,12 @@ operators upgrading a self-hosted instance don't get surprised.
   **What the export leaves out.** It withheld more than the two credentials it
   admitted to. Also absent, and now named on the page *and* in the archive's own
   README: your invitation record and any note whoever invited you wrote on it,
-  your AI usage count, your calendar feed's timestamps, and the flags saying
-  whether the account is active and when it was last seen. Ask and any of it will
-  be sent by hand, the invitation note included, since it is about you.
+  your AI usage count, your calendar feed's timestamps, the flags saying whether
+  the account is active or revoked, when it was last seen and when access was
+  withdrawn if it ever was, and the account id your sign-in provider issued for
+  you — as distinct from your username and the provider's name, both of which the
+  export does include. Ask and any of it will be sent by hand, the invitation
+  note included, since it is about you.
 
   **One sentence narrowed rather than removed.** "Nothing infers anything about
   how you are doing" was overstated: with the end-of-day round-up, a short
