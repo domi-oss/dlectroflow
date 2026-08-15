@@ -26,6 +26,7 @@ import { countsTowardInboxZero } from "@/lib/inbox-zero-queue";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { resolveInlineNoteEdit } from "@/lib/braindump-note-syntax";
 import { writeCapture } from "@/lib/capture-write";
+import { bestEffort } from "@/lib/best-effort";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
 import {
@@ -1080,10 +1081,28 @@ export async function completeItem(id: string) {
     // rather than the deprecated `touchStreakOnCompletion` alias, because the
     // alias takes no engagement argument and a credit with no `itemId` would be
     // permanent — silently un-revocable, which is the defect this closes.
-    await touchStreakOnEngagement(workspaceId, {
-      kind: EngagementKind.TaskComplete,
-      itemId: id,
-    });
+    //
+    // ⚠️ `bestEffort` and not a bare `await`, unlike its neighbours here, and the
+    // asymmetry is the point: #233 is what made this call able to fail on ANOTHER
+    // ROW. `itemId` is a foreign key to the to-do, so a delete from a second tab
+    // landing between this function's commit and this line raises 23503 — and
+    // unwrapped that threw out of an action whose writes were already committed,
+    // reporting a completion that succeeded as failed (#175). The neighbours can
+    // only fail on a generic fault, which is the pre-existing gap this file's
+    // module docblock records. Raised in review on !352.
+    //
+    // Losing the touch costs a streak day, which is the conservative direction:
+    // the day is un-credited rather than credited on evidence that no longer
+    // exists, and the to-do it would have pointed at has just been deleted.
+    await bestEffort(
+      "complete_item_streak_touch_failed",
+      workspaceId,
+      async () =>
+        touchStreakOnEngagement(workspaceId, {
+          kind: EngagementKind.TaskComplete,
+          itemId: id,
+        }),
+    );
     await awardBadge(workspaceId, BadgeKey.TaskComplete);
     await maybeAwardInboxZero(workspaceId);
 

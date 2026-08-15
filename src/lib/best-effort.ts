@@ -102,6 +102,33 @@ export type BookkeepingTag =
    */
   | "breakdown_streak_touch_failed"
   /**
+   * `completeItem` — the qualifying-engagement streak touch.
+   *
+   * ⚠️ **Deliberately bundled, and the same bundle as
+   * `breakdown_streak_touch_failed`** — both wrap `touchStreakOnEngagement`, so the
+   * one exception reaches this union under two tags. Same dependency and same
+   * residual: `streakRecord.aggregate` reads the `StreakRecord` row that the same
+   * transaction may have just written, so the BeatBestStreak decision cannot be
+   * separated from the write it measures.
+   *
+   * ⚠️ **Added by #233, and it guards a failure mode #233 itself created** (Duo
+   * review, `!352`). Before the ledger this call was
+   * `touchStreakOnCompletion(workspaceId)`, which referenced no other row and so
+   * could only fail on a generic database fault. It now writes an `EngagementDay`
+   * row carrying `itemId`, which is a foreign key to `BrainDumpItem` — so if the
+   * to-do is deleted from a second tab in the window between `completeItem`'s
+   * transaction committing and this line running, the insert raises 23503 and,
+   * unwrapped, threw out of an action whose writes had already committed. That is
+   * the #175 class exactly: a completion that succeeded, reported to the person as
+   * failed.
+   *
+   * Only this one call is wrapped, deliberately. The other post-commit awaits in
+   * `completeItem` (`logReward`, `awardBadge`, `maybeAwardInboxZero`) carry the
+   * same pre-existing gap, recorded in `braindump.ts`'s module docblock; sweeping
+   * them is separate work and not something #233 introduced.
+   */
+  | "complete_item_streak_touch_failed"
+  /**
    * `completeStep` — `rewardStepDone`: points, streak and ten-steps badge under
    * ONE tag.
    *

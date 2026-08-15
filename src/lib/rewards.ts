@@ -1094,8 +1094,23 @@ export async function touchStreakOnEngagement(
 
 /**
  * @deprecated A step/task completion is one kind of qualifying engagement.
- * Retained as a thin alias so the completion call sites and existing tests keep
- * working; prefer {@link touchStreakOnEngagement} for new call sites.
+ * Prefer {@link touchStreakOnEngagement}.
+ *
+ * ⚠️ **Calling this writes NO `EngagementDay` row**, and that is the whole reason
+ * not to use it rather than a style preference (raised in review on `!352`). It
+ * forwards no engagement argument, so the credit it produces is invisible to the
+ * ledger: the day cannot be recomputed, and `revokeUnqualifiedStreakBadges` can
+ * never withdraw it. A streak day credited through here is permanent — which is
+ * precisely the defect #233 exists to remove, reintroduced one call at a time.
+ *
+ * **No production caller remains.** Every engagement site passes an explicit
+ * `kind` — `completeItem` and `createBrainDumpItem` via `writeCapture`,
+ * `confirmBreakdown`, `completeStep` and `completeFocus` via `rewardStepDone`.
+ * This survives only for `rewards.integration.test.ts`, the restored
+ * `SELECT … FOR UPDATE` proof, which calls it to exercise the lock rather than the
+ * ledger. The previous wording said it was "retained so the completion call sites
+ * keep working"; those call sites are gone, and a comment naming callers that no
+ * longer exist is what makes an alias look safe to reach for.
  */
 export function touchStreakOnCompletion(
   workspaceId: string,

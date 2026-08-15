@@ -122,6 +122,7 @@ import {
   awardBadge,
   maybeAwardTenStepsDay,
   maybeAwardInboxZero,
+  touchStreakOnEngagement,
 } from "@/lib/rewards";
 import { TASK_WRITER_TX_BUDGET } from "@/lib/constants";
 
@@ -293,6 +294,85 @@ describe("completeItem", () => {
     // that tab would go on rendering the row as un-completed.
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  /**
+   * #233 via `!352` review — the ledger write is the ONE post-commit await in
+   * `completeItem` that can now fail on another row, so it is the one that is
+   * wrapped.
+   *
+   * Before the ledger this call was `touchStreakOnCompletion(workspaceId)`, which
+   * referenced nothing but the workspace and so could only fail on a generic
+   * database fault. It now writes an `EngagementDay` carrying `itemId`, a foreign
+   * key to the to-do — so a delete from a second tab landing between this
+   * function's commit and this line raises **23503**, and unwrapped that threw out
+   * of an action whose writes had already committed. #175's rule in one line: the
+   * row is in the database, so the caller must be told the row is in the database.
+   *
+   * The neighbours are deliberately NOT asserted as wrapped; their pre-existing
+   * gap is recorded in `braindump.ts`'s module docblock and sweeping it is separate
+   * work. What this pins is that #233 did not ADD a way for a successful
+   * completion to report failure.
+   */
+  it("resolves when the ledger write fails on a concurrently deleted item", async () => {
+    seedCompletion({
+      id: "i1",
+      completedAt: null,
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    // The real shape: Prisma surfaces an FK violation as P2003. The message is
+    // the constraint this MR added, so a reader meeting this test sees which
+    // write it is about.
+    const fk = Object.assign(
+      new Error(
+        'Foreign key constraint violated on the constraint: "EngagementDay_itemId_fkey"',
+      ),
+      { code: "P2003" },
+    );
+    vi.mocked(touchStreakOnEngagement).mockRejectedValueOnce(fk);
+
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i1")).resolves.toBeUndefined();
+
+    // It really did fail — without this the test would pass on a call that
+    // simply never happened, which is the vacuous shape this repo has recorded
+    // repeatedly.
+    expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner", {
+      kind: "task_complete",
+      itemId: "i1",
+    });
+    // And the bookkeeping AFTER it still ran: a swallow that also skipped the
+    // rest of the sequence would trade a spurious error for silently unpaid
+    // rewards.
+    expect(awardBadge).toHaveBeenCalled();
+    expect(maybeAwardInboxZero).toHaveBeenCalled();
+    // The revalidations are owed either way — `reopenItem`'s rule, the same one
+    // the concurrent-loser test above asserts.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("CONTROL: a failure in the guarded WRITE still rejects", async () => {
+    // Without this half the suite would pass an implementation that swallowed
+    // everything, which is a worse bug than the one being fixed —
+    // `post-commit-bookkeeping.test.ts` pairs every swallow with this same
+    // control, for that reason.
+    // `findFirst` seeded directly rather than through `seedCompletion`, for the
+    // reason the concurrent-loser test above records: this caller never reaches
+    // the step write, so `seedCompletion`'s queued `updateManyAndReturn` value
+    // would go unconsumed and shift every later test in this file by one.
+    // Measured while writing this — it red seven unrelated cases.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      completedAt: null,
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    prismaMock.brainDumpItem.updateMany.mockRejectedValueOnce(
+      new Error("write boom"),
+    );
+
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i1")).rejects.toThrow("write boom");
+    expect(touchStreakOnEngagement).not.toHaveBeenCalled();
   });
 
   it("takes the item's row lock FIRST, then the steps and the task", async () => {
