@@ -31,6 +31,51 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The task row's action bar fits a phone (#253).** At 360px the row had grown to
+  roughly seven stacked bands of controls. This is a **height** fix and not a
+  touch-target one: every control on the row was already 44px and still is.
+
+  The inline actions come down to four — the row's main call to action, **Save**,
+  **Complete** and **Note** — and the trailing cluster of icons is gone. Move,
+  schedule and delete were removed as props rather than merely hidden, because a
+  prop that renders nothing is how a defect comes to be described in terms of a
+  control nobody can see. The **▾** becomes the row's canonical action list instead
+  of a mirror of what is already on it: what reshapes the item, in the order it
+  escalates, then the two calendar entries, then **Delete** last as the destructive
+  answer.
+
+  Three entries were **removed** rather than moved. The nested `Move to…` picker;
+  `Snooze 1h`, whose sixty-minute write is still reachable through **Save for
+  later**, which dispatches the identical action; and `Edit task title`, a mirror of
+  the ✎ pencil whose own label already names the row it belongs to. The ✓ came off
+  **Complete** in `src/lib/strings.ts`, which nine callers read, so the label moved
+  in one place. All four row renderers change, and a 360px assertion in
+  `e2e/smoke/row-menu-viewport-fit.spec.ts` holds the height from now on.
+
+- **A completed to-do can be deleted, and deleting it gives back what it banked
+  (#251).** Completing something moved it into the Done bucket and took away every
+  way of getting rid of it, so to-dos completed while demoing the app stayed in the
+  list permanently. The 🗑 the other buckets already have is now on the inbox's
+  Completed bucket too, and the Library's Done tab gets a delete of its own.
+
+  **The reward reversal is a full one** — points and badge progress both — and it is
+  stated as an equality rather than as a second rule: a delete owes exactly what
+  reopening the same row would owe, one `step_done` per done step it destroys plus a
+  `task_complete` if it was carrying a completion. Reopen-then-delete and delete
+  outright therefore land on the same balance, and neither route can drift from the
+  other. It also gets the Library's fully-done rows right, where every ticked step
+  banked a `step_done` even though no completion was ever stamped.
+
+  **Both halves run inside the delete's own transaction.** A reversal that failed
+  after the row was gone would leave the points banked with nothing left to ever take
+  them back, and production runs two replicas. The completion is claimed by a guarded
+  write before the delete, so a second concurrent delete re-evaluates its condition
+  after the row lock, matches nothing and reverses nothing — without that gate both
+  callers would see the completion set and both would take a `task_complete`, and
+  since a reward event holds no link back to the to-do that earned it, the second one
+  would come out of unrelated, already-settled work. An over-large reversal stops at
+  zero rather than going negative or borrowing from another reward type.
+
 - **A name in the header, and one-tap access to the timer and the shopping list
   (#252).** The bar greeted people by their **provider username** — the
   lowercased handle the OAuth provider issued, else eight characters of an
@@ -164,6 +209,38 @@ operators upgrading a self-hosted instance don't get surprised.
   code that grants those cannot see them. Entries are capped at 200 characters and
   a list at 500 items. `/privacy` names the new category of stored content and the
   effective date moves with it.
+
+- **Any inbox row can be scheduled and noted, untriaged ones included (#186), and
+  capture can write the note inline (#179).** `BrainDumpItem` gains a notes column
+  and the three schedule-intent columns, mirroring `Task` field for field, so an item
+  no longer has to be triaged into a task before it can carry a deadline or a note.
+  Item rows get the full Schedule menu, the `.ics` branch keeps its own duration
+  path, and needs-review rows reuse the existing note row rather than a fork of it.
+
+  **The inline syntax is one rule with no second clause:** a `{…}` group at the very
+  end of what you type becomes the note. So `water the office plants {can under sink
+  needs a wash}` splits, and `fix the {foo} handler` does not — nor does
+  `rename {old} to {new}.`, because the full stop means the group is not final. That
+  refusal is the feature rather than a limitation of it: a syntax that fires
+  mid-string needs an escape character, and an escape character is a second syntax
+  nobody remembers at the speed a brain dump happens. The group is found by scanning
+  **backwards** from a closing brace, so an earlier placeholder survives —
+  `deploy the {{VERSION}} chart {check values.yaml}` keeps the placeholder in the
+  text where a forward search would have eaten most of the capture. Unbalanced braces
+  are left literal.
+
+  **One residual case is accepted knowingly rather than left to be discovered:** a
+  trailing JSON object splits, because an end-anchored rule cannot tell it from a
+  note. The alternative costs either an escape character or a content heuristic, and
+  a heuristic that sometimes decides your note is JSON is worse than a rule that is
+  always the same. It is visible and reversible either way — the split shows in the
+  row immediately, and editing the text back re-runs the parser.
+
+  Operators: one additive migration, no new environment variables. The notes column
+  is bounded at 2000 code points by a CHECK constraint, the same bound as `Task`'s,
+  because the value is copied into that column at triage. The schedule columns carry
+  **no defaults** — NULL is what distinguishes "the owner chose this" from "nobody
+  has said yet", which is the distinction prefill reads.
 
 - **Pick your playlists and jump to any track, from inside the focus timer
   (#181).** The mini-player gains one expandable panel, collapsed by default and
@@ -458,6 +535,32 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **`README.md` and this file caught up with what is on `main`.** The README gave
+  `docker compose up -d db` twice in "Database & migrations". There is no compose file
+  at the repo root, only `docker/`, so the bare form exits 1 with *"no configuration
+  file provided: not found"* — while the Troubleshooting table two sections below
+  already gave the `-f docker/docker-compose.yml` form. A document that disagrees with
+  itself is the cheapest kind of defect to find and the most expensive to leave, so
+  the reason is now stated once where the commands are rather than only in the row
+  that catches the failure.
+
+  Three shipped features were missing from the status table, which calls itself "what
+  works today" and is promised further down as the reason you are never chasing
+  something that is not wired up yet: notes on a to-do and on a step (#44) with the
+  inline capture syntax (#179), the shopping list (#199), and the name in the header
+  with its timer and trolley shortcuts (#252). **The shopping row says it is off by
+  default and names the switch**, because a flat "works" overstates a feature nobody
+  meets until they find Settings. The accessibility section described a single spec
+  where `e2e/a11y/` now holds eight; its WCAG tags are unchanged and still 2.0/2.1
+  A+AA. The table of contents had lost two of its own sections, and the stack list
+  omitted Base UI, which seven components import.
+
+  In this file, `[Unreleased]` had grown a **second `### Fixed`** below
+  `### Security`, which made the entry it held invisible to anyone reading the section
+  it belongs to, and six shipped changes had no entry at all (#251, #253, #186 with
+  #179, #233, #244, #245). Each was written up from its own merge request rather than
+  from its title.
+
 - **The footer's Privacy, Terms and Source links now open in a new tab (#200).**
   That footer sits under every screen, the inbox included, and the old
   behaviour took you away from the page you were on. The reasoning written
@@ -571,6 +674,62 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Completing the same to-do from two places at once no longer pays for it twice
+  (#233).** Both payouts were guarded by a read taken before the write, so two
+  simultaneous completions of one to-do both saw it as not yet complete, both passed
+  the guard, and both paid out — the item completed once and was paid for twice.
+
+  **The harm was never the points.** The ten-steps-in-a-day badge counts today's
+  `step_done` rows and awards at ten, so a double-completed **five**-step to-do wrote
+  ten rows for five real steps and earned that badge unearned. Badges are never
+  revoked, so unlike the points that one was permanent. Production already holds a
+  seven-step task, which makes a to-do of that size ordinary rather than a corner. The
+  inflated total also leaves the app: it feeds the narrative and goes out in the daily
+  round-up email.
+
+  **The write is now the guard**, carrying the completion as a precondition, with
+  every payout gated on whether that write actually changed anything. Postgres
+  re-evaluates a blocked update's condition against the committed version, so the
+  loser matches nothing, banks nothing, and raises nothing at somebody whose other tab
+  finished first. Reaching this needs two tabs served by different replicas, which no
+  in-process guard can span — that is why it is a database-level change and not a UI
+  one. The item write goes first in the transaction, taking the same lock order four
+  neighbouring writers already take, because inverting it in one writer is how a
+  deadlock gets built. The three local writes became one transaction as well, so a
+  to-do can no longer be left completed with its task still active.
+
+- **Scheduling a single-task to-do no longer makes a second copy of it (#244).**
+  Creating the task and linking the item to it were atomic with each other, but the
+  decision that got them there was not: the check for an existing task came from a
+  plain read taken **before any lock existed**, and a plain read does not wait on a
+  row lock — it returns the last committed version. A caller whose read landed before
+  a concurrent winner committed therefore entered the create branch and repointed the
+  item at its own brand-new task the moment the block cleared. Two task rows: the item
+  pointed at the loser's, while the winner's was reachable from no inbox row and the
+  focus page, the calendar feed and the data export all still counted it.
+
+  The precondition moved into the write. **Measured on real Postgres before the fix —
+  two rows where one is required** — with the interleaving arranged rather than hoped
+  for: the winner is held mid-transaction and released only once the other caller has
+  demonstrably blocked on its row lock, observed on the holder's own backend rather
+  than through a database-wide count another suite could satisfy.
+
+- **Double-pressing ▶ Focus no longer makes a duplicate step (#245).** On this path
+  the to-do already has its task, so the duplicate-task guard is skipped and the
+  transaction takes **no lock at all**: both callers read an empty step list from
+  their own snapshot and both insert. **No application-level precondition can close
+  that.** An update's condition can carry one; an insert's cannot, and there is no row
+  to lock because the whole question is whether a row should exist. Only something at
+  the table grain can decide which insert wins, so `(taskId, order)` is now unique and
+  the conflict is one Postgres resolves rather than one the app races.
+
+  A caught duplicate-key error would not have been a quiet alternative: the client
+  logs it before any handler runs, which is the defect that once got escalated as an
+  incident. An insert that does nothing on conflict raises nothing at all, so a lost
+  race is genuinely a no-op. Reproduced first and watched failing — again two rows
+  where one is required — with the caller parked between its check and its act while
+  the competing step is committed underneath it.
+
 - **The shopping list stops asking you to retry something it has taken the button
   away for, and says out loud that it is retrying (#246, #236).** Two small things
   in the notice that appears when a change to your list does not save. If the
@@ -594,6 +753,15 @@ operators upgrading a self-hosted instance don't get surprised.
   agrees with the button it is shown beside, and that the wait is announced rather
   than merely displayed. Four surfaces grew this notice separately and each of them
   had drifted; this is the check that stops a fifth.
+
+- **Your data export was missing a table (#199, found while adding one).** Custom
+  focus playlists (#185) were absent from `export.json` — the export names every
+  table by hand and nothing failed when one was left out, so the whole test suite
+  stayed green while the archive quietly held less than the app did. The export now
+  derives its obligations from the schema: a model that carries user data and is
+  not read by the export fails the build. Nobody had a playlist to lose yet, since
+  the feature has no save path on `main`, but the class of bug is closed rather
+  than the instance.
 
 - **"Back to inbox" in the step editor can no longer lose a step (#212).** The
   control takes one step out of the plan you are editing and puts it in your
@@ -1059,17 +1227,6 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
-
-### Fixed
-
-- **Your data export was missing a table (#199, found while adding one).** Custom
-  focus playlists (#185) were absent from `export.json` — the export names every
-  table by hand and nothing failed when one was left out, so the whole test suite
-  stayed green while the archive quietly held less than the app did. The export now
-  derives its obligations from the schema: a model that carries user data and is
-  not read by the export fails the build. Nobody had a playlist to lose yet, since
-  the feature has no save path on `main`, but the class of bug is closed rather
-  than the instance.
 
 ## [0.5.0] - 2026-08-01
 
