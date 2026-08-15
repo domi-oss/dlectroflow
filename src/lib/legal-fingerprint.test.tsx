@@ -231,7 +231,36 @@ const PUBLISHED = {
   // A page this long is its own consistency surface, and a recipient named in one
   // section falsifies an "only you" written in another. Nothing was published
   // under the earlier hashes, so the date stays 2026-08-15 for all four.
-  privacy: "29026594108298d800d061d5a61dbc658f8532f911654da7d1af4af27d4dee01",
+  //
+  // SEVENTH re-record, and the only one in this branch where the CODE moved rather
+  // than the prose. The export now includes the four account records the page had
+  // been describing as withheld — the `Allowlist` invitation row with its private
+  // note, the `UserAiUsage` count, the `CalendarFeed` timestamps and six columns of
+  // `User` — so the F6 paragraph was rewritten to describe the new behaviour.
+  //
+  // The instructive part is which way round the defect was. **The page was
+  // accurate and the code was wrong.** Every other finding in this sweep is a page
+  // claiming something the code does not do; this one is a page honestly
+  // disclosing a gap, where closing the gap was the better answer than describing
+  // it more precisely. An invitation note is free text somebody else wrote about
+  // the reader, and "ask and I will send it by hand" is a worse discharge of
+  // Art. 15 than putting it in the file they already downloaded.
+  //
+  // So the lesson for the next sweep is that "does the page match the code?" is
+  // only half the question. The other half is "and is the behaviour the page
+  // accurately describes the RIGHT behaviour?" — which no amount of
+  // page-versus-code checking can raise, because that check passes.
+  //
+  // Substance in both directions at once, which is why it would move the date on
+  // its own: a widened scope for a right the reader exercises, AND the withdrawal
+  // of a published statement that things were deliberately left out. The date
+  // stays 2026-08-15 on the same reasoning as the six re-records above — nothing
+  // has been published under any of these hashes, because this branch has not
+  // merged.
+  //
+  // `terms` is untouched again, which is what makes the two documents' hashes
+  // independent evidence rather than two copies of one claim.
+  privacy: "cbbf81ff91e56f369e6c5c669a3a26b488b981dfda590696a5f36b8b3e2dfeee",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",

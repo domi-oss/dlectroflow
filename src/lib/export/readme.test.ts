@@ -51,9 +51,15 @@ describe("README.md — the file that explains the archive", () => {
     // called one because the whole row was absent.
     expect(readme.toLowerCase()).toMatch(/oauth token/); // GoogleAuth
     expect(readme.toLowerCase()).toMatch(/api key/); // User.llmKeyEnc
-    expect(readme.toLowerCase()).toMatch(
-      /feed'?s? (own )?(secret )?(address|url|token)|token in your calendar/,
-    ); // CalendarFeed.token
+    // CalendarFeed.token. The row IS exported now, so the archive has to account
+    // for its one missing column instead of the reader finding a feed record with
+    // an unexplained hole in it.
+    expect(readme.toLowerCase()).toContain(
+      "address of your calendar subscription feed",
+    );
+    // And where to get it — the claim that nothing is lost holds only because the
+    // live URL is one click away.
+    expect(readme).toContain("Settings → Calendar");
 
     // And the four records must be positively described as present, or "not in
     // this archive" could simply have gone quiet about them — which is the

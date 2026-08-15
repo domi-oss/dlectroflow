@@ -1304,25 +1304,49 @@ export default function PrivacyPage() {
             thing to publish at the time and would be a false statement now. The
             omission is named here as well as in the archive's own README: a
             reader who never opens the zip must not assume their Google
-            connection travelled with it. */}
+            connection travelled with it.
+
+            Rewritten again when the export grew to include the four account
+            records it had been describing as withheld. The previous version was
+            accurate and is now false, and the direction of that change matters:
+            it said "some things are deliberately left out" and listed the
+            invitation record, the AI usage count, the calendar feed timestamps
+            and four account flags as bookkeeping available on request. All of
+            them are in the download. Keeping the caveat would have been the
+            worse failure of the two — a page understating what it gives you
+            teaches readers not to bother asking. */}
         <p>
           <strong>Access and portability you can do yourself.</strong>{" "}
           <strong>Settings → Account → Export your data</strong> downloads
           everything this app holds about your account, in formats that open
-          with no special software. Some things are deliberately left out.{" "}
-          <strong>Two are credentials</strong>: the OAuth tokens for your Google
-          connection, and any LLM API key you have stored — putting a copy of
-          either in a file you might forward to somebody would be the opposite
-          of protecting your data.{" "}
-          <strong>The rest is account bookkeeping</strong> rather than content:
-          your invitation record and any note whoever invited you wrote on it,
-          your AI usage count, the timestamps on your calendar feed, the
-          internal flags saying whether your account is active or revoked, when
-          it was last seen and when access was withdrawn if it ever was, and the
-          account id GitLab issued for you — as distinct from your username and
-          the provider&rsquo;s name, both of which the export does include. Ask
-          at <ContactLink /> and I will send any of it by hand — the invitation
-          note included, since it is about you.
+          with no special software. That includes the records kept{" "}
+          <em>about</em> your account rather than typed into it: your invitation
+          record and any private note whoever invited you wrote on it, your AI
+          usage count, when your calendar feed was created and last regenerated,
+          whether the account is active or revoked, when it was last seen, when
+          access was withdrawn if it ever was, and the account id GitLab issued
+          for you. The invitation note is in there because it is about you, and
+          you should not have to ask me for it.
+        </p>
+        {/* Named as KEYS rather than as "credentials", deliberately. The word
+            credential is precise and does no work for a reader deciding whether
+            they have been shortchanged; "these three would let someone else in"
+            explains the whole exclusion in one clause. The feed address is the
+            newest of the three and the only one stored in plain text, which is
+            why it is now stated rather than left as an unexplained absence — the
+            row it sits on is exported, so its one missing column has to be
+            accounted for. */}
+        <p>
+          <strong>Three things are held back, and all three are keys.</strong>{" "}
+          The OAuth tokens for your Google connection, any LLM API key you have
+          stored, and the secret address of your calendar feed. Putting a copy
+          of any of them in a file you might forward to somebody would be the
+          opposite of protecting your data, and none of them is a record of
+          anything — so the download loses nothing by leaving them out. Your
+          feed address is in <strong>Settings → Calendar</strong> whenever you
+          want it, and reconnecting Google or re-entering a key takes seconds.{" "}
+          <strong>Nothing else is held back.</strong> If you think something is
+          missing, ask at <ContactLink />.
         </p>
         {/* #153 — erasure came off that list, so this paragraph had to stop
             saying it was on it. The caveat is not a hedge: the control freezes

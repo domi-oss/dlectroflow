@@ -100,6 +100,28 @@ export const SOURCE_REPO_URL =
  *      while never being disclosed as stored — the page describing a thing it
  *      had not admitted to holding.
  *
+ * A FIFTH substantive change shares this date, and it is the only one in the sweep
+ * that changes what the app DOES rather than what the page says about it. The
+ * export now includes the four account records /privacy had been describing as
+ * withheld: the `Allowlist` invitation row — its private note included — the
+ * `UserAiUsage` count, the `CalendarFeed` timestamps, and six columns of `User`.
+ *
+ * The page was ACCURATE about the omission; the export was the thing that was
+ * wrong. Given the choice between disclosing the gap more precisely and closing
+ * it, the owner chose to close it, because the invitation note is free text
+ * somebody else wrote about the reader and answering an Art. 15 request for it
+ * "on request, by hand" is a worse discharge of the right than putting it in the
+ * file. So the copy and the code moved in the same commit and the page now
+ * describes the new behaviour.
+ *
+ * It moves this date on its own twice over: a widened scope for a right the reader
+ * exercises (Art. 15/20, reassuring direction) AND the withdrawal of a published
+ * statement that things were deliberately left out (un-reassuring direction, the
+ * one that must never ship quietly). What is now published is the narrower and
+ * checkable claim — the only things held back are three KEYS, the third being the
+ * calendar feed's address, which had never been named as one because the whole row
+ * used to be absent.
+ *
  * Also corrected, and worth its own line because the temptation is to drop the
  * subject entirely: "nothing infers anything about your health, your mind, or how
  * you are doing" was overstated, because `DayRollup.narrative` is an LLM-written,

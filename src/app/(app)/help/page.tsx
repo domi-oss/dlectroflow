@@ -288,9 +288,13 @@ export default async function HelpPage({
           scheduled work as a calendar file. The same data is written several
           ways so you are not stuck with one tool — a Markdown file you can read
           anywhere, CSVs for a spreadsheet, and a complete JSON copy. A README
-          inside explains each file. Two things are deliberately left out: your{" "}
-          <strong>Google connection</strong> and any <strong>API key</strong>{" "}
-          you have stored are never exported.
+          inside explains each file. Three things are left out, and all three
+          are keys rather than records: your <strong>Google connection</strong>,
+          any <strong>API key</strong> you have stored, and the secret address
+          of your <strong>calendar feed</strong> — which you can copy any time
+          from <strong>Settings → Calendar</strong>. Everything else this app
+          holds about your account is in the download, the private note whoever
+          invited you wrote on your invitation included.
         </p>
         <p className="text-sm">
           <strong>Delete your account.</strong>{" "}

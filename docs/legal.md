@@ -246,11 +246,41 @@ asserts each honest wording is still present.
 > *Delete my account*, `deleteOwnAccount` in `src/app/actions/account.ts`) and #129
 > made access and portability one (`GET /api/export`). /privacy names both.
 >
-> The export's caveat is what it withholds: the Google OAuth tokens and any stored
-> LLM API key. Both are credentials, both are named on /privacy AND in the
-> archive's own `README.md` (`src/lib/export/readme.ts`), and those two wordings
-> move together — `readme.test.ts` asserts the archive states the Google omission,
-> and `page.test.tsx` asserts /privacy does.
+> The export's caveat is what it withholds, and as of the legal-accuracy sweep it
+> is **three keys and nothing else**: the Google OAuth tokens, any stored LLM API
+> key, and the calendar feed's capability token. All three are named on /privacy,
+> in the archive's own `README.md` (`src/lib/export/readme.ts`) and on the in-app
+> Help page — **three wordings that move together**, and `readme.test.ts` plus
+> `page.test.tsx` assert two of them per surface: that the keys are named, and that
+> the account records are described as INCLUDED.
+>
+> **The list used to be longer, and the correction is the instructive part.** Until
+> that sweep the pages named the two credentials *and* four kinds of "account
+> bookkeeping" held but not exported — the `Allowlist` invitation row including the
+> private note whoever invited you wrote on it, the `UserAiUsage` count, the
+> `CalendarFeed` timestamps, and four columns of `User`. The pages were accurate.
+> The export was the thing that was wrong, and the decision was to fix the export
+> rather than keep disclosing the gap, because an invitation note is somebody
+> else's words about the reader and offering it "on request" is a worse answer than
+> putting it in the file.
+>
+> **`CalendarFeed` is the one to read before editing any of this.** Its ROW is
+> exported and its `token` COLUMN is not, so the credential rule is applied at two
+> different grains and the three wordings have to keep that straight: a reader who
+> finds feed timestamps in their archive and no address must be told why, or the
+> hole reads as an oversight. It is also the only one of the three keys stored in
+> plain text (see the note on the model in `prisma/schema.prisma`), so it is the
+> one where "a copy in a file you forward" is immediately usable.
+>
+> **Why the export could omit three whole tables with a guard in place.**
+> `src/lib/export/__tests__/model-coverage.test.ts` exists to fail when the export
+> forgets a model, and it could not see any of them: its predicate was `declares
+> workspaceId`, and all three hang off `User`. It now has a second arm for models
+> with a relation to `User`. Two consequences worth knowing before touching it —
+> the arm is a RELATION and not a `userId` column, because `Allowlist` links
+> through `claimedById`; and `CalendarFeed`/`UserAiUsage` are read through the
+> modules `scoping.harness.test.ts` pins rather than by `collect.ts`, because those
+> two guards otherwise give contradictory orders about the same string.
 >
 > What it does **not** do is destroy anything. It goes through the same
 > `freezeAccount` the owner's Revoke goes through, so the automatic-purge row

@@ -500,15 +500,17 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     // is what made its token an explicit decision rather than an absence.
     expect(text).toMatch(/OAuth tokens/i); // GoogleAuth
     expect(text).toMatch(/API key/i); // User.llmKeyEnc
-    expect(text).toMatch(
-      /calendar feed'?s? (own )?(secret )?(address|url|token)/i,
-    ); // CalendarFeed.token
+    // CalendarFeed.token. The row IS exported, so its one withheld column has to
+    // be accounted for on the page rather than left as an unexplained absence —
+    // and it is the only one of the three stored in plain text.
+    expect(text).toMatch(/secret address of your calendar feed/i);
+    // Where to get it, since the page tells the reader they lose nothing by its
+    // absence. That claim is only true because the live URL is one click away.
+    expect(text).toMatch(/Settings → Calendar/);
     expect(
       text,
-      "the page must say credentials are the exclusion, not one of several",
-    ).toMatch(
-      /only things|only exclusion|nothing else is held back|that is the whole list/i,
-    );
+      "the page must say the three keys are the WHOLE exclusion, not some of it",
+    ).toMatch(/Nothing else is held back/i);
 
     // Each of the four, positively described as included. Same axis as before.
     expect(text).toMatch(/invitation record/i); // Allowlist
