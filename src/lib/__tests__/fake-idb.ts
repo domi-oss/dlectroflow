@@ -62,6 +62,15 @@ export type FakeIdb = {
   rows(store: string): Row[];
   /** How many transactions have been opened, so a caller can count round trips. */
   transactions: number;
+  /**
+   * How many **whole-store** scans have been made.
+   *
+   * A `getAll` costs the size of the store where a keyed `get` costs one row, and
+   * on a service worker's battery-sensitive path that difference is the thing
+   * worth asserting. Counting it is the only way to tell a per-pass scan from a
+   * per-entry one, since both open the same number of transactions.
+   */
+  scans: number;
 };
 
 /**
@@ -81,7 +90,7 @@ export function fakeIdbFactory(
   options: FakeOptions = {},
 ): IDBFactory & FakeIdb {
   const stores = new Map<string, { keyPath: string; rows: Map<string, Row> }>();
-  const state = { transactions: 0 };
+  const state = { transactions: 0, scans: 0 };
 
   type Store = { keyPath: string; rows: Map<string, Row> };
 
@@ -130,10 +139,20 @@ export function fakeIdbFactory(
         settle(() => (request.onsuccess as (() => void) | undefined)?.());
         return request;
       },
+      /** One row by key, which is what a keyed lookup should cost. */
+      get(key: string) {
+        const request = { result: store.rows.get(String(key)) } as Record<
+          string,
+          unknown
+        >;
+        settle(() => (request.onsuccess as (() => void) | undefined)?.());
+        return request;
+      },
       getAll() {
         // Committed rows. The mirror never reads and writes in one transaction,
         // so reading through an uncommitted overlay would be untested machinery
         // standing in for a case that does not arise.
+        state.scans += 1;
         const request = { result: [...store.rows.values()] } as Record<
           string,
           unknown
@@ -217,6 +236,9 @@ export function fakeIdbFactory(
     },
     get transactions() {
       return state.transactions;
+    },
+    get scans() {
+      return state.scans;
     },
   };
 

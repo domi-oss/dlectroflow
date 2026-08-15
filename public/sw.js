@@ -147,6 +147,37 @@ function readMirror(db) {
 }
 
 /**
+ * One validated row by key. `null` for absent, invalid, or any failure.
+ *
+ * ⚠️ **Keyed rather than a `getAll` filtered down**, and on this path that is a
+ * real cost rather than a style preference: the drain loop re-reads per entry, so
+ * a whole-store scan each time is up to `CAPTURE_QUEUE_MAX_ITEMS` scans of as much
+ * as 64 KB per `sync` — on a battery-sensitive background task. Duo review round 7
+ * on `!348` measured the shape; `fake-idb`'s `scans` counter pins it.
+ *
+ * Validated for the same reason `readMirror` validates: the mirror is writable by
+ * anything on the origin and this worker `POST`s what it finds, so one row read by
+ * key is no more trustworthy than the whole store.
+ */
+function readMirrorEntry(db, key) {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(MIRROR_STORE, "readonly");
+      const request = tx.objectStore(MIRROR_STORE).get(key);
+      request.onsuccess = () => {
+        const row = request.result;
+        resolve(isCapture(row) ? row : null);
+      };
+      request.onerror = () => resolve(null);
+      tx.onerror = () => resolve(null);
+      tx.onabort = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
  * One write transaction. Resolves on `oncomplete`, not on the request.
  *
  * A `put` calls back as soon as the value is accepted and the transaction can
@@ -288,7 +319,7 @@ async function drainMirror() {
   // imports nothing — so the rule is carried by tests on both sides and this note,
   // the same arrangement `flushOne`'s terminal-mark conjunction uses.
   for (const key of keys) {
-    const entry = (await readMirror(db)).find((row) => row.clientKey === key);
+    const entry = await readMirrorEntry(db, key);
     // Discarded or already flushed while this pass was mid-flight. Not counted as
     // retryable: there is nothing left to come back for.
     if (!entry) continue;

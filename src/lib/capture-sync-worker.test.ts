@@ -519,6 +519,32 @@ describe("sw.js — a pass acts on live state, not its snapshot (#175)", () => {
     expect(posted(harness)).toEqual(["a"]);
   });
 
+  /**
+   * The re-read must not be paid for with a whole-store scan per entry.
+   *
+   * Duo review round 7 on `!348`: the first version of the fix above called
+   * `readMirror` — a full `getAll` — once per row, so a 20-entry queue cost 20
+   * scans of as much as 64 KB on a **battery-sensitive** background task. The
+   * correctness of the re-read and its cost are separate questions and this pins
+   * the second, because both versions open the same number of transactions and
+   * nothing else could tell them apart.
+   */
+  it("re-reads by KEY, scanning the whole store once per pass", async () => {
+    const harness = await loadWorker(() => reply(201));
+    seedMirror(harness, [
+      entry({ clientKey: "a" }),
+      entry({ clientKey: "b" }),
+      entry({ clientKey: "c" }),
+    ]);
+
+    await harness.fireSync();
+
+    // All three sent, so the pass genuinely walked them…
+    expect(harness.fetchMock).toHaveBeenCalledTimes(3);
+    // …and exactly one whole-store scan paid for it: the initial key list.
+    expect(harness.idb.scans).toBe(1);
+  });
+
   it("does reach the second row when nothing removed it", async () => {
     // The non-vacuous control. "`b` was not POSTed" would also be satisfied by a
     // pass that died after its first entry — which is the head-of-line failure
