@@ -415,7 +415,19 @@ Workspace user data held in the app that *could* be forwarded to a model.
 numeric, enum, boolean and date, and never selects `Step.text` or
 `BrainDumpItem.text`. It does select one free-text column — `Task.notes`, for the
 single task being broken down (#179) — which is text the person typed **here**,
-not anything read from Google. The Limited Use conclusion above is unaffected: it
+not anything read from Google.
+
+⚠️ **Do not read that column list as a list of what is SENT.** They are different
+sets and conflating them has already produced one review finding. The `select`
+reads several **date** columns (`createdAt`, `freshenedAt`, `snoozedUntil`,
+`completedAt`, `breakdownRequestedAt`, `Streak.lastActiveWorkday`); none of them
+reaches the prompt. `BreakdownContext` is the egress contract, and it carries
+counts, one enum, one boolean and the note — the dates are reduced to
+`activeToday` and to bucket counts inside the gather, and `buildContextBlock`
+renders no date at all. That is why /privacy can say **"no dates"** under *What is
+not sent* while this paragraph lists date columns: the page describes egress, this
+paragraph describes the query. If you widen `BreakdownContext`, the page's claim
+is what moves — the `select` is the wrong thing to check it against. The Limited Use conclusion above is unaffected: it
 rests on there being no Google data held in the app to forward, and one read of
 task-**list** names is still the only read the integration makes.
 

@@ -106,11 +106,19 @@ export const SOURCE_REPO_URL =
  * STORED, second-person text about the reader's day.
  *
  * Precisely what happened to it, since this file exists to be precise and an
- * earlier draft of this very paragraph described its own edit wrongly: the
+ * earlier draft of this very paragraph described its own edit wrongly TWICE: the
  * ABSOLUTE clause was removed and replaced with a NARROWER one — "nothing here
- * asks you how you are or records why you use it" — and the roll-up exception was
- * then stated as new prose. That is a rewrite plus an addition, not the original
- * sentence "gaining an exception". What was kept rather than deleted is the
+ * asks you how you are" — and the roll-up exception was then stated as new prose.
+ * That is a rewrite plus an addition, not the original sentence "gaining an
+ * exception".
+ *
+ * The second wrong description was this quote itself, which carried the draft's
+ * "...or records why you use it" suffix after review had removed it from the page
+ * as a repeat of the bold lead-in. A docblock quoting text the page no longer
+ * renders is the same defect one layer up, and it is the reason to quote sparingly
+ * and check the quote against the render rather than against the previous draft.
+ *
+ * What was kept rather than deleted is the
  * SUBJECT: the paragraph still makes an affirmative claim about health data
  * instead of going silent, because the verified part is worth stating — no health,
  * mood, energy, sleep, medication or symptom column exists in any model, and there
