@@ -55,15 +55,38 @@
 -- make a PRE-coverage run look longer or make an extra pre-coverage day appear,
 -- both of which keep a badge.
 --
--- ── Idempotent, and provably so ────────────────────────────────────────────
+-- ── Idempotent, and what each guard actually checks (raised in review) ─────
 --
--- Each statement is guarded on the ledger being empty, so a second run is a
--- no-op. That guard is sound rather than optimistic because Prisma wraps every
--- migration file in one transaction: a failure part-way rolls back both inserts,
--- leaving the table empty again, so "empty" cannot mean "half done". The
--- `ledgerFrom` write is scoped to rows still carrying the previous migration's
--- default instant, so a re-run cannot push a workspace's coverage boundary
--- forward and un-trust runs that had become trustworthy.
+-- A second run writes nothing. That is sound rather than optimistic because
+-- Prisma wraps every migration file in one transaction: a failure part-way rolls
+-- back both inserts, leaving the table empty again, so "empty" cannot mean "half
+-- done". The `ledgerFrom` write is scoped to rows still carrying the previous
+-- migration's default instant, so a re-run cannot push a workspace's coverage
+-- boundary forward and un-trust runs that had become trustworthy.
+--
+-- The two inserts are NOT guarded on the same condition, and the difference is
+-- forced rather than an oversight. Statement 1 checks that the ledger is empty.
+-- Statement 2 CANNOT: it runs after statement 1 in the same transaction, so it
+-- sees statement 1's own capture rows, and a
+-- `NOT EXISTS (SELECT 1 FROM "EngagementDay")` guard there would skip itself on
+-- any database holding a single "BrainDumpItem" — silently writing none of the
+-- reward days. That is measured rather than predicted: making exactly that
+-- change reds `backfills the engagement ledger …` in
+-- src/lib/migration-data-harness.integration.test.ts with all three reward kinds
+-- absent, which is #180's failure shape in one line — an `INSERT … SELECT` that
+-- writes nothing and reports success. So statement 2 is guarded on the absence
+-- of its OWN output instead (`kind <> 'capture'`).
+--
+-- The residual that wording hid, and its direction: statement 2's guard does not
+-- latch for a workspace whose ledger only ever holds capture rows, so a MANUAL
+-- re-run of this file (`psql -f`, outside Prisma's tracking, which never re-runs
+-- an applied migration) would re-execute it there. What that can do is
+-- re-create a permanent unattributed credit for a day whose attributed row had
+-- since been cascaded away by an item delete — so it can only ever KEEP a badge,
+-- never revoke one, the direction this file argues for being wrong in
+-- throughout. It cannot double-count either: the recompute reads a SET of days
+-- (`engagementDays` in src/lib/engagement-ledger.ts), so a second row for a day
+-- that already counts changes no answer.
 --
 -- Exercised against SEEDED rows by src/lib/migration-data-harness.integration.test.ts
 -- — an empty-table run of this file proves only that it parses, which is #180 in

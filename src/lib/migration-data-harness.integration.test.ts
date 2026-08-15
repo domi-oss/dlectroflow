@@ -583,6 +583,16 @@ describe("the migrations applied to a database that already holds rows (#190)", 
       // `inbox_zero`, `scheduled` and `session_finished` all landed on it, and
       // none of them advances the streak. A backfill that copied every reward
       // type would credit a day the app never counted.
+      //
+      // The three reward-kind rows below are also what pins the SHAPE of the
+      // backfill's second re-run guard, which is not obvious from reading it and
+      // was proposed for "tightening" in review on !352. Statement 2 is guarded
+      // on `kind <> 'capture'` rather than on the ledger being empty because it
+      // runs after statement 1 in the same transaction and therefore sees
+      // statement 1's capture rows. Changing it to
+      // `NOT EXISTS (SELECT 1 FROM "EngagementDay")` makes all three vanish —
+      // measured, and the reason this assertion lists kinds rather than counting
+      // them.
       expect(await daysOf("seed-ledger-ws-a")).toEqual([
         ["2026-08-01", "capture", null],
         ["2026-08-01", "step_done", null],

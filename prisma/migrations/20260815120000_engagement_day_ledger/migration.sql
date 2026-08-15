@@ -48,9 +48,30 @@
 --     20260811120000_step_task_order_unique. A plain `CREATE INDEX` on a table
 --     created two statements earlier locks nothing that exists.
 --
--- Re-running this file is a no-op that cannot fail halfway: every statement is
--- `IF NOT EXISTS`-guarded or creates something new, and Prisma's per-file
--- transaction means a failure leaves nothing behind.
+-- ── What "safe to re-run" does and does not mean here (raised in review) ───
+--
+-- Re-running this file after a FAILED apply is a clean start, and that is the
+-- whole of the guarantee #180 needs: Prisma wraps every migration file in one
+-- transaction, so a failure leaves NOTHING behind and the recovery is to fix the
+-- file and run it again, never to reason about a half-applied schema.
+--
+-- Re-running it after a SUCCESSFUL apply is a different thing, and this file
+-- deliberately does not survive it. Three statements are not idempotent and
+-- cannot be made so in place: PostgreSQL has no `ADD CONSTRAINT IF NOT EXISTS`
+-- — it is a syntax error (42601), unlike `CREATE TABLE`, `CREATE INDEX` and
+-- `ADD COLUMN`, which do have the form and which this file uses above — so the
+-- two foreign keys and `EngagementDay_kind_check` below each abort with 42710
+-- `duplicate_object` once they exist. Both codes are measured against this
+-- schema rather than assumed.
+--
+-- That is the behaviour to want rather than a gap to close, which is why the
+-- obvious guard was rejected: wrapping each in
+-- `DO $$ … EXCEPTION WHEN duplicate_object THEN NULL; END $$;` would also
+-- swallow the case where the constraint already exists with a DIFFERENT
+-- definition, reporting success while leaving the wrong one in place. A re-run
+-- that cannot tell "already correct" from "already wrong" is worse than one
+-- that stops, and `_prisma_migrations` — not this file — is what records that a
+-- migration is already applied.
 
 -- CreateTable
 CREATE TABLE IF NOT EXISTS "EngagementDay" (
