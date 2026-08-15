@@ -246,15 +246,23 @@ export type DiscardOutcome =
  *
  * ⚠️ **Its own member rather than a re-use of the `EnqueueRefusal` that caused
  * it, because every one of those sentences ends *"your words are still in the
- * box"* — and here they are not.** The field was cleared at submit, the strip has
- * stopped listing the entry, and there is nothing left to shorten or retry. A
- * refusal reason the user cannot act on, attached to an action they did not take,
- * is worse than no sentence at all; this one names the loss.
+ * box"* — and here they are not.** The field was cleared at submit and the strip
+ * has stopped listing the entry, so there is nothing on screen left to shorten,
+ * copy or re-submit. A refusal reason the user cannot act on, attached to an
+ * action they did not take, is worse than no sentence at all; this one names the
+ * loss instead.
  *
- * It carries no reason for the same argument. `max-items`, `no-room` and
- * `storage-unavailable` are all reachable here and the remedy is identical for
- * all three, because the words are not held anywhere the user could recover them
- * from. See `CAPTURE_REFUSAL_COPY` in `inbox-view.tsx` for the sentence.
+ * **To be exact about the retry, since the two halves read as contradictory
+ * otherwise:** the handler leaves the entry in `awaiting`, so the *recovery*
+ * retries itself on the next `storage` event and may well succeed. What does not
+ * exist is anything the **user** can do to help it, or any guarantee another such
+ * event arrives — so the sentence reports the loss and asks for the words again,
+ * rather than offering a wait it cannot promise.
+ *
+ * It also carries no cause, for the same reason it is not an `EnqueueRefusal`:
+ * `max-items`, `no-room` and `storage-unavailable` are all reachable here and the
+ * remedy is identical for all three, because the words are not held anywhere the
+ * user could recover them from. See `CAPTURE_REFUSAL_COPY` in `inbox-view.tsx`.
  */
 export type CaptureRecoveryFailure = "recovery-failed";
 
