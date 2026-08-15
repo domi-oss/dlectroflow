@@ -145,6 +145,28 @@ SELECT gen_random_uuid()::text,
 -- for runs that BEGIN after that point — a delay on a feature about multi-day
 -- streaks, in exchange for never revoking on a day the ledger only partly saw.
 --
+-- ⚠️ That slack reaches only the rows that EXIST when this statement runs, and
+-- the sentence above is worth reading narrowly for it (raised in review on
+-- !352). A "Streak" row created LATER takes the column's own
+-- `DEFAULT CURRENT_TIMESTAMP` from the previous migration — the creation instant,
+-- no slack — and for a row created by a pod running THIS code that is already
+-- right: `touchStreakOnEngagement` writes the ledger row in the same call, so
+-- coverage genuinely does begin then, which is what the previous migration's
+-- `ledgerFrom` note argues.
+--
+-- The residual is one window. A workspace whose FIRST-EVER engagement is served
+-- by an OUTGOING pod mid-rollout has its "Streak" row created by code that
+-- writes no ledger row — this column is additive, so an older client keeps
+-- working — leaving `ledgerFrom` claiming coverage from an instant the ledger
+-- did not yet cover, and a run that begins the next day then reads one day
+-- short. Measured on a seeded schema: the pre-existing rows move to the
+-- boundary, while a row inserted afterwards reads `now()`.
+--
+-- Not closable from here, which is why it is stated rather than argued away: a
+-- column default cannot know whether its writer is old code, and the value this
+-- statement exists to write is a function of the execution instant. It expires
+-- when the rollout finishes, unlike the working-week limit recorded on #233.
+--
 -- ⚠️ This statement is NOT idempotent across days, and it is the one statement in
 -- this file that is not. Said plainly because the earlier wording claimed the
 -- opposite, and because the way that claim survived measurement is the reusable
