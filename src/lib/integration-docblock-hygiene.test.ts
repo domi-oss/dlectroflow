@@ -144,6 +144,22 @@ describe("integration-test docblock hygiene (#256)", () => {
       ).toBe(false);
     });
 
+    // A line often carries more than one code span, and then the exemption
+    // depends on the regex finding the span that holds the recipe rather than
+    // the first span on the line. That it backtracks to do so is not obvious
+    // from reading the pattern, so it is pinned rather than assumed — the
+    // first of these is an entirely ordinary sentence to write.
+    it.each([
+      [" * Unlike `npm test`, do NOT run `set -a; . ./.env; set +a`.", false],
+      [" * `npm test` is enough; never use `set -a; . ./.env; set +a`.", false],
+      [" * `set -a; . ./.env; set +a` — do not.", false],
+      // An earlier code span must not lend its quoting to a bare command
+      // later on the line.
+      [" * See `config/vitest.config.ts`. Run: set -a; . ./.env; set +a", true],
+    ])("handles multiple code spans on one line: %j", (line, expected) => {
+      expect(prescribesEnvSourcing(line)).toBe(expected);
+    });
+
     it("requires the disavowal on the same line as the recipe", () => {
       // Recorded rather than left to be discovered: this is the one shape a
       // reader could reasonably write and still fail. The sweep's failure
