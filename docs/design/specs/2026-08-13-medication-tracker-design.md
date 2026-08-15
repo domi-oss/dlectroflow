@@ -71,7 +71,7 @@ standing on. **Every row where the re-read corrected what the brainstorm asserte
 | `Settings.focusTimerStyle String?` is precedent for nullable-inherits | **Confirmed**, `prisma/schema.prisma:173`. The block comment above it (`:169–172`) says `(nullable → resolve by voice)`; the inline comment says `(null → voice default)`. Both phrasings are in the file |
 | Nullable-inherits is a repo convention, not a one-off | **Confirmed, on two fields.** `Settings.focusTimerStyle String?` above, and `Settings.breakdownModel String?` — `// null = env/default` (`:153`). ⚠️ Both are *delegation*: null means "ask somewhere else", not "unset". Do **not** cite `Task.schedulePriority` or `Settings.demoOverrideSeconds` as precedent — those are nullable because the value is genuinely optional, which is a different meaning wearing the same type |
 | Pseudo-enum columns get a CHECK constraint mirrored in `src/lib/constants.ts` | **Confirmed as the dominant rule — 21 columns carry one** (the enum `REGISTRY`'s size). Naming rule stated in the doctrine migration: `"<Table>_<column>_check"`. ⚠️ **It is not unanimous, and the exception matters here**: `Settings.voice` (`plain \| playful`) and `Settings.breakdownModel` are pseudo-enums with **no** CHECK — verified, zero hits for `Settings_voice_check` and `Settings_breakdownModel_check`. So the decision below needs an argument, not just an appeal to convention |
-| ⚠️ The CHECK/constant pairing is guarded by a test the brainstorm did not know about | **`src/lib/enum-constraint-sync.integration.test.ts`** — a hand-maintained `REGISTRY` of **21 entries**, plus `ARRAY_`, `RANGE_` and `LENGTH_REGISTRY`. It asserts set equality between each constraint's literals and its constant object. **This changes the v1 checklist**; see *The CHECK constraint* |
+| ⚠️ The CHECK/constant pairing is guarded by a test the brainstorm did not know about | **`src/lib/enum-constraint-sync.integration.test.ts`** — a hand-maintained `REGISTRY` of **21 entries**, plus `ARRAY_`, `RANGE_` and `LENGTH_REGISTRY`. It asserts set equality between each constraint's literals and its constant object. **This changes the v1 checklist**; see *The CHECK constraints* |
 | ⚠️ That test does **not** catch an unregistered new constraint | **Measured, not assumed.** Its "no missing, no strays" assertion intersects the live constraint list with the registry's own names *before* comparing, so a constraint applied but never registered is filtered out and the test passes. Recipe in *Reproducing these numbers* |
 | `DayRollup`, `DailySpark` and `GuestDailyActivity` all use `date String // YYYY-MM-DD` + `@@unique([workspaceId, date])` | ⚠️ **Two of three.** `DayRollup` (`:663`, `:674`) and `DailySpark` (`:723`, `:729`) match exactly. **`GuestDailyActivity` does not**: its column is `day`, not `date` (`:826`), it carries **no `workspaceId` at all**, and its key is `@@id([day, ipHash])`, not a `@@unique`. It is IP-hash scoped global bookkeeping, so the difference is correct rather than sloppy — but it is not a citation for this convention. A third genuine one exists: `Streak.lastActiveWorkday String? // YYYY-MM-DD` (`:693`) |
 | `bucketOfItem` derives a bucket from `snoozedUntil > now`, with no cron | **Confirmed.** `src/components/inbox/bucket.ts`, `export function bucketOfItem(i: Item, now: number = Date.now())`. ⚠️ #260's body cites it at `:271`; at `90d97dd` the `export function` line is **`:268`**. Cite the symbol, not the line — advice #257's own body gives ("Name the symbols, not the lines") |
@@ -87,7 +87,7 @@ standing on. **Every row where the re-read corrected what the brainstorm asserte
 | `/shopping` is gated server-side, not just in the menu | **Confirmed.** `src/app/(app)/shopping/page.tsx`: `if (!settings.shoppingList) notFound();`, before any query, with the reasoning in a doc comment — and its server actions carry the same check |
 | The repo's touch-target floor, and which criterion it is | **Confirmed, and the pair is easy to invert.** 44×44 is **2.5.5 Target Size (Enhanced), AAA** — a voluntary house floor via the shared `touchTarget` helper. **2.5.8 Target Size (Minimum) is the AA one, at 24×24.** `src/components/breakdown/note-field.tsx:333–338` states it correctly and explains the harm of getting it backwards. ⚠️ Two live citations still have it inverted — `src/components/inbox/add-note-button.{tsx,test.tsx}` call the 44×44 floor "WCAG 2.5.8" — which is out of scope here but worth folding into the next MR that touches that file |
 | A small in-repo copy set is an established shape | **Confirmed twice**: `FALLBACK_SPARKS` (**8** lines, `src/lib/spark.ts`) and `FABLE_LINES` (**6** lines, `src/lib/fable-lines.ts`). ⚠️ Both pick **randomly**, via `pickOne`. That difference matters; see *The reward* |
-| ⚠️ `/privacy` currently states the app has no health field | **It does, in terms this feature contradicts.** "There is no health field, no diagnosis field, no questionnaire, and nothing infers anything about your health." A medication log is a health field. **This is a v1 blocker, not a footnote**; see *The legal copy* |
+| ⚠️ `/privacy` currently states the app has no health field | **It does, in terms this feature contradicts.** "There is no health field, no diagnosis field, no questionnaire, and nothing infers anything about your health, your mind, or how you are doing." A medication log is a health field. **This is a v1 blocker, not a footnote**; see *The legal copy* — where the second half of that sentence turns out to have been overstated for a reason unrelated to meds |
 | ⚠️ `/terms` already names medication | Under *Where being wrong would cost you*: "Do not rely on an AI suggestion for anything with real consequences: **medication or dosing**, legal or tax deadlines, medical appointments…". Scoped to *AI suggestions*, so it is not contradicted — and it is why no-AI is a declared non-goal above rather than an oversight |
 | ⚠️ A new workspace-scoped model is auto-enrolled in two guards | `src/lib/export/__tests__/model-coverage.test.ts` and `src/lib/__tests__/scoping.harness.test.ts` both derive their model list from `Prisma.dmmf` **at runtime**, filtered on carrying a `workspaceId` field. So declaring `workspaceId` enrols the model with **no registry entry to forget** — and the export guard will red until `collect.ts` and `json.ts` both name it |
 | No medication feature or duplicate issue exists | Zero matches for `medication` in `src/`, `prisma/` or `charts/` other than the `/terms` sentence above. Open-issue search for `medication` returns **0**; `meds` and `pill` return only substring hits (`needs`, `Spotify`, `bulky`) |
@@ -491,8 +491,8 @@ screen-reader recommendation lives — as words, since nothing can detect the ne
 | --- | --- |
 | A clock time per dose as the *primary* model | The owner's regimen is meal-relative. "After breakfast" is not a time, and a required picker invites a false precision — the user would be inventing a number to satisfy a form. `dueAfter` stays optional |
 | **Which page** the history is viewed on | There is nothing to select until `/meds` exists. A picker with one option is a control that teaches the user to distrust controls. ⚠️ **Distinct from `medsNavMode` above**, which selects a *behaviour* of the header control and has two genuine options on day one — this row is about choosing a destination, and there is only one |
-| Whether the nav control appears at all | See `medsNavMode`'s third bullet: `medsTracker` governs availability, and a separate visibility Boolean would need an owner decision that has not been taken |
-| The order `B★` cycles through states | Real, and declined for v1 rather than dismissed: if skipping is the common case, one tap should be *skipped*. It is a third column and a third code path for a preference nobody has expressed yet, and the mode picker already covers the case by offering a symmetric alternative |
+| Whether the nav control appears at all | See `medsNavMode`'s **second** bullet: `medsTracker` governs availability, and a separate visibility Boolean would need an owner decision that has not been taken |
+| The order `B★` cycles through states | Real, and declined for v1 rather than dismissed: if skipping is the common case, one tap should be *skipped*. It costs another column plus a branch inside `dots`, for a preference nobody has expressed yet — and the mode picker already serves that user, because `next` is symmetric and has no order to get wrong |
 | Per-medication reminder settings | Nothing to configure while there is one banner and no notifications. v3 |
 | ⚠️ `Settings.workingDays` itself | **Two reasons, and the first is not obvious.** It is read by `src/lib/rewards.ts` to decide which days a **streak** may advance on, so a meds-settings control over it would silently retune an unrelated feature — a user narrowing their meds week to Mon–Wed would find their streak had opinions about it. Second, exposing it makes the empty-CSV case above reachable for the first time. The per-medication `days` override is the configurable surface instead, and it is strictly local |
 
@@ -616,6 +616,11 @@ expressed as a number, and the one half of it a test can hold.
 The module shape follows `fable-lines.ts` and `spark.ts`: a plain exported array plus one pure
 selector, in its own module, no React import.
 
+⚠️ **One further constraint on the lines themselves, from the nav control settled the same day: each
+must be short enough to sit inside a single spoken announcement.** The reward is not announced
+separately — see *Where this collides with the reward* — so a line that reads well on a chip but drags as
+the tail of a sentence heard on every dose is the wrong line. Keep them to a few words.
+
 #### 6. ⚠️ The two-voice framing has expired — there is one register, and it carries the variety
 
 **This section used to weigh a `plain` reward against a `playful` one and lean toward `plain` being
@@ -666,10 +671,11 @@ It does not, and the reason is structural rather than lucky:
   `fable-lines.ts` and `spark.ts` — a plain exported array plus one pure selector. `FABLE_LINES` is
   already a flat array with no voice pairing, so the reward is voice-free by construction and needs
   nothing from #86 in either order.
-- **The chip and banner *labels* do go through `t()`**, so those keys take whatever shape
-  `strings.ts` has on the day they are written, and #86 sweeps them with everything else. Writing a
-  pair that #86 later collapses costs one line in that sweep; the reverse — waiting for #86 — costs
-  the feature.
+- **Everything that is a *label* does go through `t()`** — the chips, the banner, the nav control's
+  accessible names, and the mode picker's per-option explainer copy in Settings. Those keys take
+  whatever shape `strings.ts` has on the day they are written, and #86 sweeps them with everything
+  else. Writing a pair that #86 later collapses costs one line in that sweep; the reverse — waiting for
+  #86 — costs the feature.
 - ⚠️ **One file the meds work touches is a `t(key, voice)` caller and needs naming:**
   `src/components/nav/quick-access.tsx` resolves `const label = t(labelKey, voice)` and receives
   `voice` as a prop. The nav control below follows that pattern, so **#86's collapse reaches this
@@ -690,7 +696,12 @@ app's existing at-a-glance card for an optional gated feature, and it renders fr
 `src/components/inbox/inbox-view.tsx` on the home page — not on `/dashboard`.
 
 `/dashboard` is where the **v2** history visualisation would sit naturally if `/meds` were not
-getting its own page. It is not where today's three chips go.
+getting its own page. It is not where today's dose chips go.
+
+⚠️ **Corrected 2026-08-15: this sentence said "today's three chips".** The owner's regimen is **two
+doses** — 2 tablets after breakfast, 1 after lunch — and the strip renders one chip **per dose**, not per
+tablet. Three is the tablet count, and a spec that miscounts the chips in the feature it is specifying
+would be copied. The regimen is configurable anyway, so no number belongs in that sentence.
 
 **The owner accepted this argument unchanged on 2026-08-15.** It is not reopened below and the section
 is left as it was written. What the same decision *added* is a second surface, which this document did
@@ -791,6 +802,33 @@ polices number↔name welds and iterates `["src", "e2e", "docs"]`, so an inverte
 implementation *or in this file* reds the pipeline. Bare numbers are deliberately legal there; only a
 number wearing the wrong name is a defect.
 
+#### ⚠️ Where this collides with the reward, and the answer both decisions force
+
+**Two decisions of 2026-08-15 meet on one press, and neither section alone resolves it.** *The reward*
+requires an instant presentational reward on every log, announced politely. This section requires every
+nav commit to announce politely too. Naively implemented that is **two polite messages for one press** —
+and in `E`'s case a *delayed second* announcement, which is precisely the cost the timed variant of `B★`
+was rejected for. Shipping the rejected defect through a different door would be a poor outcome.
+
+**So: one announcement per press, and the reward line rides inside it.** "After breakfast, 2 tablets,
+taken. Logged and counted." — dose, state, reward, what remains, in one polite utterance. This is a
+consequence of the two decisions rather than a third decision, and it is written down because an
+implementer working from either section in isolation would produce the other thing.
+
+Three corollaries worth stating, since they are the parts that go wrong:
+
+- **The reward's *visual* half still fires wherever the log happened** — the dots or the split pill can
+  animate, and the home strip's chip can too. Only the *announcement* is single.
+- **The reward copy must therefore be short enough to sit inside an announcement.** That is an
+  additional constraint on the rotating set that §5 does not impose on its own: a line that reads well
+  on a chip may be intolerable as the tail of a spoken sentence heard on every dose. It belongs in the
+  same review pass as the honesty rule.
+- **Two presses that are not a log get no reward: `Undo`, and an overwrite.** Undo is a correction, and
+  congratulating someone for retracting a record is the one place a cheerful line would read as
+  sarcasm. An overwrite — *skipped* → *taken* on the strip — is also a correction rather than a new log,
+  and rewarding it would make repeated tapping a way to farm the reward. Both still **announce** the
+  new state, since that is information; they just do not carry a reward line.
+
 ### The banner
 
 **One dismissable banner, and no notification of any kind in v1.**
@@ -834,8 +872,10 @@ The two modes fail differently, so a single checklist would be wrong for both. W
   (Enhanced), AAA**, with **2.5.8 Target Size (Minimum), at 24×24** met regardless.
 - **State is never colour alone**, as for the chips: `taken`, `skipped` and `missed` each carry a shape
   or a glyph difference, because `completeTickColor` can be set to `black`.
-- **Every commit announces politely**, through the same polite live region the reward uses. One press,
-  one announcement — the announcement names the dose, the new state, and what remains.
+- **Every commit announces politely**, through the same polite live region the reward uses. **One press,
+  one announcement**, naming the dose, the new state, the reward and what remains — the reward does
+  **not** get a second utterance. Argued in *Where this collides with the reward*, and pinned by test 20,
+  which asserts the announcement *count* rather than its content.
 - **The home strip is the accessible route**, always present. Neither mode is load-bearing for
   conformance, which is what makes the per-mode compromises below legitimate rather than excuses.
 
@@ -843,15 +883,35 @@ The two modes fail differently, so a single checklist would be wrong for both. W
 
 - **The accessible name states the next action as well as the current state.** Not "taken" but "after
   breakfast, 2 tablets, not recorded. Activate to mark taken." A name that reports only the current
-  state leaves a screen-reader user unable to predict what activating does, which is the defect that
-  disqualified the timed variant of this shape.
+  state leaves a screen-reader user unable to predict what activating does. ⚠️ **That is the defect
+  which disqualified the *plain* cycling pill** — the mockup's `B`, whose whole objection was that a
+  control changing meaning per press cannot state its name in advance. It is a different objection from
+  the one that disqualified the *timed* variant, which was the time limit and the delayed second
+  announcement. `B★` has to answer both, and this bullet is the first half.
 - **The name is recomputed on every commit**, since the target dose advances.
 - **`Undo` is a real focusable control in the tab order**, not a toast. It persists until the next
   action. This is the requirement, not an enhancement — the mode is only acceptable *because* the
   correction path is reachable without a mouse and without a time limit.
 - **No press may be silently destructive.** Tapping past *skipped* must not wrap round to *not
-  recorded*: erasing a health record is a deliberate act and belongs on the strip, not on the fourth
-  tap of a two-dot shortcut.
+  recorded*: erasing a health record on the fourth tap of a two-dot shortcut is not something anyone
+  chose to do.
+
+⚠️ **What follows from that, stated because it is a real v1 limitation rather than a detail.** With the
+cycle terminating at *skipped*, the routes available after a commit are:
+
+| Correction wanted | Route in v1 |
+| --- | --- |
+| *taken* → *skipped* | The pill's second press, or the strip. |
+| *skipped* → *taken* | **The strip**, not the pill. The write is an upsert on `(workspaceId, date, medicationDoseId)`, so tapping *Taken* on an already-skipped dose overwrites the row — no repair path and no special case, exactly as *the unique index makes the write idempotent* sets out. |
+| Undoing the press you just made | `B★`'s persistent Undo, for one commit. |
+| Back to **Unknown** — no row at all | ⚠️ **Not available in either surface in v1.** Nothing deletes a `MedsDoseLog` row. |
+
+That last row is deliberate and not an oversight. A delete path is the one write that destroys history,
+which is the thing v2 needs and cannot backfill, and *"I logged something and now want the record
+gone"* is not a case the owner has raised. **If it is ever wanted it belongs on the strip with a
+confirmation**, never on a nav shortcut, and it should be argued in its own right rather than arriving
+as a side-effect of a cycle order. The Undo covers the realistic mistake, which is the press you just
+made.
 
 `E` specifically:
 
@@ -892,8 +952,8 @@ that part of this checklist is being done anyway. **Read against `!357`'s actual
 does not hold in the direction that matters, and the honest reading is: the surgery on one sentence is
 being done for us, and the amendment gains three surfaces and loses its stated legal basis.**
 
-- ✅ **The sentence's second half is already being narrowed, for a reason that has nothing to do with
-  meds.** `!357` found *"nothing infers anything about … how you are doing"* was **already overstated
+- **In flight, not done — the sentence's second half is being narrowed for a reason that has nothing
+  to do with meds.** (`!357` is Draft; this is its recorded finding, not a landed change.) `!357` found *"nothing infers anything about … how you are doing"* was **already overstated
   before any medication work**, because `DayRollup.narrative` is an LLM-written, stored, second-person
   text about the reader's day, written automatically at `workdayEndTime` rather than opt-in. So the
   clause is being *narrowed, not deleted* — which means the meds amendment edits a sentence that is
@@ -1146,10 +1206,14 @@ TDD, failing test first. The ones that pin decisions rather than mechanics:
 18. **`E`'s two buttons each carry a complete accessible name on their own**, not one that depends on
     the group label being read.
 19. **Every commit announces through a polite live region, in both modes** — never assertive.
-20. **The home strip renders whatever `medsNavMode` says.** The property that makes every per-mode
+20. ⚠️ **Exactly ONE announcement per press, carrying the reward inside it.** Assert the **count**, not
+    just the content: the failure mode is two polite messages for one log, which is the delayed second
+    announcement the timed `B★` variant was rejected for, arriving through a different door. A
+    content-only assertion passes the whole time that is happening.
+21. **The home strip renders whatever `medsNavMode` says.** The property that makes every per-mode
     compromise legitimate, so it is asserted rather than assumed: iterate both modes and assert the
     strip is present in each.
-21. ⚠️ **Nothing in the meds code branches on assistive technology.** A source-level assertion that no
+22. ⚠️ **Nothing in the meds code branches on assistive technology.** A source-level assertion that no
     `matchMedia`, no AT-probe and no equivalent heuristic appears in these components. It reads like a
     style rule and is not one: it is the only thing that stops a future well-meaning commit from adding
     detection that cannot work.
@@ -1260,7 +1324,7 @@ is that, not your own citation.
 | A far-future `markedAt` or a year-9999 sentinel for any state | #260's explicit warning: indistinguishable from a real timestamp, and something will eventually read it as one |
 | Streaks, badges or points on doses | Creates a motive to lie to the tracker, which destroys its only value; `0 day streak` on medication reads as a verdict about health; and points would make a productivity score partly measure a pill. It would also add the post-commit write this feature is otherwise structurally free of |
 | A softer, gentler copy set for `skipped` | **The honesty incentive delivered as tone.** If skipping feels worse than taking, the user learns to press *Taken*. Same warmth, different words |
-| One fixed reward word rather than a rotating set | Considered and **declined 2026-08-15**. It was defensible while there were two registers and the plainer one could stay bare; with the playful voice deleted (#86) a fixed word is the *only* thing the user ever sees, and habituation to a predictable string is the exact ADHD-relevant failure the reward exists to avoid |
+| One fixed reward word rather than a rotating set | Considered and **declined 2026-08-15**. It was defensible while there were two registers and the plainer one could stay bare; once #86's deletion lands there is one register, so a fixed word becomes the *only* thing the user ever sees — and habituation to a predictable string is the exact ADHD-relevant failure the reward exists to avoid. Declined now rather than after the deletion, because the reward set is written before it |
 | A twenty-line reward set | The other direction, declined for the same section's reason: the repo's own sets are 8 and 6, and past that a set is not more varied, only harder to review as a pair — and reviewing it as a pair is the one enforcement §1's honesty rule has |
 | `pickOne` (CSPRNG) for the reward line | Correct and available, but it buys **randomness**, which reads as a slot machine and is not server/client-stable. Rotation is deterministic, needs no RNG, and avoids the weak-PRNG SAST class outright |
 | `Math.random` for the reward line | Mints a MEDIUM SAST finding whose fingerprint moves with the line number — the cost `src/lib/pick-one.ts` exists to record, having been dismissed five times for one statement |
