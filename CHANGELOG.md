@@ -590,6 +590,18 @@ operators upgrading a self-hosted instance don't get surprised.
   lands you on that row's own undo, and a successful undo still lands you on its
   Start Focus. Your typing was never at risk — only the caret.
 
+- **Dependency update MRs no longer wait a week for an automerge that was lost at
+  creation (#243).** Renovate arms GitLab's native auto-merge once, at the moment
+  it opens the MR, never re-arms an MR it has not pushed a new commit to, and logs
+  the failure at a level the job does not print — so five update MRs opened on
+  10 August 2026 sat unmerged with nothing anywhere saying why. Renovate's own
+  automerge does recover those MRs, but only on a later run, and there was one run
+  a week. A second pipeline schedule now runs it every four hours purely to finish
+  work already in flight, and a `schedule` window in `.gitlab/renovate.json` keeps
+  those extra runs from opening MRs of their own; the arming failure is promoted to
+  a warning, which also puts it on the Dependency Dashboard issue. No effect on a
+  self-hosted instance — this is this project's own update automation.
+
 - **The shopping list stops asking you to retry something it has taken the button
   away for, and says out loud that it is retrying (#246, #236).** Two small things
   in the notice that appears when a change to your list does not save. If the
