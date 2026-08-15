@@ -9,7 +9,7 @@ export type SaveStatus = "idle" | "saving" | "saved" | "error" | "stalled";
  * #227 — how long a save may go unanswered before the indicator stops claiming
  * it is still working.
  *
- * 10s, the same bound `CAPTURE_TIMEOUT_MS` and `SHOPPING_ACTION_TIMEOUT_MS`
+ * 10s, the same bound `CAPTURE_FLUSH_TIMEOUT_MS` and `SHOPPING_ACTION_TIMEOUT_MS`
  * already use for a server action, and generous for the same reason
  * `withActionTimeout` gives: it bounds how long the UI is willing to *wait*,
  * not the request. A server action cannot be aborted from the client, so the

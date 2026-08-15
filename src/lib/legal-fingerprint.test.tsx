@@ -289,7 +289,67 @@ const PUBLISHED = {
   // recipient (none) and the same retention — it corrects a wayfinding instruction.
   // LEGAL_EFFECTIVE_DATE stays 2026-08-15, and nothing has been published under
   // any of the eight hashes because the branch has not merged. `terms` unchanged.
-  privacy: "f555d63e514a066aef4f054d4dcf90d632ce9f818e0adcd1f7653d3ee07abc83",
+  // A first draft of this change also added a sentence asserting that reading
+  // the OS setting stores and transmits nothing. It was dropped rather than
+  // pinned: a claimed ABSENCE of processing is the one shape this file's own
+  // docblock records having had to retract (#154's "no log of when it was
+  // fetched", false on both deploy targets), and it earns nothing a reader does
+  // not already get from the sentence above it.
+  //
+  // ⚠️ **`privacy` moved again at 2026-08-15, and it is SUBSTANCE — #175, the
+  // offline capture queue.** The date is bumped with it, deliberately. Two new
+  // disclosures, both of which the page previously got wrong by omission:
+  //
+  //   1. **A new category of at-rest storage.** The page named browser storage
+  //      once and pinned it to a theme preference that "never leaves your
+  //      device". From this release the browser can hold **text the user typed**
+  //      — a brain dump that could not reach the server — so the "your data is in
+  //      the United Kingdom" section now carries the exception, and the storage
+  //      list names `df-capture-queue` **and the IndexedDB mirror separately**.
+  //      The mirror is a second at-rest copy on a different schedule with a
+  //      different deletion trigger; a notice listing one and not the other is
+  //      inaccurate on the day it ships.
+  //   2. **A new retention rule with THREE triggers, not two.** "Until it saves,
+  //      or until you clear it" is false for a capture whose account can no
+  //      longer be reached, because neither trigger can ever fire — precisely the
+  //      entries that would sit there longest. The third is
+  //      `CAPTURE_ORPHAN_WINDOW_HOURS` in prose, and
+  //      `capture-orphan-window.test.ts` keeps it in step with the guest TTL.
+  //
+  // ⚠️ **This gate greened both of the wrong versions of that text as happily as
+  // the right one**, which is worth stating where the hash lives: it can tell
+  // that the document moved, never that it became true. A notice listing the
+  // `localStorage` key and not the mirror would have passed here.
+  // ⚠️ **Re-derived from the REBASED tree, not carried across from either side.**
+  // #85 moved this document too, in the same release and classified COPY, so the
+  // text rendered here is a state neither branch rendered alone and neither
+  // branch's hash is correct for it — `0fe73291…` was /privacy before #175's
+  // disclosures, `4cf5a9a0…` was /privacy before #85's theme rewording. Same
+  // reasoning the 2026-08-05 note above records for #154 and #164, and the reason
+  // it is worth repeating: a hash copied from one branch is only correct by luck.
+  //
+  // The DATE is shared with the other legal change landing in this release rather
+  // than bumped past it, which is the supported case this file already documents —
+  // one effective date can cover two movements of the published text. Nothing
+  // asserts that, because the date is stripped before hashing (see
+  // `EFFECTIVE_DATE_TEXT`) precisely so a bump cannot move a fingerprint; it is a
+  // reading obligation, not something the suite can catch.
+  // ⚠️ **Re-derived from the MERGED tree, and it is a third value neither side
+  // carried.** `/privacy` moved twice more between #175 opening and landing:
+  // #85 at 08-14 (theme wording, classified COPY, date deliberately not bumped)
+  // and the legal-accuracy sweep, both now on `main`. So `f555d63e…` is /privacy
+  // without #175's disclosures and `9f758366…` was this branch against the tree
+  // before the sweep landed — neither is correct for what actually renders now.
+  // Same rule the 2026-08-05 note above records, and the same reason it is worth
+  // repeating: a hash carried across from one branch is only correct by luck.
+  //
+  // The DATE is `main`'s, not a second bump. #175 and the sweep are two movements
+  // of one document sharing one effective date, which is the case this file
+  // already documents as supported. ⚠️ **Nothing asserts that** — the date is
+  // stripped before hashing (`EFFECTIVE_DATE_TEXT`) precisely so a bump cannot
+  // move a fingerprint — so it is a reading obligation and this note is the record
+  // of the reading, not something the suite could have caught.
+  privacy: "29f5b5e7df04c2a9986dae28eea6ba09fdedc0b2aa7aa706e95a6d6e859f9ffd",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",

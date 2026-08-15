@@ -26,7 +26,7 @@ export const LIB_PANEL_HEADING_ID = "lib-panel-heading";
 
 /**
  * How long the UI is willing to wait for the delete before it stops claiming to
- * be working. 10s, the same bound `CAPTURE_TIMEOUT_MS`,
+ * be working. 10s, the same bound `CAPTURE_FLUSH_TIMEOUT_MS`,
  * `SHOPPING_ACTION_TIMEOUT_MS` and `INBOX_ACTION_TIMEOUT_MS` use, and generous
  * for the reason `withActionTimeout` gives: it bounds the WAIT, not the request.
  * A server action cannot be aborted from the client, so the delete may still

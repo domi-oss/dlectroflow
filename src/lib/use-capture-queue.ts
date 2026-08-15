@@ -120,6 +120,50 @@ export const CAPTURE_QUEUE_EVENT = "df-capture-queue-change";
 const FLUSH_URL = "/api/braindump";
 
 /**
+ * How long one entry's `POST` is given before it is abandoned and left queued.
+ *
+ * ⚠️ **Moved here from `inbox-view.tsx`'s `CAPTURE_TIMEOUT_MS` by #175's client
+ * half**, keeping the same 10s value that `shopping-list.tsx`,
+ * `breakdown-chat.tsx`, `library-done-delete.tsx`, `use-save-status.tsx` and
+ * `focus-timer.tsx` all cite as the house bound for this class of call. Their
+ * comments were repointed here rather than left naming a constant that no longer
+ * exists — a citation goes on reading authoritatively after it stops being true.
+ *
+ * **It is load-bearing rather than tidy, and the copy already promises it.** The
+ * third failure mode is silence, not a rejection — a pod rolling mid-request, a
+ * connection that never closes. Unbounded, that entry's key stays in
+ * `inFlightKeys` for the life of the tab, so `flushing` never goes false, the
+ * polite region says *"Saving what's waiting…"* for ever, and every Discard of
+ * that entry is refused with *"This one is being saved right now. Give it a
+ * moment and try again"* — a wait for something that will not happen.
+ *
+ * **And here the abort is real, which it could not be for the write this
+ * replaced.** A server action cannot be aborted from the client, so
+ * `withActionTimeout` only ever bounded the UI's patience while the request
+ * carried on — which is why #210 had to carry a `timedOut` flag meaning "whether
+ * it landed is unknown". A route handler takes an `AbortSignal`, and a write that
+ * lands anyway is answered `200` on the retry because of `clientKey`. So the
+ * unknown-outcome state this design replaced does not exist here at all.
+ */
+export const CAPTURE_FLUSH_TIMEOUT_MS = 10_000;
+
+/**
+ * A per-request timeout signal, or nothing where the platform has no
+ * `AbortSignal.timeout`.
+ *
+ * Degrading to an unbounded request is the correct fallback: it is what the
+ * previous implementation did on every browser, and losing the bound costs a
+ * stuck "Saving…" while refusing to send at all would cost the capture.
+ */
+function flushSignal(): AbortSignal | undefined {
+  try {
+    return AbortSignal.timeout(CAPTURE_FLUSH_TIMEOUT_MS);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * What the strip is told. Everything the component needs and nothing it could
  * use to reach storage itself.
  */
@@ -135,7 +179,7 @@ export type CaptureQueueApi = {
   /** Store a capture before the network is attempted. Called from `submit()`. */
   enqueueCapture: (text: string) => CaptureEnqueueResult;
   /** Try the queue now. Safe to call concurrently; overlapping passes coalesce. */
-  flush: () => Promise<void>;
+  flush: () => Promise<CaptureFlushResult>;
   /** Throw entries away at the user's request. Mirror first, then `localStorage`. */
   discard: (clientKeys: readonly string[]) => Promise<DiscardOutcome>;
   /** The last refusal to ANNOUNCE, with a token that changes on every occurrence. */
@@ -145,10 +189,45 @@ export type CaptureQueueApi = {
   } | null;
   /** Drop the announcement, so an identical next one is a genuine change. */
   clearAnnouncement: () => void;
+  /**
+   * Bumped once per flush pass that saved anything, by ANY trigger.
+   *
+   * The inbox needs it because three of the four triggers are the hook's own —
+   * mount, `visibilitychange`, `online` — so the caller never learns about those
+   * saves from a return value. Without it a capture that flushes on mount leaves
+   * the queue, the strip stops mentioning it, and **nothing appears in the list**
+   * until the next unrelated interaction: the words look destroyed at the exact
+   * moment they became safe, which is #210's defect with the sign flipped.
+   *
+   * A counter rather than a boolean or a callback: the consumer's reaction is
+   * `router.refresh()`, so what it needs is "something changed since I last
+   * looked", and an effect keyed on a number gives that with no subscription to
+   * tear down. Starts at 0 and only ever increases.
+   */
+  savedTicket: number;
 };
 
 export type CaptureEnqueueResult =
-  { ok: true } | { ok: false; reason: EnqueueRefusal };
+  | {
+      ok: true;
+      /**
+       * The key this capture was stored under, so the caller can ask whether
+       * **these** words reached the server rather than whether the pass saved
+       * anything. `submit()` shows "captured ✓" off it, and a confirmation about
+       * the wrong capture is the unverifiable promise #210 exists to remove.
+       */
+      clientKey: string;
+    }
+  | { ok: false; reason: EnqueueRefusal };
+
+/**
+ * Which captures a flush pass got onto the server, by `clientKey`.
+ *
+ * `duplicate` (200) counts as saved and that is deliberate: the row exists, which
+ * is the only thing the caller is deciding on. The distinction matters inside the
+ * pass — it is why a replayed capture is not an error — and nowhere outside it.
+ */
+export type CaptureFlushResult = { saved: readonly string[] };
 
 /**
  * What a Discard did.
@@ -261,6 +340,7 @@ function outcomeOf(status: number, body: unknown): FlushOutcome {
 
 export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
   const [flightCount, setFlightCount] = useState(0);
+  const [savedTicket, setSavedTicket] = useState(0);
   const [announcement, setAnnouncement] = useState<{
     reason: EnqueueRefusal | DiscardOutcome;
     token: number;
@@ -338,9 +418,10 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
 
   const queue = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  const flush = useCallback(async (): Promise<void> => {
+  const flush = useCallback(async (): Promise<CaptureFlushResult> => {
     const store = currentStore();
-    if (!store) return;
+    const saved: string[] = [];
+    if (!store) return { saved };
     for (const capture of readQueue(store)) {
       if (capture.workspaceId !== workspaceId) continue;
       // A terminal entry is skipped rather than flushed: a 403 that can never
@@ -366,6 +447,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
               text: capture.text,
               workspaceId: capture.workspaceId,
             }),
+            signal: flushSignal(),
           });
           status = response.status;
           try {
@@ -382,6 +464,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
         // only thing the client holds that changes when the user signs in.
         applyFlushOutcome(store, capture.clientKey, outcome, workspaceId);
         if (outcome === "saved" || outcome === "duplicate") {
+          saved.push(capture.clientKey);
           awaiting.current.delete(capture.clientKey);
           await deleteMirrored(mirror.current, [capture.clientKey]);
         } else {
@@ -395,6 +478,11 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
       }
     }
     broadcast();
+    // Bumped for the pass, not per entry: the consumer's reaction is one
+    // `router.refresh()`, and a counter that moved three times would buy three
+    // refetches of the same list.
+    if (saved.length > 0) setSavedTicket((n) => n + 1);
+    return { saved };
   }, [workspaceId]);
 
   // ── Mount: sweep, reconcile the mirror, flush ──────────────────────────────
@@ -483,7 +571,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
       void putMirrored(mirror.current, [mirroredFrom(capture)]).then(() =>
         registerSync(),
       );
-      return { ok: true };
+      return { ok: true, clientKey: capture.clientKey };
     },
     [announce, workspaceId],
   );
@@ -579,6 +667,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
     discard,
     announcement,
     clearAnnouncement: () => setAnnouncement(null),
+    savedTicket,
   };
 }
 

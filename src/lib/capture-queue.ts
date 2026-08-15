@@ -233,7 +233,23 @@ export type QueuedCapture = {
 
 /** Why an enqueue was refused. Each maps to something the user is told. */
 export type EnqueueRefusal =
-  "empty" | "max-items" | "max-bytes" | "storage-unavailable";
+  | "empty"
+  | "max-items"
+  /**
+   * THIS capture is over the byte bound on its own.
+   *
+   * ⚠️ **Split from a single `max-bytes` by #175's client half, because one reason
+   * cannot select two remedies.** The spec gives these two states different
+   * sentences and says why: *"shorten it"* is the right advice when the capture's
+   * own length is the problem, and the wrong advice when the queue is full, where
+   * shortening would not help at all. While both arms returned one reason the
+   * strip could only ever have printed one of the two, so one of the spec's
+   * sentences was unreachable and the other was wrong half the time.
+   */
+  | "too-long"
+  /** The queue TOTAL is at the byte bound. This capture is fine; there is no room. */
+  | "no-room"
+  | "storage-unavailable";
 
 /**
  * How long a capture whose workspace no longer resolves is kept before it is
@@ -812,7 +828,7 @@ export function enqueue(
   // it here both keeps the message right on an empty queue and keeps the
   // serialisation of a 64 KB text out of the read/write window below.
   if (byteLength(JSON.stringify([entry])) > CAPTURE_QUEUE_MAX_BYTES) {
-    return { ok: false, reason: "max-bytes" };
+    return { ok: false, reason: "too-long" };
   }
 
   for (let attempt = 1; ; attempt++) {
@@ -847,7 +863,7 @@ export function enqueue(
     // 64 KB `JSON.stringify` is on this side of the final read, not inside it.
     const payload = serialise(next);
     if (byteLength(payload.serialised) > CAPTURE_QUEUE_MAX_BYTES) {
-      return { ok: false, reason: "max-bytes" };
+      return { ok: false, reason: "no-room" };
     }
 
     // Everything above is work done against a value we have only read. If it moved

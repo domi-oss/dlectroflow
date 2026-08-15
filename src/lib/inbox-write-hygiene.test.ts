@@ -94,10 +94,25 @@ const ALLOWED: Record<string, string> = {
   // failure is a workspace-wide condition rather than one row's write.
   runSchedule: "#169 — per-row schedule errors and the reconnect state",
   runScheduleIcs: "#169 — the ICS twin of runSchedule, same reporting",
-  // #210's notice: the one write whose failure destroys words that exist nowhere
-  // else, so it holds them and cannot share the row notice's shape.
-  capture: "#210 — the capture notice, which restores the words it lost",
 };
+
+/**
+ * ⚠️ **`capture` was here and is deliberately gone (#175).**
+ *
+ * Its entry read *"#210 — the capture notice, which restores the words it lost"*,
+ * and the notice it excused no longer exists: the capture path is now
+ * `POST /api/braindump` through the offline queue, so a failed capture is a queue
+ * entry on the strip rather than a one-slot notice.
+ *
+ * The removal is not incidental to that. `capture()` starts **no transition at
+ * all** now, and it must not: React 19 holds an async transition's state updates
+ * until the action settles, so the `flushing` flag the polite region announces
+ * from would first paint at the moment it stopped being true — the trap
+ * `runSchedule` records, and here it would silence `write-notice-hygiene` rule E's
+ * channel on the submit path. The "no ALLOWED entry that has gone stale" spec
+ * below is what forced this note to be written rather than the entry being left
+ * behind as a lie, which is precisely its job.
+ */
 
 describe("inbox-view.tsx starts no unreported transitions (#225)", () => {
   const source = readFileSync(

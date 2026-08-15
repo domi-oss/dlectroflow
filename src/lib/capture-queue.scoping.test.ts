@@ -260,7 +260,8 @@ describe("capture queue — the caps split (#175)", () => {
 
   it("counts the byte cap across every entry in the key, foreign ones included", () => {
     // The quota is charged per origin, so A's bulk does refuse B — with the
-    // room-not-ownership copy, which is why the reason must be `max-bytes`.
+    // room-not-ownership copy, which is why the reason must be `no-room` and not
+    // `too-long`: B's capture is 600 bytes and blameless.
     const filler = "y".repeat(CAPTURE_QUEUE_MAX_BYTES - 400);
     const store = seeded([
       capture({ clientKey: "theirs", workspaceId: OTHER, text: filler }),
@@ -271,7 +272,7 @@ describe("capture queue — the caps split (#175)", () => {
       capture({ clientKey: "mine", text: "z".repeat(600) }),
     );
 
-    expect(result).toEqual({ ok: false, reason: "max-bytes" });
+    expect(result).toEqual({ ok: false, reason: "no-room" });
   });
 });
 

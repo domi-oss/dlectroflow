@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useEffect } from "react";
-import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useCaptureQueue, type CaptureQueueApi } from "@/lib/use-capture-queue";
 import { CAPTURE_QUEUE_STORAGE_KEY, readQueue } from "@/lib/capture-queue";

@@ -136,6 +136,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
 function renderInbox(items: Item[]) {
   return render(
     <InboxView
+      workspaceId="ws-test"
       now={Date.now()}
       initialItems={items}
       settings={settings}

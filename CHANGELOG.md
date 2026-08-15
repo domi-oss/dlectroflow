@@ -76,6 +76,40 @@ operators upgrading a self-hosted instance don't get surprised.
   would come out of unrelated, already-settled work. An over-large reversal stops at
   zero rather than going negative or borrowing from another reward type.
 
+- **Brain dumps survive a bad connection, and save themselves when it comes back
+  (#175).** Press Enter with patchy coverage and the words were gone: the capture
+  bar held one failed write in a notice, and a second failure displaced the first
+  — whose words were then in neither the notice nor the box. On a phone, where
+  this feature is aimed, it was worse than that: Chrome discards background tabs
+  under memory pressure and **fires no unload event**, so the notice and the words
+  went with the tab.
+  A capture is now written to this browser's own storage **before** the network is
+  attempted, so nothing can lose it — not a closed tab, not a killed browser, not
+  a reboot. Everything not yet on the server is listed in a **"N waiting to save"**
+  strip under the capture box: expand it to read or copy the words, retry them, or
+  discard one for good behind a two-step confirm. They flush by themselves on
+  four triggers — opening the inbox, returning to the tab, the connection coming
+  back, and the next capture — and through **Background Sync**, which is the only
+  path that saves them while the app is closed. Firefox and Safari have no
+  Background Sync; there the words are just as safe and save on the next open.
+  Three things are worth knowing. **The strip never says "offline"** — a browser
+  reports itself online on a captive portal, in a lift and at the edge of
+  coverage, so it says what is true instead: the words are held, and what will or
+  will not move them. **A session that expired is refused and kept**, with
+  *"Sign in and these will save"* rather than being written into a throwaway
+  sandbox that gets purged. And **retrying is safe**: each capture carries a
+  one-time key, so words that quietly saved on a first attempt cannot arrive twice.
+  For operators and self-hosters: this needs no new environment variable, and it
+  is the browser half of the `POST /api/braindump` route and the
+  `braindump_item_client_key` migration that shipped in v0.6.0. If you override
+  `GUEST_SANDBOX_TTL_HOURS` **above 24**, raise `CAPTURE_ORPHAN_WINDOW_HOURS` in
+  `src/lib/capture-queue.ts` to match — CI can only compare the two defaults, and
+  a client window shorter than the server's TTL would expire captures whose
+  account was still reachable.
+  **`/privacy` has changed and its effective date has moved**: text you typed is
+  now stored in the browser, which it never was before, so the notice names both
+  stores and gives the retention as three triggers.
+
 - **A name in the header, and one-tap access to the timer and the shopping list
   (#252).** The bar greeted people by their **provider username** — the
   lowercased handle the OAuth provider issued, else eight characters of an

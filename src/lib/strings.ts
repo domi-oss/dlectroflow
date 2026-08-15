@@ -1280,7 +1280,7 @@ export const STRINGS = {
   },
   // Refused because a POST for this very entry is outstanding. Said rather than
   // silently disabling the control, and the wait is nameable because the flush is
-  // bounded by CAPTURE_TIMEOUT_MS.
+  // bounded by CAPTURE_FLUSH_TIMEOUT_MS in `use-capture-queue.ts`.
   "captureQueue.discardInFlight": {
     plain: "This one is being saved right now. Give it a moment and try again.",
     playful:

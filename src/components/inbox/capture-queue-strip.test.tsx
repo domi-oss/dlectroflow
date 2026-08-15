@@ -33,11 +33,12 @@ function api(over: Partial<CaptureQueueApi> = {}): CaptureQueueApi {
     stranded: [],
     flushing: false,
     inFlight: () => false,
-    enqueueCapture: () => ({ ok: true }),
-    flush: vi.fn().mockResolvedValue(undefined),
+    enqueueCapture: () => ({ ok: true, clientKey: "k-new" }),
+    flush: vi.fn().mockResolvedValue({ saved: [] }),
     discard: vi.fn().mockResolvedValue("discarded" as DiscardOutcome),
     announcement: null,
     clearAnnouncement: () => {},
+    savedTicket: 0,
     ...over,
   };
 }
@@ -325,7 +326,7 @@ describe("capture queue strip — Discard takes a two-step confirm (#175)", () =
 
   it("refuses without a confirm when a POST is already in flight for that entry", async () => {
     // Said rather than the control silently disabled: the flush is bounded by
-    // CAPTURE_TIMEOUT_MS, so the wait is short and nameable. This is the
+    // CAPTURE_FLUSH_TIMEOUT_MS, so the wait is short and nameable. This is the
     // courtesy check — the guard is the hook's re-check at confirm-resolution.
     const { value } = strip({
       mine: [capture()],
