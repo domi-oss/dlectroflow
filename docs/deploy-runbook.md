@@ -449,10 +449,27 @@ outlive any single workspace. A daily CronJob purges both.
 **What it purges** (`prisma/scheduled-purge.ts` — self-contained so it runs in
 the standalone prod image; imports only `@prisma/client`, no app source):
 - `purgeExpiredGuests` — deletes `Workspace` rows with `kind: "guest"` and
-  `expiresAt` in the past (bounded to 25/call, looped until drained). All
-  workspace-scoped rows cascade via FK (Settings, Streak, BrainDumpItem, Task,
-  FocusSession, DayRollup, RewardEvent, StreakRecord, Badge, DailySpark;
-  Step/BreakdownTurn cascade transitively through Task).
+  `expiresAt` in the past, 25 per batch and at most 200 batches per run
+  (`PURGE_BATCH` / `MAX_BATCHES`). A backlog larger than that needs a second run,
+  which is what the on-demand command below is for. Every workspace-scoped row
+  goes with it: each one declares `workspaceId` with `onDelete: Cascade`, and
+  `Step`/`BreakdownTurn` cascade transitively through `Task`.
+
+  The list of those models is **not written out here** — it changed three times
+  without this section noticing, and the same reasoning retired the model count
+  that used to sit in `CLAUDE.md`. Derive it instead:
+
+  ```
+  awk '/^model /{m=$2} /^  workspaceId /{print m}' prisma/schema.prisma | sort -u
+  ```
+
+  Anchor the `workspaceId` match to a field declaration as above. Matching the
+  bare word anywhere in the block also picks up back-relations and index
+  declarations, which reads as one extra model — 14 where the answer is 13.
+
+  A model that declares `workspaceId` is also enrolled automatically in the
+  scoping harness and the export-coverage guard, so the schema is the one place
+  this is stated.
 - `purgeStaleGuestCounters` — deletes `GuestDailyActivity`/`GuestAiUsage` rows
   older than **30 days**.
 
