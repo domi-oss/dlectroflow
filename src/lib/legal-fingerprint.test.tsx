@@ -185,7 +185,19 @@ const PUBLISHED = {
   // so the date does not move for it either. Recorded because the alternative is
   // a hash whose provenance nobody can reconstruct, and because it is the third
   // re-record inside one branch: two for substance and merge, one for copy.
-  privacy: "eed96f5d51654fcfb9207b1892d6f4fc432e6715b7ccd7f5c0dafbe2e806d7e8",
+  // Fourth and final re-record, for a real self-contradiction found on review
+  // round 8: the roll-up narrative was described as "shown only to you" while
+  // "Who else is involved" discloses that Resend receives the round-up email
+  // containing that same narrative. One section's confidentiality claim against
+  // another section's recipient disclosure — the exact defect class this branch
+  // exists to remove, inside the paragraph the branch added.
+  //
+  // Worth keeping as the clearest lesson of the whole sweep: the new prose was
+  // checked against the CODE, thoroughly, and not against the REST OF THE PAGE.
+  // A page this long is its own consistency surface, and a recipient named in one
+  // section falsifies an "only you" written in another. Nothing was published
+  // under the earlier hashes, so the date stays 2026-08-15 for all four.
+  privacy: "b8d814cd06b28a12068b9b3305c4be5219b302b15e1e5cea1022edce26c76733",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
