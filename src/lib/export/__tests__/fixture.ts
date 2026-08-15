@@ -235,20 +235,61 @@ export function makeSnapshot(
       id: WORKSPACE_ID,
       kind: "user",
       createdAt: new Date(Date.UTC(2026, 5, 1, 7, 0, 0)),
+      lastSeenAt: new Date(Date.UTC(2026, 7, 3, 9, 29, 0)),
       expiresAt: null,
     },
     account: {
       id: "user-1",
       provider: "gitlab",
+      // A GitLab subject is a numeric string. Distinctive here so an assertion
+      // that it reached the archive cannot pass on some other field's value.
+      providerSub: "gitlab-sub-778201",
       handle: "sam",
       // #252 — null, so the fixture stays a row an account that predates the
       // column really has: the migration adds it nullable and backfills nothing.
       displayName: null,
       email: "sam@example.com",
       role: "member",
+      status: "active",
       aiPolicy: "capped",
       aiQuota: 50,
+      // At the schema default (null = the instance's own provider). The account
+      // that saved a key is not the baseline row.
+      llmProvider: null,
       createdAt: new Date(Date.UTC(2026, 5, 1, 7, 0, 0)),
+      lastSeenAt: new Date(Date.UTC(2026, 7, 3, 9, 29, 0)),
+      // An active account, so both of these are null — and they are spelled out
+      // rather than omitted, because this literal is typed against
+      // `ExportAccount` and that is what makes a new column a compile error here
+      // instead of a silently-missing export field.
+      revokedAt: null,
+      purgeAfter: null,
+    },
+    accountRecords: {
+      invitation: {
+        provider: "gitlab",
+        identity: "sam",
+        // The whole reason this record is exported rather than disclosed and
+        // withheld: free text ANOTHER PERSON wrote about the data subject. A
+        // comma and an apostrophe because it is typed into a free-text field,
+        // and distinctive enough that a search for it cannot match anything else
+        // in the archive.
+        note: "met at the ADHD meetup, wants the shopping list beta",
+        isOwnerSeed: false,
+        invitedAt: new Date(Date.UTC(2026, 4, 28, 14, 0, 0)),
+        claimedAt: new Date(Date.UTC(2026, 5, 1, 7, 0, 0)),
+      },
+      aiUsage: {
+        count: 7,
+        windowStartedAt: new Date(Date.UTC(2026, 7, 3, 6, 0, 0)),
+        updatedAt: new Date(Date.UTC(2026, 7, 3, 8, 45, 0)),
+      },
+      calendarFeed: {
+        createdAt: new Date(Date.UTC(2026, 6, 20, 11, 0, 0)),
+        // Never rotated — the ordinary case, and the null path for the one
+        // nullable column on the row.
+        rotatedAt: null,
+      },
     },
     settings: makeSettings(),
     tasks: [makeTaskWithSteps(), makeSteplessTask(), makeUnscheduledTask()],
@@ -447,6 +488,23 @@ export function makeEmptySnapshot(): ExportSnapshot {
     focusSessions: [],
     focusPlaylists: [],
     shoppingItems: [],
+    accountRecords: {
+      // The invitation survives into the empty state on purpose: it PREDATES
+      // first sign-in — it is what allowed the account to exist at all — so an
+      // account with nothing in it still has one. The other two rows are written
+      // by using the features, so a brand-new account genuinely has neither, and
+      // that is the null path every serialiser has to render.
+      invitation: {
+        provider: "gitlab",
+        identity: "newcomer",
+        note: null,
+        isOwnerSeed: false,
+        invitedAt: new Date(Date.UTC(2026, 5, 1, 6, 0, 0)),
+        claimedAt: new Date(Date.UTC(2026, 5, 1, 7, 0, 0)),
+      },
+      aiUsage: null,
+      calendarFeed: null,
+    },
     gamification: {
       streak: null,
       streakRecords: [],

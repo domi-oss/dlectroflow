@@ -478,32 +478,65 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(text).toMatch(/no field for it/i);
   });
 
-  it("names all four withheld bookkeeping categories, symmetrically with the archive README", () => {
+  it("says the four account records are IN the download, with credentials as the only exclusion", () => {
     // `docs/legal.md`: /privacy and `src/lib/export/readme.ts` are one
-    // disclosure read in two places, and "those two wordings move together".
-    // The README got one assertion per omitted model and per omitted `User`
-    // column (`readme.test.ts`); this side had only the two credential
-    // exclusions, so the page was free to drift from the archive without a
-    // build failure — an asymmetry in a pair the doc says must stay in step.
+    // disclosure read in two places, and "those two wordings move together", so
+    // this test and `readme.test.ts`'s equivalent move together too.
     //
-    // Counted on the defect's own axis, per omitted COLUMN, because this
-    // paragraph has already shipped a partial list twice: once as the original
-    // F6 defect, and once inside its own correction, when it named `status` and
-    // `lastSeenAt` while dropping `revokedAt` and `providerSub`.
+    // POLARITY FLIPPED. This test previously asserted that the page NAMED four
+    // withheld bookkeeping categories, counted per omitted COLUMN because the
+    // paragraph had shipped a partial list twice — once as the original F6
+    // defect, and once inside its own correction, when it named `status` and
+    // `lastSeenAt` while dropping `revokedAt` and `providerSub`. The owner's
+    // decision was to INCLUDE all four rather than keep disclosing the gap, so
+    // the accurate page now says they are in the download and the assertions
+    // invert. The per-column counting is kept, because a partial list is just as
+    // wrong in this direction: a page claiming three of four columns are included
+    // reads as if all of them are.
     const text = pageText();
-    expect(text).toMatch(/invitation record/i); // Allowlist
-    expect(text).toMatch(/AI usage count/i); // UserAiUsage
-    expect(text).toMatch(/timestamps on your calendar feed/i); // CalendarFeed
-    expect(text).toMatch(/active or revoked/i); // User.status
-    expect(text).toMatch(/when it was last seen/i); // User.lastSeenAt
-    expect(text).toMatch(/when access was withdrawn/i); // User.revokedAt
-    expect(text).toMatch(/account id GitLab issued/i); // User.providerSub
-    // The opposite direction: `provider` and `handle` ARE exported, so the page
-    // must not imply they are withheld while disclosing `providerSub`.
+
+    // The exclusion is credentials, and there are THREE — the calendar feed's
+    // token joins the two already named, because exporting the row's timestamps
+    // is what made its token an explicit decision rather than an absence.
+    expect(text).toMatch(/OAuth tokens/i); // GoogleAuth
+    expect(text).toMatch(/API key/i); // User.llmKeyEnc
+    expect(text).toMatch(/calendar feed'?s? (own )?(secret )?(address|url|token)/i); // CalendarFeed.token
     expect(
       text,
-      "the page must not claim the username or provider name is withheld",
-    ).toMatch(/both of which the export does include/i);
+      "the page must say credentials are the exclusion, not one of several",
+    ).toMatch(/only things|only exclusion|nothing else is held back|that is the whole list/i);
+
+    // Each of the four, positively described as included. Same axis as before.
+    expect(text).toMatch(/invitation record/i); // Allowlist
+    expect(text).toMatch(/AI usage count/i); // UserAiUsage
+    expect(text).toMatch(/calendar feed/i); // CalendarFeed
+    expect(text).toMatch(/active or revoked/i); // User.status
+    expect(text).toMatch(/last seen/i); // User.lastSeenAt
+    expect(text).toMatch(/access was withdrawn/i); // User.revokedAt
+    expect(text).toMatch(/account id GitLab issued/i); // User.providerSub
+
+    // The note specifically, because it is the one field that is data ABOUT the
+    // reader written by somebody else, and the reason the set was worth including
+    // rather than continuing to offer by hand.
+    expect(
+      text,
+      "the page must say the invitation note itself is in the download",
+    ).toMatch(/note/i);
+
+    // The stale claims. Each was true when written and is false the moment the
+    // code ships, so their absence is asserted rather than left to review.
+    expect(
+      text,
+      "the page still says some things are deliberately left out of the export",
+    ).not.toMatch(/Some things are deliberately left out/i);
+    expect(
+      text,
+      "the page still calls the four records account bookkeeping withheld from the export",
+    ).not.toMatch(/The rest is account bookkeeping/i);
+    expect(
+      text,
+      "the page still offers to send the records by hand, which is now redundant",
+    ).not.toMatch(/I will send any of it by hand/i);
   });
 
   it("discloses the three stored-content categories added by this sweep (#252, F7/F8)", () => {

@@ -32,42 +32,54 @@ describe("README.md — the file that explains the archive", () => {
     expect(readme.toLowerCase()).toContain("token");
   });
 
-  it("names the account bookkeeping it withholds, and does not claim to be everything", () => {
+  it("says the account records ARE in the archive, and names credentials as the exclusion", () => {
     // /privacy and this file are one disclosure read in two places, and
-    // `docs/legal.md` says so: "those two wordings move together". The page now
-    // names four kinds of held-but-unexported bookkeeping — the invitation row
-    // and its note (`Allowlist`), the AI usage count (`UserAiUsage`), the
-    // calendar feed's timestamps (`CalendarFeed`) and the account flags
-    // (`User.status` / `lastSeenAt`) — so an archive still saying it holds
-    // "everything dlectroflow holds about your account" is the weaker of two
-    // statements of the same fact, and the one a reader gets AFTER they have
-    // stopped reading the page.
-    // One assertion per omitted model, because the first version of this test
-    // named only two of the four and its own comment claimed all four — the
-    // same shape of gap the sweep is closing, reproduced in the guard for it.
-    // A future edit dropping any single category must red this.
+    // `docs/legal.md` says so: "those two wordings move together".
+    //
+    // POLARITY FLIPPED. The previous version of this test asserted that the
+    // archive NAMED four kinds of held-but-unexported bookkeeping — the invitation
+    // row and its note (`Allowlist`), the AI usage count (`UserAiUsage`), the
+    // calendar feed's timestamps (`CalendarFeed`) and the account flags on `User`.
+    // All four are now IN the download, so an archive still listing them as
+    // withheld would be false, and the accurate wording is the one this asserts.
+    // The pattern kept, the polarity reversed — the same move `docs/legal.md`
+    // records for the Terms' export sentence when #129 shipped.
     expect(readme).toContain("What is not in this archive");
+
+    // What remains excluded is credentials, and all THREE of them: the two the
+    // page already named plus the calendar feed's token, which had never been
+    // called one because the whole row was absent.
+    expect(readme.toLowerCase()).toMatch(/oauth token/); // GoogleAuth
+    expect(readme.toLowerCase()).toMatch(/api key/); // User.llmKeyEnc
+    expect(readme.toLowerCase()).toMatch(
+      /feed'?s? (own )?(secret )?(address|url|token)|token in your calendar/,
+    ); // CalendarFeed.token
+
+    // And the four records must be positively described as present, or "not in
+    // this archive" could simply have gone quiet about them — which is the
+    // failure this whole change exists to remove, one layer up.
     expect(readme.toLowerCase()).toContain("invitation"); // Allowlist
     expect(readme.toLowerCase()).toMatch(/usage count|ai usage/); // UserAiUsage
-    expect(readme.toLowerCase()).toContain("calendar subscription feed"); // CalendarFeed
-    // User: all four omitted columns, not just the two that were easy to phrase.
-    expect(readme.toLowerCase()).toMatch(/active or revoked/); // status
-    expect(readme.toLowerCase()).toMatch(/last seen/); // lastSeenAt
-    expect(readme.toLowerCase()).toMatch(/access was withdrawn/); // revokedAt
+    expect(readme.toLowerCase()).toContain("calendar subscription"); // CalendarFeed
+    expect(readme.toLowerCase()).toMatch(/active or revoked/); // User.status
+    expect(readme.toLowerCase()).toMatch(/last seen/); // User.lastSeenAt
     expect(readme.toLowerCase()).toMatch(/id your sign-in provider issued/); // providerSub
-    // `provider` and `handle` ARE exported, so the archive must not imply
-    // otherwise while disclosing `providerSub`. This is the distinction Duo's
-    // suggested wording collapsed, and collapsing it would trade one
-    // inaccuracy for another.
-    expect(
-      readme.toLowerCase(),
-      "the archive must not claim the provider's name is withheld — it is exported",
-    ).toContain("provider's *name* and your username are in");
-    // The overclaim itself. A reader who opens the zip must not be told the
-    // list they just read is exhaustive when the page says it is not.
+
+    // The stale claims, asserted absent so the flip cannot be half-done. Each is
+    // a phrase that was TRUE when written and is false now.
     expect(
       readme,
-      "the README still claims to be everything held about the account",
+      "the README still says the account records are not in these files",
+    ).not.toMatch(/they are not in these files/i);
+    expect(
+      readme,
+      "the README still tells the reader to ask for the invitation note by hand",
+    ).not.toMatch(/the Privacy Policy at `\/privacy` says how to ask, and the invitation note is included in that/i);
+    // The overclaim in the other direction. Fixing the omission must not bring
+    // back "everything", because credentials are still withheld.
+    expect(
+      readme,
+      "the README claims to hold everything, which is still not true",
     ).not.toMatch(/This is everything dlectroflow holds/);
   });
 
@@ -115,10 +127,18 @@ describe("README.md — the file that explains the archive", () => {
     const guest = exportReadme(
       makeSnapshot({
         account: null,
+        // A guest sandbox has no account, so none of the three account records
+        // exists to hang off one.
+        accountRecords: {
+          invitation: null,
+          aiUsage: null,
+          calendarFeed: null,
+        },
         workspace: {
           id: "ws-guest",
           kind: "guest",
           createdAt: new Date(Date.UTC(2026, 7, 3, 6, 0, 0)),
+          lastSeenAt: new Date(Date.UTC(2026, 7, 3, 8, 0, 0)),
           expiresAt: new Date(Date.UTC(2026, 7, 4, 6, 0, 0)),
         },
       }),
