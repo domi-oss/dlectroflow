@@ -20,9 +20,9 @@
  * APPLIED and mirrors `LlmProvider`. This file proves it BITES, and that the
  * purge left nothing behind.
  *
- * Needs the real Postgres (CI wires up a service DB and runs
- * `prisma migrate deploy` first; locally vitest.config.ts forwards
- * DATABASE_URL from your .env).
+ * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

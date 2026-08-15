@@ -30,7 +30,8 @@ import type { ExportSnapshot } from "./types";
  * content" reporting the leaked strings.
  *
  * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
- * deploy` first; locally `vitest.config.ts` forwards DATABASE_URL from `.env`).
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 const WS_A = "test-129-export-a";

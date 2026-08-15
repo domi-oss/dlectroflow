@@ -28,10 +28,9 @@
  * build a list covering every combination of `done` × `savedForLater`, and assert
  * both spellings return the same number.
  *
- * Needs the real Postgres (CI wires up a service DB and runs
- * `prisma migrate deploy` first; locally it uses your DATABASE_URL schema —
- * vitest does NOT read .env):
- *   set -a; . ./.env; set +a; npm run test
+ * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
