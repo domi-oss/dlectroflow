@@ -579,9 +579,11 @@ export default function PrivacyPage() {
           and anything you typed into the &ldquo;tell Claude how to
           adjust&rdquo; box, the context sent alongside a breakdown is{" "}
           <strong>numbers and flags only</strong> — small integers, booleans and
-          one preference. No identifiers, no email addresses and no dates. Your
-          email address, your GitLab identity, your Google tokens and your
-          settings are never sent. Neither is the text of your other captures,
+          one preference. No identifiers, no email addresses and no dates. That
+          one preference is the <strong>voice</strong> you picked, so the steps
+          come back in the same tone as the rest of the app; your email address,
+          your GitLab identity, your Google tokens and every <em>other</em>{" "}
+          setting are never sent. Neither is the text of your other captures,
           your other tasks&rsquo; steps, or any other task&rsquo;s note. The
           daily quote is generated from a fixed prompt containing nothing about
           you.
@@ -1203,9 +1205,10 @@ export default function PrivacyPage() {
           asked you, and consent nobody sought is not consent. So what I hold is
           held for one reason only: it is an unavoidable part of doing the thing
           you directed me to do with the words you typed — keep them, show them
-          back to you, and break them into steps if you press the button.
-          Nothing else is done with it, and you can delete the item yourself at
-          any time, or ask me to.
+          back to you, break them into steps if you press the button, and put
+          them on your calendar or into your Google Tasks list if you ask for
+          that. Nothing else is done with it, and you can delete the item
+          yourself at any time, or ask me to.
         </p>
         <p>
           <strong>A practical suggestion, not a rule:</strong> the app works

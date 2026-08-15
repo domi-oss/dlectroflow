@@ -185,8 +185,28 @@ const PUBLISHED = {
   // so the date does not move for it either. Recorded because the alternative is
   // a hash whose provenance nobody can reconstruct, and because it is the third
   // re-record inside one branch: two for substance and merge, one for copy.
-  // Fourth and final re-record, for a real self-contradiction found on review
-  // round 8: the roll-up narrative was described as "shown only to you" while
+  // FIFTH re-record. Round 8 exposed a defect CLASS this sweep had no method
+  // for — page-versus-page rather than page-versus-code — so the same check was
+  // then run deliberately over every absolute claim the branch added, and it
+  // found two more that Duo had not reached:
+  //
+  //   • "your settings are never sent" sat in the SAME PARAGRAPH as "one
+  //     preference", and that preference is `Settings.voice`. A paragraph
+  //     contradicting itself across two sentences, inherited from the pre-#123
+  //     wording and carried through this rewrite. The voice is now named, which
+  //     is a stronger disclosure than the denial it replaces.
+  //   • the health paragraph's "keep them, show them back to you, and break them
+  //     into steps" omitted the calendar and Google Tasks copy that F4 of this
+  //     very MR discloses two sections earlier. "Nothing else is done with it"
+  //     was therefore false against this branch's own new text.
+  //
+  // The method is the lesson: grep the added prose for absolutes — only, never,
+  // nothing, nobody — and check each against the OTHER sections, not just the
+  // code. Nine of the ten original findings were page-versus-code, which is why
+  // this class went unexamined until a reviewer walked into it.
+  //
+  // Fourth re-record, for the self-contradiction round 8 DID find:
+  // the roll-up narrative was described as "shown only to you" while
   // "Who else is involved" discloses that Resend receives the round-up email
   // containing that same narrative. One section's confidentiality claim against
   // another section's recipient disclosure — the exact defect class this branch
@@ -197,7 +217,7 @@ const PUBLISHED = {
   // A page this long is its own consistency surface, and a recipient named in one
   // section falsifies an "only you" written in another. Nothing was published
   // under the earlier hashes, so the date stays 2026-08-15 for all four.
-  privacy: "b8d814cd06b28a12068b9b3305c4be5219b302b15e1e5cea1022edce26c76733",
+  privacy: "8a657b9b18cfb40c742f6bd184f7193de8c3f17f46363543b9ba3c3a161e07fa",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
