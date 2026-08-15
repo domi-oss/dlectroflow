@@ -172,9 +172,20 @@ export async function expectThemeApplied(
 /**
  * Wait for the always-present app shell (the brand link in the shared header)
  * so assertions and axe scans see a fully-rendered page, not a hydrating one.
+ *
+ * `timeout` is opt-in and omitted by every caller but one, so the Playwright
+ * default still applies everywhere it always did. #193 needs it: that spec
+ * CPU-throttles the page 20x and derives its own test timeout from the SUM of the
+ * bounded waits inside each iteration, and a wait whose bound is an inherited
+ * default is not a term you can add up.
  */
-export async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
+export async function waitForShell(
+  page: Page,
+  timeout?: number,
+): Promise<void> {
+  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible({
+    timeout,
+  });
 }
 
 // ── #101: every /settings section is a disclosure ───────────────────────────
