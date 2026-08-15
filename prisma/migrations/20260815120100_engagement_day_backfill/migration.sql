@@ -60,9 +60,9 @@
 -- A second run writes nothing. That is sound rather than optimistic because
 -- Prisma wraps every migration file in one transaction: a failure part-way rolls
 -- back both inserts, leaving the table empty again, so "empty" cannot mean "half
--- done". The `ledgerFrom` write is scoped to rows still carrying the previous
--- migration's default instant, so a re-run cannot push a workspace's coverage
--- boundary forward and un-trust runs that had become trustworthy.
+-- done". That covers the two INSERTs. **Statement 3 is the exception and is
+-- treated separately below** — it is a no-op on a same-day re-run and NOT on a
+-- later one, which is the second thing review caught here.
 --
 -- The two inserts are NOT guarded on the same condition, and the difference is
 -- forced rather than an oversight. Statement 1 checks that the ledger is empty.
@@ -145,9 +145,34 @@ SELECT gen_random_uuid()::text,
 -- for runs that BEGIN after that point — a delay on a feature about multi-day
 -- streaks, in exchange for never revoking on a day the ledger only partly saw.
 --
--- Scoped to rows that still carry the previous migration's default, identified by
--- `ledgerFrom < date_trunc('day', now()) + interval '2 days'`, so a hand-set or
--- already-advanced boundary is left alone and a re-run is a no-op.
+-- ⚠️ This statement is NOT idempotent across days, and it is the one statement in
+-- this file that is not. Said plainly because the earlier wording claimed the
+-- opposite, and because the way that claim survived measurement is the reusable
+-- part: `now()` is re-evaluated on every execution, so the boundary is a MOVING
+-- target, not a fixed reference. A re-run on the same day computes the same
+-- boundary and matches nothing — which is the only window anyone had measured it
+-- in, here and in the MR's own evidence. A re-run a week later computes a boundary
+-- a week further out, the already-advanced `ledgerFrom` is still below it, and the
+-- row is pushed forward again. Measured on a seeded schema: same-day re-run leaves
+-- `2026-08-17T00:00:00Z` untouched, a `now() + interval '7 days'` re-run moves it
+-- to `2026-08-24T00:00:00Z`.
+--
+-- It is left as it is rather than made time-invariant, because the two cannot both
+-- be had: the value this statement exists to write is "two days after THIS
+-- deployment", which is a function of the execution instant. A fixed timestamp
+-- would be wrong for every self-hoster who deploys later than the day it was
+-- written — their boundary would already be in the past, so revocation would go
+-- live immediately against a ledger that had recorded nothing, which is the exact
+-- hazard the two-day slack exists to prevent. Any guard that compares a stored
+-- boundary against a `now()`-derived one eventually matches again; `< now()` only
+-- moves the horizon to two days.
+--
+-- The direction is safe, and that is why this is a comment fix and not a data fix:
+-- a boundary further out means MORE runs are untrusted, so strictly FEWER
+-- revocations — the "keep a badge somebody earned" side this whole file errs
+-- toward. It is also defensible on its own terms: a manual re-run means the ledger
+-- is being re-derived from history, and re-opening the trust window is the
+-- conservative response to that, not a regression.
 UPDATE "Streak"
    SET "ledgerFrom" = date_trunc('day', now()) + interval '2 days'
  WHERE "ledgerFrom" < date_trunc('day', now()) + interval '2 days';
