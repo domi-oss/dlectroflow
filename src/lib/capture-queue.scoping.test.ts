@@ -332,6 +332,39 @@ describe("capture queue — blockedUnder is a comparison, not a flag (#175)", ()
     expect(entry?.blockedUnder).toBeUndefined();
   });
 
+  /**
+   * ⚠️ **The direction the case above does NOT cover: 409 first, then 403.**
+   *
+   * `session-expired` is transient, so a 403 legitimately supersedes it — and the
+   * spread that carried the new mark used to carry the old `blockedUnder` with it.
+   * The `retry` arm two cases up already clears both together, on the stated
+   * grounds that the field *"means nothing without the mark"*; a 403 ends the
+   * comparison just as finally, so the same rule has to apply.
+   *
+   * Honest note on reachability: there is **no visible symptom today**, because
+   * `strandedStateOf` returns on `account-revoked` before any `blockedUnder` is
+   * read, and the mark is sticky, so the only thing that clears it is a success
+   * that removes the entry outright. It is fixed because the module's own
+   * invariant is that this field follows the session, and because the default here
+   * is the wrong one — the same argument `BLOCK_PERSISTENCE` makes for being an
+   * exhaustive `Record` rather than a hand-copied comparison.
+   *
+   * Duo review round 9 on `!348`, and the one finding of that round. Verified
+   * against `applyOutcome` before acting: the finding is accurate, including its
+   * own note about the short-circuit.
+   */
+  it("drops a stale blockedUnder when a 403 supersedes a 409", () => {
+    const store = seeded([
+      capture({ blockedBy: "session-expired", blockedUnder: "ws-old" }),
+    ]);
+
+    applyFlushOutcome(store, "k1", "account-revoked", LIVE);
+
+    const entry = readQueue(store)[0];
+    expect(entry?.blockedBy).toBe("account-revoked");
+    expect(entry?.blockedUnder).toBeUndefined();
+  });
+
   it("rejects a stored blockedUnder that is not a non-empty string", () => {
     const store = memoryStore({
       [CAPTURE_QUEUE_STORAGE_KEY]: JSON.stringify([

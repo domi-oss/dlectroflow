@@ -420,6 +420,8 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
           return;
         const store = currentStore();
         const present = new Set(readQueue(store).map((c) => c.clientKey));
+        /** Did any recovery below fail? Announced once, after the loop. */
+        let lost = false;
         // ⚠️ The losing tab of a clobber finds its own pending capture gone from a
         // queue it never removed it from. Re-enqueueing is the ONLY recovery: this
         // tab has already told its user the words are safe.
@@ -470,8 +472,15 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
           //
           // Reported by Duo on `!360`, verified against this line before acting.
           const recovered = enqueue(store, capture);
-          if (!recovered.ok) announce("recovery-failed");
+          if (!recovered.ok) lost = true;
         }
+        // ⚠️ ONCE for the event, not once per capture, and the copy is worded for
+        // either count. One clobbering write can take the queue to its cap and
+        // strand every entry this tab was still waiting on, so N is genuinely
+        // reachable — and `setAnnouncement` batches, so announcing per capture
+        // would raise the token N times to say one sentence anyway. Announcing
+        // once is the honest version of what the region can actually convey.
+        if (lost) announce("recovery-failed");
         onChange();
       };
       window.addEventListener(CAPTURE_QUEUE_EVENT, onChange);

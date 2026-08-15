@@ -1377,14 +1377,23 @@ export const STRINGS = {
   //
   // No cap is quoted and no wait is offered — the recovery retries on its own, and
   // the user cannot act on which bound was hit. What they can act on is knowing
-  // they need to type it again, so that is what it says, and it says "one" because
-  // the loop announces per capture. `role="alert"` is the right region and it is
-  // already the one this notice renders into.
+  // they have to type the words again, so that is what it says.
+  //
+  // ⚠️ **Deliberately count-agnostic, and a first draft said "One capture" and was
+  // wrong.** The handler walks every entry this tab was still waiting on, and a
+  // single clobbering write can take the queue to its cap and strand all of them,
+  // so N > 1 is reachable. The hook announces once per event rather than once per
+  // capture, and the region cannot carry a number without the announcement growing
+  // a payload — so the sentence is true for either count instead.
+  //
+  // `role="alert"` is the right region and it is already the one this renders into:
+  // the loss is not something a polite region should sit on until the next focus
+  // change, because there is nothing left on screen to notice it from.
   "captureQueue.refused.recoveryFailed": {
     plain:
-      "One capture that was waiting to save has been lost — this browser couldn't hold on to it. Nothing already saved is affected, but you'll need to type that one again.",
+      "Words that were waiting to save have been lost — this browser couldn't hold on to them. Nothing already saved is affected, but you'll need to type them again.",
     playful:
-      "One capture that was waiting to save has been lost — this browser couldn't hold on to it. Nothing already saved is affected, but you'll need to type that one again.",
+      "Words that were waiting to save have been lost — this browser couldn't hold on to them. Nothing already saved is affected, but you'll need to type them again.",
   },
   // The origin check refused the request (400, CSRF). No sign-in offered and no
   // account mentioned: the user did nothing wrong, nothing about their account is

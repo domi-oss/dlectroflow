@@ -565,6 +565,49 @@ describe("useCaptureQueue — the storage-event re-enqueue (#175)", () => {
 
     expect(screen.getByTestId("announcement")).toHaveTextContent("");
   });
+
+  /**
+   * ⚠️ **One announcement for the event, not one per capture — which is what makes
+   * the sentence's wording honest rather than a guess at the count.**
+   *
+   * A single clobbering write can take the queue to its cap and strand *every*
+   * entry this tab was still waiting on, so more than one loss per event is
+   * reachable rather than theoretical. `setAnnouncement` batches, so announcing
+   * per capture would raise the token N times to deliver one sentence — and the
+   * region cannot carry a number without the announcement growing a payload. So
+   * the copy is count-agnostic and this pins the token to one move, which is the
+   * observable half of that decision. A first draft of the sentence said *"One
+   * capture"* and would have been wrong here.
+   */
+  it("announces once for the event, however many captures it lost", async () => {
+    render(<Host />);
+    // Two captures of this tab's own, both awaiting.
+    await userEvent.click(screen.getByRole("button", { name: "add" }));
+    await userEvent.click(screen.getByRole("button", { name: "add" }));
+    expect(readQueue(window.localStorage)).toHaveLength(2);
+    const before = latest?.announcement?.token ?? 0;
+
+    // One write from another tab: both of ours gone, and no room to put either back.
+    await act(async () => {
+      seed(
+        Array.from({ length: CAPTURE_QUEUE_MAX_ITEMS }, (_, i) =>
+          capture({ clientKey: `theirs-${i}`, text: `theirs ${i}` }),
+        ),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: CAPTURE_QUEUE_STORAGE_KEY }),
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("announcement")).toHaveTextContent(
+        "recovery-failed",
+      ),
+    );
+    // The control: TWO were lost, and the token moved exactly once.
+    expect(latest?.announcement?.token).toBe(before + 1);
+  });
 });
 
 describe("useCaptureQueue — Discard re-checks at resolution (#175)", () => {

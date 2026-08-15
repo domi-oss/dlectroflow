@@ -1010,7 +1010,24 @@ function applyOutcome(
       if (outcome === "session-expired" && liveWorkspaceId) {
         return { ...c, blockedBy: outcome, blockedUnder: liveWorkspaceId };
       }
-      return { ...c, blockedBy: outcome };
+      // ⚠️ **And the spread must not carry a `blockedUnder` an earlier 409 left
+      // behind.** `session-expired` is transient, so a 403 legitimately supersedes
+      // it — and the field is the raw input to a comparison that is now over, so
+      // it means nothing without the mark it belonged to. Exactly the reasoning the
+      // `retry` arm below already gives for clearing both together; a 403 ends the
+      // comparison just as finally as a retryable failure does.
+      //
+      // No visible symptom today: `strandedStateOf` returns on `account-revoked`
+      // before any `blockedUnder` is read, and the mark is sticky, so nothing but a
+      // success clears it and a success removes the entry. Fixed anyway, because
+      // leaving it makes the stored shape contradict this field's stated invariant
+      // — that it follows the session — and because inheriting the wrong default by
+      // omission is the failure `BLOCK_PERSISTENCE` is an exhaustive `Record` to
+      // prevent one decision away from here.
+      //
+      // Duo review round 9 on `!348`.
+      const { blockedUnder: _stale, ...withoutUnder } = c;
+      return { ...withoutUnder, blockedBy: outcome };
     }
     // `retry` — reaching a retryable failure proves the SESSION guard is no
     // longer what is stopping this capture, so a `session-expired` mark must go.
