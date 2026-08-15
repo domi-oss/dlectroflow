@@ -78,6 +78,43 @@ export const HELP_SECTIONS = [
   { id: "help-inbox-freshness", heading: { text: "The inbox & freshness" } },
   { id: "help-task-breakdown", heading: { text: "Task breakdown" } },
   { id: "help-focus-session", heading: { text: "The focus session" } },
+  // The app menu carries SIX destinations by default and this page documented
+  // four of them (Inbox, Focus Timer, Settings, and Help itself). These two close
+  // that gap, as content destinations placed before the settings-shaped sections.
+  //
+  // Six, not seven: `DESTINATIONS` (`app-menu.tsx:9-20`) has seven entries, but
+  // `nav.shopping` carries `requires: "shoppingList"` and that column is
+  // `@default(false)` (`schema.prisma:242`), so a default workspace renders six.
+  // `app-menu.test.tsx:53-63` asserts exactly that list, and seven appears there
+  // only under `<AppMenu shoppingList />`. (Substitute review of record, !356 —
+  // this comment said seven and contradicted itself four lines down, where it
+  // calls Shopping list "an optional feature most workspaces have switched off".
+  // Both halves cannot be true, and the corrected arithmetic is the tidier one:
+  // a gap of two closed by `help-where-things-go`, plus the conditional seventh
+  // closed by `help-shopping-list`.)
+  //
+  // They deliberately do NOT follow the menu's literal order, which interleaves
+  // Shopping list BETWEEN Library and Activity. Grouping wins over that here:
+  // Library and Activity answer one question between them, and splitting them
+  // around an optional feature most workspaces have switched off would put a
+  // section about groceries in the middle of the answer. So the rendered order is
+  // Library + Activity, then Shopping list. (Duo review, !356 — this comment used
+  // to claim it followed the menu's order, which the entries below do not
+  // produce. Stated rather than fixed, because the grouping is the right call and
+  // the claim was the wrong half.)
+  //
+  //  * `help-where-things-go` covers Library and Activity together, because they
+  //    answer one question between them — "my work left the inbox, where is it
+  //    now, and where did the points go". Placed straight after the focus session
+  //    so the page follows the loop to its end rather than stopping at the timer.
+  //  * `help-shopping-list` is its own section rather than a line inside
+  //    "Voice & settings", for the same reason `settings-shopping` is
+  //    (SETTINGS_SECTIONS above): it is a FEATURE switch that adds a destination,
+  //    and a feature filed under a heading that does not name it is a feature
+  //    nobody finds. It is also the one section here describing something that is
+  //    OFF until switched on, which is a fact that needs room to be stated.
+  { id: "help-where-things-go", heading: { text: "Where things end up" } },
+  { id: "help-shopping-list", heading: { text: "Shopping list" } },
   { id: "help-voice-settings", heading: { text: "Voice & settings" } },
   // #129 / #153 — export and self-deletion. After "Voice & settings" because
   // both controls live under Account on the same Settings page that section

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { HELP_SECTIONS } from "@/lib/section-nav";
 import HelpPage from "./page";
 
 // The rest of the props are spread through rather than dropped, so the
@@ -39,6 +40,8 @@ describe("HelpPage", () => {
       /The inbox & freshness/i,
       /Task breakdown/i,
       /The focus session/i,
+      /Where things end up/i,
+      /Shopping list/i,
       /Voice & settings/i,
       /Your data/i,
       /Guests & AI limits/i,
@@ -47,6 +50,47 @@ describe("HelpPage", () => {
         screen.getByRole("heading", { name: heading, level: 2 }),
       ).toBeInTheDocument();
     }
+  });
+
+  // The inbox is a board you can rearrange, and this page described none of that:
+  // it listed the four review choices and stopped, so "put this back in Needs
+  // review" had no documented route.
+  //
+  // Both paths are named on purpose, and that is an accessibility point rather
+  // than a completeness one. The drag is a pointer gesture; `MoveToMenu` is its
+  // non-pointer equivalent, which is what carries WCAG 2.1.1 and 2.5.7 for this
+  // interaction (`inbox-view.tsx:4262-4264` states exactly that). Documenting the
+  // drag alone would describe the app to the subset of users who can perform it.
+  // `Move to` is the control's real accessible name (`move-to-menu.tsx:140`) —
+  // #253 removed the older nested "Move to…" ▾ entry, so the ellipsis form would
+  // send a reader looking for something no longer on screen.
+  it("documents moving items between lists, by drag AND by the Move to control", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The inbox & freshness/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/drag/i);
+    expect(text).toMatch(/Move to/);
+    // The non-pointer path must be presented as equivalent, not as a fallback for
+    // when the drag fails — it is the same dispatcher underneath.
+    expect(text).toMatch(/without dragging|keyboard|same/i);
+  });
+
+  // Substitute review of record, !356 — this section sends the reader to Settings
+  // for the freshness thresholds without naming the section that holds them, which
+  // is the same "the NAME is the search term" standard this MR states twice and
+  // then applies only to the typefaces. The section is `Aging & reminder`
+  // (`section-nav.ts:54`), and it is one of eleven collapsed titles: a reader told
+  // only "on the Settings page" has to scan all eleven for a word that is on none
+  // of them, because "freshness" is this page's word and "Aging" is the app's.
+  it("names the Settings section that owns the freshness thresholds", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The inbox & freshness/i, level: 2 })
+      .closest("section");
+    expect(section!.textContent ?? "").toMatch(/Aging & reminder/);
   });
 
   // The focus session gained real depth in v0.4.0 (#27 pause/resume, #43 + #68
@@ -93,6 +137,225 @@ describe("HelpPage", () => {
     expect(text).toMatch(/reduced motion/i);
     // #65 — the player's pause button can drive the session, if asked to.
     expect(text).toMatch(/Pause music and timer together/i);
+  });
+
+  // The pacer is RING-STYLE ONLY, and this page used to describe it as
+  // unconditional ("From the moment you start, the ring is also a slow breathing
+  // pacer … there is nothing to switch on"). It is not: `timer-visual.tsx` reaches
+  // the breathing markup only in its `ring` branch — `digits`, `bar` and `mug`
+  // each return before it — so three of the four timer styles never breathe.
+  //
+  // `resolveTimerStyle(null, voice)` is what makes that reachable rather than
+  // theoretical: an account that has never opened Timer style resolves to `mug`
+  // on the playful voice and only `ring` on plain, so for a whole voice the
+  // documented default behaviour was the one thing that could not happen. And a
+  // plain-voice reader who simply picks Bar is told their session breathes for its
+  // whole length with nothing to switch on.
+  it("names the Ring timer style as the breathing pacer's precondition", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    // The style is named, and named as the thing that turns the pacer on.
+    expect(text).toMatch(/Ring/);
+    expect(text).toMatch(/Timer style/i);
+    // And the reader is told the other styles do not have it, because "the ring
+    // breathes" alone reads as a description of every session.
+    expect(text).toMatch(
+      /other (?:three )?timer styles do not breathe|only the Ring/i,
+    );
+    // The retired unconditional phrasing must be gone, not merely softened.
+    expect(text).not.toMatch(/there is nothing to switch on/i);
+  });
+
+  // The app menu carries SIX destinations by default (`app-menu.test.tsx:53-63`
+  // asserts the list; the seventh entry is gated on `shoppingList`, which is
+  // `@default(false)`). This page documented four of them — Inbox, Focus Timer,
+  // Settings and Help itself — and never named Library or Activity, even though its
+  // own getting-started list promises the reader they will "earn points toward
+  // your streak", which is a payoff with no stated address.
+  //
+  // Asserted on the MENU labels (`nav.everything` → `Library`, `nav.dashboard` →
+  // `Activity`), not on the route paths: `/dashboard` renders the word "Activity"
+  // and a reader hunting for "Dashboard" finds nothing.
+  it("names the Library and Activity destinations, by their menu labels", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Where things end up/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/Library/);
+    expect(text).toMatch(/Activity/);
+    // Library's four tabs are the reason the section exists: "where did my
+    // finished work go" is the question, and `Done` is the tab that answers it.
+    expect(text).toMatch(/Done/);
+    expect(text).toMatch(/Saved for later/i);
+    // Activity is where the points and the streak the loop promises actually live.
+    expect(text).toMatch(/streak/i);
+    expect(text).toMatch(/badge/i);
+    // Duo review, !356 — the round-up's settings are SPLIT and this section used to
+    // claim they "are on that page rather than in Settings", full stop. Two
+    // different things: `workdayEndTime` / `roundupEmailEnabled` live on the
+    // Activity page, while `notifyRoundup` — whether it also raises a DESKTOP
+    // notification — is Settings → Notifications, whose own hint says "the in-app
+    // recap still shows either way". Saying Settings has nothing to do with the
+    // round-up sends a reader hunting in the wrong place for the toggle they want.
+    expect(text).toMatch(/desktop notification/i);
+    expect(text).toMatch(/Notifications/);
+    const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("/library");
+    expect(hrefs).toContain("/dashboard");
+    // Substitute review of record, !356 — two claims this MR added that the tree
+    // does not support.
+    //
+    // 1. The freshness clock is NOT paused by parking an item. Age is
+    //    `now − max(createdAt, freshenedAt)` (`aging.ts:44-53`) and
+    //    `snoozeBrainDumpItem` (`braindump.ts:157-175`) writes `snoozedUntil`
+    //    without ever stamping `freshenedAt`. Parking only removes the row from
+    //    `needsReview` (`bucket.ts:180-182`), which hides the pill and stops the
+    //    nudge — the clock keeps running underneath. Save for later snoozes for
+    //    60 minutes at every call site, and the default `agingHours` is 4, so an
+    //    item parked at 3h30 comes back reading `Aging`.
+    // 2. The inbox's completed strip is the last TEN completions of all time
+    //    (`bucket.ts:201-208`, `slice(0, 10)`, no date filter). "What you
+    //    completed today" is a separate COUNT rendered beside it, so describing
+    //    the list itself that way contradicts the badge above it.
+    expect(text).not.toMatch(/clock is paused/i);
+    expect(text).not.toMatch(/preview of what you completed today/i);
+    // Duo review round 4, !356 — and this one lands on the substitute review's own
+    // fix. Library is not somewhere work GOES; it is a fuller view of lists the
+    // inbox page already shows. `libraryBuckets` (`bucket.ts:255-260`) returns
+    // `base.singleTask`, `base.multiStep` and `base.savedLater` — literally the
+    // same arrays `bucketItems` hands the inbox — and the inbox renders all five
+    // of its lists on screen (`inbox-view.tsx:2768, 2906, 3366, 3602, 3873`). The
+    // ONLY difference is `Done`, which is uncapped where the inbox's `Completed`
+    // is `slice(0, 10)`.
+    //
+    // So "once something leaves the inbox it lives in Library" was wrong about all
+    // four tabs, and the first correction — conceding the overlap for `Saved for
+    // later` alone, with an "also" — was wrong about the other three. Both are the
+    // same defect: describing one surface as the destination of another.
+    expect(text).not.toMatch(/leaves the inbox/i);
+    expect(text).not.toMatch(/also stays on the inbox/i);
+    // The relationship stated positively, so a reader knows they can work from
+    // either surface rather than hunting for where an item went.
+    expect(text).toMatch(/same lists|both|either/i);
+  });
+
+  // #199 — shopping-list mode is `Settings.shoppingList`, `@default(false)`, and
+  // `/shopping` answers `notFound()` while it is off. This page had never heard of
+  // it, which is the worse of the two failures the brief distinguishes: a gated
+  // feature described without its switch is misleading, but one omitted entirely
+  // is undiscoverable, and the switch is the only thing that reveals it.
+  it("documents shopping-list mode as off until switched on (#199)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Shopping list/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    // The switch, by the label it actually carries in Settings.
+    expect(text).toMatch(/Show the shopping list/i);
+    // That it is off until you do that — the whole point of documenting it.
+    expect(text).toMatch(/off (?:by default|until|to start)/i);
+    // What the mode is FOR, in the terms its own intro uses: not tasks.
+    expect(text).toMatch(/no estimates|not tasks|does not touch your streak/i);
+    // And the reassurance the Settings hint gives, because a feature switch reads
+    // as destructive: turning it off hides the list rather than deleting it.
+    expect(text).toMatch(/without deleting|does not delete|hides the list/i);
+    // Duo review, !356 — `Saved for later` names TWO unrelated things: a Library
+    // tab holding `BrainDumpItem`s, and this list's own `ShoppingItem.savedForLater`
+    // (a separate model entirely, `schema.prisma`'s `ShoppingItem`). This section
+    // asserts the shopping list is "not a kind of task", so borrowing the tab's name
+    // without saying they are separate implies shopping items enter the task
+    // pipeline. The page has to disown that, since it cannot rename the app's label.
+    expect(text).toMatch(/its own|separate|nothing to do with/i);
+    expect(text).toMatch(/Library/);
+    const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("/settings?from=help");
+  });
+
+  // "Voice & settings" named three of Settings' eleven sections. The two that
+  // matter most to a reader who came to /help for help are both absent:
+  //
+  //  - #40's Typeface radios, which is where Atkinson Hyperlegible and
+  //    OpenDyslexic live. Someone who cannot comfortably read the app is exactly
+  //    who opens the help page, and it offered them nothing.
+  //  - the real name of the reminders section (`Notifications`) and the fact that
+  //    every toggle in it is inert without the browser's permission — a user can
+  //    tick all three, be told nothing, and receive nothing.
+  it("documents the typeface a11y setting and the Notifications permission gate", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Voice & settings/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    // The section that owns the typefaces, and the two aids by name — the names
+    // are what someone who needs them is searching for.
+    expect(text).toMatch(/Appearance/);
+    // #85 made the theme THREE-state (`system` / `light` / `dark`) defaulting to
+    // `system`, so "light and dark mode" is no longer the whole setting and no
+    // longer describes what a first visit does. Named by its real label, and the
+    // default is stated, because "follows your device" is the behaviour a reader
+    // meets before they ever open Settings.
+    expect(text).toMatch(/Follow my system/);
+    expect(text).toMatch(/by default|to start with|already/i);
+    expect(text).toMatch(/Atkinson Hyperlegible/);
+    expect(text).toMatch(/OpenDyslexic/);
+    // Reminders: the section's real heading, not the word "reminders" alone.
+    expect(text).toMatch(/Notifications/);
+    // Duo review, !356 — the section's LEAD sentence has to name what the section
+    // covers. It listed three of five after this MR added the Appearance and
+    // Integrations paragraphs below it, so a reader skimming only the summary would
+    // never learn the typeface options are in here. That is the same
+    // "section does not say what it covers" gap this MR exists to close, so it is
+    // asserted on the first sentence specifically rather than on the section text.
+    //
+    // Substitute review of record, !356 — the fix for that finding recursed and
+    // stopped one short, and this loop is where it was pinned at five. The section
+    // carries SIX topics: the sixth is `Account → Your name` (#252), the field that
+    // stops the header greeting you by your provider username. Its reader is
+    // exactly the skimmer this assertion exists for — someone whose header shows a
+    // username scans the lead for "name" or "account", finds neither, and leaves.
+    // Guarding five while documenting six would have passed forever.
+    const lead = section!.querySelector("p")!.textContent ?? "";
+    for (const covered of [
+      /voice/i,
+      /freshness/i,
+      /notifications/i,
+      /appearance/i,
+      /integrations/i,
+      /name/i,
+    ]) {
+      expect(lead).toMatch(covered);
+    }
+    // …and the precondition, which is the reachable failure here.
+    expect(text).toMatch(/permission/i);
+  });
+
+  // Two integrations exist and neither was mentioned: per-user Google Tasks
+  // scheduling, and a calendar-subscription URL that is a BEARER CAPABILITY —
+  // anyone holding it reads the feed without signing in. The page documents
+  // export and deletion as data rights; a link that hands out step titles and
+  // times to whoever has the URL belongs in the same breath.
+  it("documents the Google and calendar-feed integrations, and the URL's risk", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Voice & settings/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/Integrations/);
+    expect(text).toMatch(/Google Tasks/);
+    expect(text).toMatch(/calendar feed|calendar subscription/i);
+    // The caveat `calendar-feed.tsx` puts on screen, carried here rather than
+    // left to be met only after the URL has been copied somewhere.
+    expect(text).toMatch(/without signing in|like a password/i);
   });
 
   // #142 — the app now NAVIGATES ON ITS OWN five seconds after a step is
@@ -244,6 +507,54 @@ describe("HelpPage", () => {
       "href",
       "/",
     );
+  });
+
+  // The page's title block used to be a `<header>`, which made it a SECOND
+  // `banner` landmark on every visit.
+  //
+  // `<header>` only stops mapping to `banner` when it is a descendant of
+  // `article`, `aside`, `main`, `nav` or `section`. This one sat in the page's
+  // outer `<div>`, and `(app)/layout.tsx:151` wraps `{children}` in a plain
+  // `<div>` rather than a `<main>` — so there was no sectioning ancestor anywhere
+  // above it and it resolved to `banner`, alongside the shell's own header at
+  // `layout.tsx:83`. Two banners is a duplicate-landmark failure, and it makes
+  // "go to the banner" ambiguous for a screen-reader user on this page only.
+  //
+  // /help was the ONLY `(app)` page doing this, so it is fixed here rather than
+  // swept: `legal-page.tsx` has a `<header>` too and is already correct, because
+  // its own `<main>` (:110) encloses it. A `<div>` loses nothing — the `h1` is
+  // what carries the page's name either way.
+  //
+  // The missing `<main>` in the shell is a separate, wider gap (no `(app)` route
+  // has one, while `/login`, `/privacy` and `/terms` all do) and is reported
+  // rather than changed here. It is one sweep across the NINE `(app)` routes
+  // (`find "src/app/(app)" -name page.tsx | wc -l` → 9) — this said ten until the
+  // substitute review of record counted them.
+  it("contributes no second banner landmark (the app shell owns the banner)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryAllByRole("banner")).toHaveLength(0);
+    // The title itself is untouched — this is about the wrapper, not the heading.
+    expect(
+      screen.getByRole("heading", {
+        name: /Help & getting started/i,
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  // A content page's headings have to descend without gaps: h1, then h2 per
+  // section, nothing below. The nine h2s come from HELP_SECTIONS via
+  // <SectionHeading>, so this also pins that none of them has quietly become an
+  // h3 — and that the page has exactly one h1 to be the document's name.
+  it("keeps heading levels contiguous: one h1, then only h2s", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(
+      HELP_SECTIONS.length,
+    );
+    for (const level of [3, 4, 5, 6]) {
+      expect(screen.queryAllByRole("heading", { level })).toHaveLength(0);
+    }
   });
 
   it("renders exactly one back control", async () => {
