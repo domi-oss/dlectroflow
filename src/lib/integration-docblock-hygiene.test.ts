@@ -117,6 +117,44 @@ describe("integration-test docblock hygiene (#256)", () => {
       expect(prescribesEnvSourcing(` *   ${line}`)).toBe(true);
     });
 
+    // The mirror of the block above, and the reason it is not redundant with it:
+    // accepting every spelling must not slide into accepting every superstring.
+    // Both halves of the pattern were unanchored, so the recipe also matched
+    // inside a longer word — `unset` ends with `set`, and `./.envrc` begins with
+    // `./.env`. Raised in `!350`'s review.
+    //
+    // This is the false-positive direction: it reds an unrelated author's
+    // pipeline over a docblock that prescribes nothing, which is the exact
+    // failure mode the quoted-and-disavowed exemption and the per-occurrence
+    // check exist to prevent. It also made the pattern *wider* than the list of
+    // accepted spellings in its own docstring, and none of the three documented
+    // limitations covered it — the same trust-the-comment defect this guard is
+    // here to stop, pointing the other way.
+    it.each([
+      // `set -a; . ./.env` is a substring of both of these.
+      "unset -a; . ./.env",
+      "offset -a; . ./.env",
+      // `./.env` is a literal prefix of `./.envrc`, which is a direnv file and
+      // not the env file this guard is about.
+      "set -a; source ./.envrc",
+      "set -a; . ./.envrc",
+    ])(
+      "does not flag a different command that merely contains it: %j",
+      (line) => {
+        expect(prescribesEnvSourcing(` *   ${line}`)).toBe(false);
+      },
+    );
+
+    // The boundary must not narrow too far. `config/vitest.config.ts` reads
+    // `.env.local` as well as `.env`, so sourcing it exports the same class of
+    // values and is the same defect — it is a real prescription, not a
+    // near-miss like `.envrc`.
+    it("still flags sourcing .env.local", () => {
+      expect(prescribesEnvSourcing(" *   set -a; . ./.env.local; set +a")).toBe(
+        true,
+      );
+    });
+
     it("ignores lines that do not mention the recipe", () => {
       expect(prescribesEnvSourcing(" * Needs the real Postgres.")).toBe(false);
       expect(prescribesEnvSourcing("  set -e")).toBe(false);

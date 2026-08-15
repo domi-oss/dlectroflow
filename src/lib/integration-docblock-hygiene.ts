@@ -73,12 +73,23 @@
  * the defect is the export, not how the run is spelled afterwards. Case stays
  * significant because shell is — `SET -A` is not a command.
  *
+ * **Both halves are word-anchored**, which is the other half of accepting every
+ * spelling: without `\b` the recipe also matched inside a longer word, so
+ * `unset -a; . ./.env` and `set -a; . ./.envrc` were both reported as
+ * prescriptions. Neither is one — `unset` is a different command and `.envrc`
+ * is a direnv file, not the env file `config/vitest.config.ts` reads. Raised in
+ * `!350`'s review, and it mattered because a false positive here reds an
+ * unrelated author's pipeline over a docblock that prescribes nothing, which is
+ * what the quoted-and-disavowed exemption exists to avoid. The trailing anchor
+ * deliberately still admits `.env.local`: that file is read too, so sourcing it
+ * exports the same class of values and is the same defect.
+ *
  * Global, because a single line can carry the recipe **more than once** — a
  * warning and a bare copy in the same sentence — and each occurrence has to be
  * judged on its own. See {@link prescribesEnvSourcing}.
  */
 const SOURCES_ENV_FILE =
-  /set\s+(?:-a|-o\s+allexport)\s*(?:;|&&)\s*(?:\.|source)\s+(?:\.\/)?\.env/g;
+  /\bset\s+(?:-a|-o\s+allexport)\s*(?:;|&&)\s*(?:\.|source)\s+(?:\.\/)?\.env\b/g;
 
 /**
  * Phrases that turn a mention of the recipe into a warning against it.
