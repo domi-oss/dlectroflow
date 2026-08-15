@@ -435,24 +435,59 @@ is `false`:
 > Turning it off HIDES the list, it does not delete it — the rows survive and reappear if it is
 > turned back on.
 
-Every clause transfers. **Turning `medsTracker` off hides the strip, the banner and the editor, and
-deletes no `MedsDoseLog` row** — which matters more here than for a shopping list, because a
-medication history destroyed by a settings toggle is not recoverable and is the one thing v2 needs.
+Every clause transfers. **Turning `medsTracker` off hides the strip, the banner, the nav-bar control and
+the editor, and deletes no `MedsDoseLog` row** — which matters more here than for a shopping list,
+because a medication history destroyed by a settings toggle is not recoverable and is the one thing v2
+needs. **The nav control is in that list deliberately**: it is gated on this column and on nothing else,
+which is the point argued under `medsNavMode` below.
 
 The switch is a **feature gate, not an authorization boundary** — `/shopping`'s page comment makes
 that distinction and it holds identically. Whose rows these are is decided by the `workspaceId`
 filter the scoping harness polices.
 
+#### `Settings.medsNavMode` — the nav control's behaviour, settled 2026-08-15
+
+**`Settings.medsNavMode String @default("dots")`**, values `dots` (`B★`) and `next` (`E`), constrained
+as *The CHECK constraints* sets out. **`dots` is the default** because the owner chose `B★` as the
+default, and the column's default is where that decision lives.
+
+Three things about the shape, each argued rather than asserted:
+
+- **It is a behaviour column, not a visibility column, and the difference decides the count.** The
+  nearest precedent pair is `Settings.focusQuickAccess` (does the icon appear?) beside
+  `Settings.focusTimerStyle` (how does the thing behave/look?). Meds needs only the second, because
+  **`medsTracker` already governs availability** — which is precisely why the trolley icon has no
+  column of its own. #252's comment states the discriminator in the other direction: `/focus` *"is not
+  optional, so nothing governed its AVAILABILITY"*, and that is the only reason it needed one.
+- ⚠️ **So the pill is not independently switchable off in v1, and that is a real limitation rather
+  than an oversight.** The trade-off is stated because the header is where it will bite: the right
+  cluster already carries up to three controls and meds makes a fourth, with `next` the widest. If the
+  owner wants the feature without the header control, the change is **one Boolean beside this column**
+  following `focusQuickAccess` exactly — not a redesign. It is not added pre-emptively because #252's
+  criterion for adding one is *the owner asked*, and no such ask exists; inventing the column would be
+  inventing the decision.
+- **Not nullable.** A `String?` where null meant "hidden" would collapse a visibility meaning and a
+  behaviour meaning onto one column — the same inexpressiveness #260 records and this document already
+  refuses for dose states. Nullable in this schema means **delegate**, per `focusTimerStyle` and
+  `breakdownModel`, and there is nothing here to delegate to.
+
 **In v1 settings, users can:** enable or disable the feature; add, rename, reorder and deactivate
-medications; and for each, edit an ordered list of doses (label + quantity, and optionally
-`dueAfter`).
+medications; for each, edit an ordered list of doses (label + quantity, and optionally `dueAfter`);
+and **choose the nav control's mode**.
+
+⚠️ **The mode picker needs an explainer per option, not two bare names.** The modes differ in
+*behaviour*, not appearance, and a name alone cannot convey "this one asks you to remember which dose
+is next". The copy says what each does in the terms of the choice being made, and it is where `E`'s
+screen-reader recommendation lives — as words, since nothing can detect the need.
 
 **Deliberately not configurable in v1**, each with its reason:
 
 | Not configurable | Why |
 | --- | --- |
 | A clock time per dose as the *primary* model | The owner's regimen is meal-relative. "After breakfast" is not a time, and a required picker invites a false precision — the user would be inventing a number to satisfy a form. `dueAfter` stays optional |
-| View selection | There is nothing to select until `/meds` exists. A picker with one option is a control that teaches the user to distrust controls |
+| **Which page** the history is viewed on | There is nothing to select until `/meds` exists. A picker with one option is a control that teaches the user to distrust controls. ⚠️ **Distinct from `medsNavMode` above**, which selects a *behaviour* of the header control and has two genuine options on day one — this row is about choosing a destination, and there is only one |
+| Whether the nav control appears at all | See `medsNavMode`'s third bullet: `medsTracker` governs availability, and a separate visibility Boolean would need an owner decision that has not been taken |
+| The order `B★` cycles through states | Real, and declined for v1 rather than dismissed: if skipping is the common case, one tap should be *skipped*. It is a third column and a third code path for a preference nobody has expressed yet, and the mode picker already covers the case by offering a symmetric alternative |
 | Per-medication reminder settings | Nothing to configure while there is one banner and no notifications. v3 |
 | ⚠️ `Settings.workingDays` itself | **Two reasons, and the first is not obvious.** It is read by `src/lib/rewards.ts` to decide which days a **streak** may advance on, so a meds-settings control over it would silently retune an unrelated feature — a user narrowing their meds week to Mon–Wed would find their streak had opinions about it. Second, exposing it makes the empty-CSV case above reachable for the first time. The per-medication `days` override is the configurable surface instead, and it is strictly local |
 
@@ -635,7 +670,7 @@ It does not, and the reason is structural rather than lucky:
   `voice` as a prop. The nav control below follows that pattern, so **#86's collapse reaches this
   feature's nav code** as well as its own. Not a blocker in either direction; a line in #86's sweep.
 
-### ⚠️ The today-strip goes on the home page, not on `/dashboard`
+### ⚠️ The today-strip goes on the home page, not on `/dashboard` — **accepted as written, 2026-08-15**
 
 The brainstorm said "a today-strip on the dashboard". **This app has two things that word could
 mean**, so the choice is made explicitly rather than left to whoever implements it:
@@ -652,6 +687,105 @@ app's existing at-a-glance card for an optional gated feature, and it renders fr
 `/dashboard` is where the **v2** history visualisation would sit naturally if `/meds` were not
 getting its own page. It is not where today's three chips go.
 
+**The owner accepted this argument unchanged on 2026-08-15.** It is not reopened below and the section
+is left as it was written. What the same decision *added* is a second surface, which this document did
+not cover at all.
+
+### The nav-bar control — settled 2026-08-15, and it is an addition rather than an alternative
+
+**The header gets a meds control as well.** The home strip is asked-and-answered in one glance, but
+only while you are on home; the header travels with you. So both, and the relationship between them is
+the load-bearing part:
+
+⚠️ **Neither nav mode may be the only route to logging a dose.** The home strip is always present when
+the feature is on, and that is what makes the function reachable regardless of which mode is selected —
+which is the thing WCAG asks for. A mode is a **shortcut**, and a shortcut is allowed to be
+specialised in a way a sole route is not. Every trade-off below is affordable only because of this
+sentence, so it is stated first rather than as a mitigation at the end.
+
+Mockups for both modes are at `_reports/2026-08-15-meds-pill-mockups.html`, built on the real tokens
+and the real 44×44 control surface, and each panel carries its own trade-offs. That file is the source
+of truth for the two designs; this section is the source of truth for the decision about them.
+
+#### `B★` — the default: two dots, one tap, immediate commit, persistent Undo
+
+- **Two dots, one per dose**, in a single header slot. One tap marks the next unrecorded dose *taken*;
+  a second tap on the same dose turns that into *skipped*.
+- **The press commits immediately.** There is no pending window and no timed write.
+- **A persistent, focusable `Undo` appears beside it** and stays until the next action — *not* a toast
+  that vanishes. That distinction is the whole reason this shape is viable: a disappearing undo is
+  reachable only by a fast sighted user, whereas a control that persists is reachable by keyboard and
+  by a screen reader.
+- **Chosen for being the most compact and the fewest taps for the common case**, which is the
+  property the feature exists for.
+
+⚠️ **Its costs, recorded because they are the reason there are two modes at all.** A reader who meets
+only the default will eventually delete the other one as redundant:
+
+- **It asks you to hold state in your head** — which dose is next, and what state that dose is
+  currently in. Two dots you cannot see is two facts you have to remember.
+- **It is asymmetric: *skipped* is two presses where *taken* is one.** Defensible, and *not* a
+  violation of §1's honesty rule — a press is not a reward, and reaching *skipped* satisfies the
+  control exactly as fully as reaching *taken*, with equal visual weight (one filled dot, one hatched)
+  and no nagging afterwards. But it is a real asymmetry and it is not pretended away.
+- **Its accessible name must state the next action, not just the current state.** "…after breakfast, 2
+  tablets, not recorded. Activate to mark taken." A control whose meaning changes per press is
+  otherwise unannounceable, and this is the specific fix for that.
+- **Every commit must announce through a live region**, politely — see *a11y*.
+
+#### `E` — the alternative: the next unrecorded dose, tick or cross
+
+- **Shows only the next unrecorded dose**, labelled, with **two one-tap choices** — a tick and a
+  cross — then **advances itself** to the following dose and re-announces the new target.
+- **No timing, and nothing to remember.** The control tells you which dose it is about instead of
+  asking you to know.
+- **Both choices are identical in weight**: two adjacent buttons of the same size in a labelled group,
+  so there is no "first" action to bias toward. This is the cleanest possible expression of §1.
+- **Regimen-agnostic**: three doses or one, the control is the same width, because it only ever shows
+  the next one.
+- **Native semantics, nothing invented** — two ordinary buttons in a group whose label names the dose,
+  so each button's own name is complete on its own.
+
+⚠️ **Its costs:**
+
+- **It is the widest of the one-tap options** — a label plus two 44×44 targets. The header's right
+  cluster already carries up to three of these (focus timer, shopping list, dark mode), which
+  `controlSurface`'s docblock states, so meds makes a fourth and `E` makes that fourth the widest. On a
+  narrow phone the label may have to shorten to a glyph.
+- **It shows only the next dose, so the count is implicit.** You cannot tell at a glance that lunch is
+  outstanding while breakfast is unrecorded. **The home strip remains the full picture** — the same
+  sentence that makes the mode safe also makes this cost affordable.
+
+#### ⚠️ `E` is recommended for screen-reader users, and that recommendation cannot be automated
+
+**There is no browser API and no media query that reveals assistive technology**, and probing for one
+is an anti-pattern. So `E` **cannot** auto-select, and nothing in the implementation may branch on a
+guess about it.
+
+It is therefore a **stated recommendation in the Settings copy** — words the user reads and acts on —
+and nothing more than that. Combined with the always-present home strip, that is what actually
+guarantees the function is reachable; a detection heuristic would be both impossible and unnecessary.
+
+#### The control surface, and the citation to copy
+
+The new control **composes `controlSurface` + `touchTarget` from `src/lib/utils.ts`, giving 44×44**
+(`min-h-11 min-w-11` = `2.75rem`), exactly as each existing quick-access link does with
+`cn(controlSurface, touchTarget)`. Not a new class string: `controlSurface`'s own docblock explains
+that the cluster's controls "have to read as ONE set of controls" and that #117 exists because two of
+a set kept private copies.
+
+⚠️ **The citation to copy is `controlSurface`'s docblock, not `touchTarget`'s.** 44×44 is
+**2.5.5 Target Size (Enhanced), AAA** — a voluntary house floor. The AA criterion is
+**2.5.8 Target Size (Minimum), at 24×24**, which is met regardless. `touchTarget`'s own docblock welds
+the first number to the word *minimum* and is one of the sites `#268` sweeps, so it is the wrong
+neighbour to read even though it sits directly above the constant. `src/components/breakdown/note-field.tsx`
+and `controlSurface` both state the pair correctly.
+
+**Why this matters mechanically and not only pedantically:** `src/lib/a11y-class-hygiene.test.ts`
+polices number↔name welds and iterates `["src", "e2e", "docs"]`, so an inverted citation in the
+implementation *or in this file* reds the pipeline. Bare numbers are deliberately legal there; only a
+number wearing the wrong name is a defect.
+
 ### The banner
 
 **One dismissable banner, and no notification of any kind in v1.**
@@ -664,7 +798,8 @@ getting its own page. It is not where today's three chips go.
   `localStorage.setItem(dayKey, "1")` with `dayKey` built from `ymd(new Date())` — so **no schema
   column is needed** for it. That is the right cost for a control whose whole meaning is "not now, on
   this device, today". `"action.dismiss"` already exists as a string key (`plain: "Dismiss"`,
-  `playful: "Not now"`).
+  `playful: "Not now"`). ⚠️ **The pair is quoted as it stands today; `#86` deletes the `playful` half**,
+  so the key survives and reduces to `"Dismiss"`. Reuse the key either way rather than adding one.
 - ⚠️ **The strip is gated on `firstRunPreview` as well as on `medsTracker`.**
   `src/app/(app)/page.tsx` suppresses the shopping summary with
   `if (!st.shoppingList || st.firstRunPreview) return null` — a demo workspace showing a medication
@@ -685,6 +820,47 @@ getting its own page. It is not where today's three chips go.
 - **The reward is announced politely, never assertively.** It is a confirmation, not an alert, and an
   assertive region would interrupt whatever the user was reading. The offline-capture spec's *two
   live regions* section is the precedent for that distinction.
+
+#### The nav control's a11y obligations — settled 2026-08-15, and they differ per mode
+
+The two modes fail differently, so a single checklist would be wrong for both. What is shared:
+
+- **44×44 via `controlSurface` + `touchTarget`**, per the citation note above — **2.5.5 Target Size
+  (Enhanced), AAA**, with **2.5.8 Target Size (Minimum), at 24×24** met regardless.
+- **State is never colour alone**, as for the chips: `taken`, `skipped` and `missed` each carry a shape
+  or a glyph difference, because `completeTickColor` can be set to `black`.
+- **Every commit announces politely**, through the same polite live region the reward uses. One press,
+  one announcement — the announcement names the dose, the new state, and what remains.
+- **The home strip is the accessible route**, always present. Neither mode is load-bearing for
+  conformance, which is what makes the per-mode compromises below legitimate rather than excuses.
+
+`B★` specifically, because a cycling control is the harder case:
+
+- **The accessible name states the next action as well as the current state.** Not "taken" but "after
+  breakfast, 2 tablets, not recorded. Activate to mark taken." A name that reports only the current
+  state leaves a screen-reader user unable to predict what activating does, which is the defect that
+  disqualified the timed variant of this shape.
+- **The name is recomputed on every commit**, since the target dose advances.
+- **`Undo` is a real focusable control in the tab order**, not a toast. It persists until the next
+  action. This is the requirement, not an enhancement — the mode is only acceptable *because* the
+  correction path is reachable without a mouse and without a time limit.
+- **No press may be silently destructive.** Tapping past *skipped* must not wrap round to *not
+  recorded*: erasing a health record is a deliberate act and belongs on the strip, not on the fourth
+  tap of a two-dot shortcut.
+
+`E` specifically:
+
+- **Two ordinary buttons inside a group whose accessible name names the dose**, and **each button's own
+  name is complete on its own** — "Mark after breakfast, 2 tablets, as taken" — because a group label
+  is not guaranteed to be read in every mode of every screen reader.
+- **After a log, the announcement names the result and the new target** — "…marked taken. Next: after
+  lunch, 1 tablet." That is what replaces the memory `B★` requires.
+- **When nothing is left to log, the two buttons go away** rather than sitting inert, and the group's
+  name says so.
+
+⚠️ **Nothing detects assistive technology.** Repeated here because it is the requirement most likely to
+be "improved" by a well-meaning implementation: no `matchMedia` probe, no focus-behaviour heuristic, no
+`aria-*` sniffing. The recommendation lives in Settings copy.
 
 ### ⚠️ The legal copy — a v1 blocker, not a follow-up
 
