@@ -15,13 +15,17 @@
  *      frequent one from opening update MRs of its own.
  *   3. A `logLevelRemap` entry promoting the automerge-arming failure to `warn`,
  *      because Renovate logs it at `debug` and swallows it.
- *   4. `@base-ui/react` resolving to `automerge: false`, which depends on where its
- *      deny rule sits in an ORDERED list. Reasoning at the helper, in the last
+ *   4. Any per-package `automerge: false` entry sitting BELOW the blanket
+ *      `automerge: true` rule, because `packageRules` is an ordered list and a
+ *      deny entry written above it is inert. Reasoning at the helpers, in the last
  *      section of this file.
  *
  * 1-3 are #243. 2 and 3 are the fix for the lost automerge; their reasoning is in
  * the middle of this file, at the point where the constants are defined. 4 is a
- * later addition and the only one not from that issue.
+ * later addition, the only one not from that issue, and the only one whose
+ * real-config arm is vacuous as things stand — the config has no deny entry today,
+ * so that arm passes over an empty list on purpose. Its colocated test says so, and
+ * carries a second, non-vacuous arm that does exercise the real file.
  *
  * WHY A LIMIT SET THERE IS NOT A CONTROL
  *   #243 read five stale Renovate MRs sitting at a saturated `prConcurrentLimit`
@@ -360,34 +364,60 @@ export function remappedLogLevelFor(
   return null;
 }
 
-/* ── The fourth property: a dependency that must never merge unattended ──────
+/* ── The fourth property: an `automerge: false` entry that actually takes ─────
  *
- * Not from #243. `@base-ui/react` owns `ANCHORED_POSITIONER`
- * (src/components/ui/anchored-popup.ts) — the single collision policy every
- * anchored popup in the app spreads onto its positioner. Two faults reported from
- * the running app trace to it: #92, a 160px menu laid out from `left:-43` at a
- * 390px viewport with no horizontal scroll to recover with, and the stacking half
- * of #172, where the positioner sat at `z-index: auto` under a `sticky top-0
- * z-[2]` bar and left a visible Sign out unclickable.
+ * Not from #243, and — unlike the three above — this one currently guards a shape
+ * the config does not yet use. That is deliberate and it is the whole point, so it
+ * is stated here rather than left for a reader to work out.
  *
- * The rule keeping it off automerge is order-dependent, which is why it is worth a
- * test rather than trusting the file to read correctly. Renovate applies
- * `packageRules` in order and LATER rules win, so the deny entry is only effective
- * below the blanket `automerge: true` rule. Swap the two and the file still
- * validates, still reads as though the control is present, and automerges the
- * package again — the same silent-failure shape as the three guards above, and the
- * reason `renovate-config-validator` cannot stand in for this.
+ * `packageRules` is an ORDERED list: Renovate merges the entries a package matches
+ * in file order, and later entries overwrite earlier ones' keys. This file opens
+ * with a blanket `automerge: true` for minor/patch/digest/pin. So any future entry
+ * that turns automerge OFF for one package is effective only BELOW that blanket
+ * rule. Written above it, the entry is inert — the package keeps automerging — and
+ * the file still reads as though the exception were in force.
+ *
+ * `renovate-config-validator --no-global --strict` cannot tell the two apart.
+ * Measured against the renovate 43 major this repo pins: the correctly-ordered file
+ * and the inverted one both return `Config validated successfully`, exit 0. Nor
+ * would Renovate complain at runtime; it would simply automerge. That is the same
+ * silent-failure shape as the three guards above, which is why this is a test.
+ *
+ * It is written now, while there is no such entry, because the failure is
+ * order-of-writing: whoever adds the first deny entry is the person who cannot see
+ * the trap, and a guard added afterwards is a guard added after the incident. The
+ * colocated test says plainly which of its arms is vacuous today.
  */
 
 /**
- * Packages that must resolve to `automerge: false` in `.gitlab/renovate.json`.
+ * Every package name some rule in `packageRules` sets `automerge: false` for.
  *
- * A list rather than one string because the argument is about a *kind* of
- * dependency — one whose regressions are visual, so a green pipeline is not
- * evidence about them. Add a package here only alongside the reasoning in the
- * config's own `description`, which is where a reader will look.
+ * The input to the ordering invariant, derived from the file rather than from a
+ * hardcoded list — so the check arms itself the moment somebody adds a deny entry,
+ * instead of depending on them also remembering to register the name here.
+ *
+ * Only a real `false` counts, and only a `matchPackageNames` array of strings is
+ * read. A blanket rule (no `matchPackageNames`) that set `automerge: false` names
+ * no package and so contributes nothing: it is a different config, not a
+ * per-package exception, and reporting `undefined` for it would make the invariant
+ * assert something it cannot check.
  */
-export const NEVER_AUTOMERGE_PACKAGES = ["@base-ui/react"] as const;
+export function packagesDeniedAutomerge(packageRules: unknown): string[] {
+  if (!Array.isArray(packageRules)) return [];
+  const denied: string[] = [];
+  for (const entry of packageRules) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+    const rule = entry as PackageRule;
+    if (rule.automerge !== false) continue;
+    const names = rule.matchPackageNames;
+    if (!Array.isArray(names)) continue;
+    for (const name of names) {
+      if (typeof name === "string" && !denied.includes(name)) denied.push(name);
+    }
+  }
+  return denied;
+}
 
 /** One `packageRules` entry, as far as this module reads one. */
 type PackageRule = {

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import {
   AUTOMERGE_FAILURE_LOG_MESSAGES,
   IGNORED_FOR_VULNERABILITY_ALERTS,
-  NEVER_AUTOMERGE_PACKAGES,
   PROBLEM_LOG_LEVELS,
   branchCreationWindows,
   cronWindowsWithoutWildcardMinute,
   effectiveAutomergeFor,
   ignoredKeysUnderVulnerabilityAlerts,
+  packagesDeniedAutomerge,
   remappedLogLevelFor,
   unevaluatableMatchMessages,
   type RenovateConfigShape,
@@ -443,7 +443,13 @@ describe("effectiveAutomergeFor", () => {
     matchUpdateTypes: ["minor", "patch", "digest", "pin"],
     automerge: true,
   };
-  const DENY = { matchPackageNames: ["@base-ui/react"], automerge: false };
+  /**
+   * A synthetic package name, deliberately not a real dependency. The config has
+   * no per-package deny entry today, and naming a real one here would read as
+   * though it did.
+   */
+  const PKG = "denied-package";
+  const DENY = { matchPackageNames: [PKG], automerge: false };
 
   it("reports nothing for a package no rule mentions and no blanket rule covers", () => {
     expect(effectiveAutomergeFor("left-pad", [DENY])).toBe(null);
@@ -451,33 +457,32 @@ describe("effectiveAutomergeFor", () => {
 
   it("reports nothing when there are no rules at all", () => {
     for (const rules of [undefined, [], null, 7, "rules", {}]) {
-      expect(effectiveAutomergeFor("@base-ui/react", rules)).toBe(null);
+      expect(effectiveAutomergeFor(PKG, rules)).toBe(null);
     }
   });
 
   it("reads a blanket rule as applying to every package", () => {
     // No `matchPackageNames` means "everything", which is exactly why the
     // ordering below matters at all.
-    expect(effectiveAutomergeFor("@base-ui/react", [BLANKET])).toBe(true);
+    expect(effectiveAutomergeFor(PKG, [BLANKET])).toBe(true);
   });
 
   // The two orderings that make this guard worth having. Renovate applies
   // packageRules in order and later rules override earlier ones, so the SAME two
   // rules mean opposite things depending on which way round they are written —
-  // and `renovate-config-validator` accepts both.
+  // and `renovate-config-validator` accepts both. Measured: both forms return
+  // `Config validated successfully`, exit 0, on the renovate 43 major CI pins.
   it("lets a later deny rule win over an earlier blanket automerge", () => {
-    expect(effectiveAutomergeFor("@base-ui/react", [BLANKET, DENY])).toBe(
-      false,
-    );
+    expect(effectiveAutomergeFor(PKG, [BLANKET, DENY])).toBe(false);
   });
 
   it("reports the blanket rule winning when the deny rule is put above it", () => {
-    expect(effectiveAutomergeFor("@base-ui/react", [DENY, BLANKET])).toBe(true);
+    expect(effectiveAutomergeFor(PKG, [DENY, BLANKET])).toBe(true);
   });
 
   it("ignores a rule that names other packages", () => {
     expect(
-      effectiveAutomergeFor("@base-ui/react", [
+      effectiveAutomergeFor(PKG, [
         BLANKET,
         DENY,
         { matchPackageNames: ["react", "react-dom"], automerge: true },
@@ -489,10 +494,10 @@ describe("effectiveAutomergeFor", () => {
     // A grouping or allowedVersions rule matches the package without setting
     // `automerge`; it must not be read as re-enabling it.
     expect(
-      effectiveAutomergeFor("@base-ui/react", [
+      effectiveAutomergeFor(PKG, [
         BLANKET,
         DENY,
-        { matchPackageNames: ["@base-ui/react"], groupName: "base ui" },
+        { matchPackageNames: [PKG], groupName: "a group" },
       ]),
     ).toBe(false);
   });
@@ -501,52 +506,157 @@ describe("effectiveAutomergeFor", () => {
     // `"false"` is not `false`. Coercing would make a stringly-typed edit read as
     // the control being in place.
     expect(
-      effectiveAutomergeFor("@base-ui/react", [
+      effectiveAutomergeFor(PKG, [
         BLANKET,
-        { matchPackageNames: ["@base-ui/react"], automerge: "false" },
+        { matchPackageNames: [PKG], automerge: "false" },
       ]),
     ).toBe(true);
   });
 
   it("tolerates malformed entries inside a real array", () => {
-    expect(
-      effectiveAutomergeFor("@base-ui/react", [null, "x", 7, BLANKET, DENY]),
-    ).toBe(false);
+    expect(effectiveAutomergeFor(PKG, [null, "x", 7, BLANKET, DENY])).toBe(
+      false,
+    );
   });
 
   it("reports nothing for a matchPackageNames that is not an array of strings", () => {
     expect(
-      effectiveAutomergeFor("@base-ui/react", [
-        { matchPackageNames: "@base-ui/react", automerge: false },
+      effectiveAutomergeFor(PKG, [
+        { matchPackageNames: PKG, automerge: false },
       ]),
     ).toBe(null);
   });
 });
 
+describe("packagesDeniedAutomerge", () => {
+  it("reports nothing for a config with no rules", () => {
+    for (const rules of [undefined, [], null, 7, "rules", {}]) {
+      expect(packagesDeniedAutomerge(rules)).toEqual([]);
+    }
+  });
+
+  it("reports nothing when no rule turns automerge off", () => {
+    expect(
+      packagesDeniedAutomerge([
+        { matchUpdateTypes: ["minor"], automerge: true },
+        { matchPackageNames: ["react"], groupName: "react monorepo" },
+        { matchPackageNames: ["typescript"], allowedVersions: "<6.1" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports every package a deny rule names", () => {
+    expect(
+      packagesDeniedAutomerge([
+        { matchPackageNames: ["a", "b"], automerge: false },
+        { matchPackageNames: ["c"], automerge: false },
+      ]),
+    ).toEqual(["a", "b", "c"]);
+  });
+
+  it("reports a package named by two deny rules only once", () => {
+    expect(
+      packagesDeniedAutomerge([
+        { matchPackageNames: ["a"], automerge: false },
+        { matchPackageNames: ["a"], automerge: false },
+      ]),
+    ).toEqual(["a"]);
+  });
+
+  it("ignores a blanket rule that denies automerge without naming a package", () => {
+    // That is a different config — automerge off for everything — not a
+    // per-package exception. Reporting `undefined` here would make the ordering
+    // invariant assert something it cannot check.
+    expect(packagesDeniedAutomerge([{ automerge: false }])).toEqual([]);
+  });
+
+  it("ignores a non-boolean automerge and a non-array matchPackageNames", () => {
+    expect(
+      packagesDeniedAutomerge([
+        { matchPackageNames: ["a"], automerge: "false" },
+        { matchPackageNames: "b", automerge: false },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("tolerates malformed entries inside a real array", () => {
+    expect(
+      packagesDeniedAutomerge([
+        null,
+        "x",
+        7,
+        ["nested"],
+        { matchPackageNames: ["a", 7, null], automerge: false },
+      ]),
+    ).toEqual(["a"]);
+  });
+});
+
 /**
- * The ordering guard, against the real config.
+ * The ordering invariant, against the real config.
  *
- * `@base-ui/react` owns `ANCHORED_POSITIONER`, the single collision policy behind
- * every anchored popup in the app (#92, and the stacking half of #172). Its deny
- * rule is only effective BELOW the blanket automerge rule, because Renovate lets
- * later packageRules win — so the fault this catches is a reorder or a dropped
- * entry, both of which leave a file that `renovate-config-validator` calls valid
- * and that quietly automerges the package again.
+ * ⚠️ **The second arm below is VACUOUS today, and that is recorded rather than
+ * hidden.** `.gitlab/renovate.json` currently has no per-package
+ * `automerge: false` entry, so `packagesDeniedAutomerge` returns `[]` and the loop
+ * asserts nothing. The eleven synthetic `effectiveAutomergeFor` cases above are
+ * what carry the ordering coverage; this arm exists so the check arms ITSELF the
+ * first time somebody adds a deny entry, rather than being written after the
+ * incident by whoever got the ordering wrong.
+ *
+ * The first arm is the one that is not vacuous, and it is here for exactly that
+ * reason: a describe block whose only assertion ran zero times is the failure shape
+ * this repo has recorded most often — a green that means nothing was looked at. It
+ * reads the real file and requires a definite `true` out of it, so deleting
+ * `packageRules`, emptying it, or dropping the blanket rule fails here.
+ *
+ * Both arms were verified red before this landed; the proof is in !359.
  */
-describe("renovate.json never automerges the popup positioning dependency", () => {
+describe("renovate.json's packageRules resolve as Renovate would merge them", () => {
   const config = JSON.parse(
     readFileSync(join(process.cwd(), ".gitlab", "renovate.json"), "utf8"),
   ) as RenovateConfigShape;
 
-  it.each(NEVER_AUTOMERGE_PACKAGES)("leaves %s on manual review", (name) => {
+  /**
+   * A name no rule in the file matches, so the only entry that can apply to it is
+   * the blanket rule at the top of the list. Deliberately not a real package.
+   */
+  const NAMED_BY_NO_RULE = "renovate-hygiene-sentinel-not-a-dependency";
+
+  it("computes a definite answer out of the real file", () => {
+    // `true` here proves three things at once: the file parsed, `packageRules` is
+    // a real array this helper could read, and the blanket automerge rule is
+    // present and effective. That is also the baseline any future deny entry has
+    // to override — which is what makes the arm below meaningful once it has
+    // something to iterate.
     expect(
-      effectiveAutomergeFor(name, config.packageRules),
-      `${name} resolves to automerge-enabled. Renovate applies packageRules ` +
-        `in order and LATER rules win, so its deny entry has to sit below the ` +
-        `blanket automerge rule at the top of the list — moving it above, or ` +
-        `deleting it, re-enables unattended merges for the dependency that ` +
-        `owns ANCHORED_POSITIONER. renovate-config-validator accepts either ` +
-        `ordering, so nothing else in the chain can tell you.`,
-    ).toBe(false);
+      packagesDeniedAutomerge(config.packageRules),
+      "the sentinel must stay unnamed by any rule, or the assertion below stops " +
+        "being about the blanket automerge rule",
+    ).not.toContain(NAMED_BY_NO_RULE);
+    expect(
+      effectiveAutomergeFor(NAMED_BY_NO_RULE, config.packageRules),
+      "the blanket automerge rule no longer resolves for a package nothing else " +
+        "names. Either `packageRules` stopped parsing, or the blanket " +
+        "`automerge: true` entry was removed or narrowed — in which case the " +
+        "ordering invariant below has no baseline to override and this module's " +
+        "fourth property needs rewriting, not relaxing.",
+    ).toBe(true);
+  });
+
+  it("keeps every per-package deny entry below the blanket rule", () => {
+    // Vacuous while the list is empty — see the docblock. It is written as a loop
+    // rather than against a hardcoded package list so that adding a deny entry to
+    // the config is all it takes to switch this on.
+    for (const name of packagesDeniedAutomerge(config.packageRules)) {
+      expect(
+        effectiveAutomergeFor(name, config.packageRules),
+        `${name} has an \`automerge: false\` entry that does not take effect. ` +
+          `Renovate merges packageRules in file order and LATER entries win, so ` +
+          `a deny entry has to sit BELOW the blanket automerge rule at the top ` +
+          `of the list; above it, the entry is inert and the package keeps ` +
+          `merging unattended. renovate-config-validator returns exit 0 on both ` +
+          `orderings, so nothing else in the chain can tell you.`,
+      ).toBe(false);
+    }
   });
 });
