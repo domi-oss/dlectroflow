@@ -730,6 +730,25 @@ operators upgrading a self-hosted instance don't get surprised.
   where one is required — with the caller parked between its check and its act while
   the competing step is committed underneath it.
 
+- **Editing a step's title no longer loses your place when another step's undo
+  lands (#237).** A step you have marked done can be un-marked from the step
+  list, and if that does not save the row offers a **Try again**. Both of those
+  move you onto a sensible control when the button you pressed is taken away —
+  which is right if you were standing on that button, and wrong if you were not.
+
+  You could easily not be. Safari, and every browser on iPhone, does not put
+  focus on a button when you click it, so pressing Try again with a mouse there
+  never had your place to hand on. And a successful undo hands off *after* the
+  round trip to the server, so on any browser you might have opened another
+  step's title editor while it was still out. Either way the caret jumped out of
+  the field you were typing in, into a different row.
+
+  **Both hand-offs now check that the control being taken away is the one you
+  were actually on**, matching what your inbox and the breakdown chat already
+  did. Nothing changes when it is: pressing Try again from the keyboard still
+  lands you on that row's own undo, and a successful undo still lands you on its
+  Start Focus. Your typing was never at risk — only the caret.
+
 - **The shopping list stops asking you to retry something it has taken the button
   away for, and says out loud that it is retrying (#246, #236).** Two small things
   in the notice that appears when a change to your list does not save. If the
