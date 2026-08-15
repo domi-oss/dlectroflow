@@ -1104,10 +1104,18 @@ describe("TaskSteps — a hand-off only fires when the press held focus (#237)",
   // rather than an edge. Assistive-technology activation is the second route: it
   // fires a click without moving DOM focus on every engine.
   //
-  // This list is where that becomes reachable, and it is why `focus-timer.tsx` can
-  // go on without the guard while this file cannot: the failed-undo notice renders
-  // per row, inside the same `steps.map()` as the two `autoFocus` inline editors,
-  // so the control that unmounts and the field the user is typing in are siblings.
+  // This list is where that becomes reachable, and the reason is structural: the
+  // failed-undo notice renders per row, inside the same `steps.map()` as the two
+  // `autoFocus` inline editors, so the control that unmounts and the field the user
+  // is typing in are siblings.
+  //
+  // `focus-timer.tsx` is deliberately left unguarded, but NOT for the reason #237's
+  // table gives — "nowhere else focus could be" is wrong, and this comment said so
+  // in its first draft. It has the re-estimate minutes field at `:2092`, in the same
+  // phase block as the failure notice whose hand-off is unarmed. What stands in for
+  // a guard there is `showEstimateField` (`:1209`) unmounting that field across any
+  // in-flight window that has not yet failed. See the correction on #237 for the one
+  // path where that does not hold.
   //
   // Same guard, same shape and same reason as `breakdown-chat.tsx`'s "leaves focus
   // where it was when the press did not come from it" and `inbox-view.tsx`'s
