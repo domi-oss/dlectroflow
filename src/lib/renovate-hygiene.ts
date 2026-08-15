@@ -1,12 +1,12 @@
 /**
- * #243 — pure helpers for asserting three properties of `.gitlab/renovate.json`.
- * Kept free of `fs` so the parsing is unit-testable on synthetic config (the
+ * Pure helpers for asserting four properties of `.gitlab/renovate.json`. Kept free
+ * of `fs` so the parsing is unit-testable on synthetic config (the
  * manifest-hygiene, lockfile-hygiene and override-hygiene modules follow the same
  * split); the caller reads the file.
  *
- * The three come from the same issue and share one cause — a Renovate setting can
- * be wrong in a way that no tool in the chain reports, and `renovate-config-validator`
- * does not run in this repo's CI at all:
+ * All four share one cause — a Renovate setting can be wrong in a way that no tool
+ * in the chain reports, and `renovate-config-validator` does not run in this repo's
+ * CI at all:
  *
  *   1. No concurrency limit or schedule under `vulnerabilityAlerts`, because
  *      Renovate ignores every one of them on that path. Reasoning below.
@@ -15,9 +15,13 @@
  *      frequent one from opening update MRs of its own.
  *   3. A `logLevelRemap` entry promoting the automerge-arming failure to `warn`,
  *      because Renovate logs it at `debug` and swallows it.
+ *   4. `@base-ui/react` resolving to `automerge: false`, which depends on where its
+ *      deny rule sits in an ORDERED list. Reasoning at the helper, in the last
+ *      section of this file.
  *
- * 2 and 3 are the fix for the lost automerge; their reasoning is in the second
- * half of this file, at the point where the constants are defined.
+ * 1-3 are #243. 2 and 3 are the fix for the lost automerge; their reasoning is in
+ * the middle of this file, at the point where the constants are defined. 4 is a
+ * later addition and the only one not from that issue.
  *
  * WHY A LIMIT SET THERE IS NOT A CONTROL
  *   #243 read five stale Renovate MRs sitting at a saturated `prConcurrentLimit`
@@ -55,6 +59,8 @@ export type RenovateConfigShape = {
   schedule?: unknown;
   /** `logLevelRemap` — an array of `{ matchMessage, newLogLevel }`. */
   logLevelRemap?: unknown;
+  /** `packageRules` — an ordered array; later entries override earlier ones. */
+  packageRules?: unknown;
 };
 
 /**
@@ -352,4 +358,93 @@ export function remappedLogLevelFor(
     return (LOG_LEVELS as readonly string[]).includes(level) ? level : null;
   }
   return null;
+}
+
+/* ── The fourth property: a dependency that must never merge unattended ──────
+ *
+ * Not from #243. `@base-ui/react` owns `ANCHORED_POSITIONER`
+ * (src/components/ui/anchored-popup.ts) — the single collision policy every
+ * anchored popup in the app spreads onto its positioner. Two faults reported from
+ * the running app trace to it: #92, a 160px menu laid out from `left:-43` at a
+ * 390px viewport with no horizontal scroll to recover with, and the stacking half
+ * of #172, where the positioner sat at `z-index: auto` under a `sticky top-0
+ * z-[2]` bar and left a visible Sign out unclickable.
+ *
+ * The rule keeping it off automerge is order-dependent, which is why it is worth a
+ * test rather than trusting the file to read correctly. Renovate applies
+ * `packageRules` in order and LATER rules win, so the deny entry is only effective
+ * below the blanket `automerge: true` rule. Swap the two and the file still
+ * validates, still reads as though the control is present, and automerges the
+ * package again — the same silent-failure shape as the three guards above, and the
+ * reason `renovate-config-validator` cannot stand in for this.
+ */
+
+/**
+ * Packages that must resolve to `automerge: false` in `.gitlab/renovate.json`.
+ *
+ * A list rather than one string because the argument is about a *kind* of
+ * dependency — one whose regressions are visual, so a green pipeline is not
+ * evidence about them. Add a package here only alongside the reasoning in the
+ * config's own `description`, which is where a reader will look.
+ */
+export const NEVER_AUTOMERGE_PACKAGES = ["@base-ui/react"] as const;
+
+/** One `packageRules` entry, as far as this module reads one. */
+type PackageRule = {
+  matchPackageNames?: unknown;
+  automerge?: unknown;
+};
+
+/**
+ * Whether a rule could apply to `packageName` at some update type.
+ *
+ * No `matchPackageNames` means "every package" — that is what makes the blanket
+ * automerge rule blanket, and it is the entry this guard is really about.
+ *
+ * Deliberately ignores the other narrowing matchers (`matchUpdateTypes`,
+ * `matchManagers`, `matchDatasources`, `matchCurrentValue`). This is NOT a
+ * reimplementation of Renovate's resolver and must not be read as one: the
+ * question here is ordering — "can a rule that enables automerge win against the
+ * deny entry for this package" — and a rule narrowed to `minor` still answers yes,
+ * because minor is precisely the update type the deny entry exists to catch.
+ * Modelling those matchers would make the guard narrower than the fault.
+ */
+function ruleCouldApply(rule: PackageRule, packageName: string): boolean {
+  const names = rule.matchPackageNames;
+  if (names === undefined) return true;
+  // A `matchPackageNames` that is not an array of strings is not a selector this
+  // module can read, so the rule is treated as inapplicable rather than as
+  // matching everything — the conservative direction is the one that cannot
+  // fabricate a passing guard.
+  if (!Array.isArray(names)) return false;
+  return names.some((name) => name === packageName);
+}
+
+/**
+ * The `automerge` value `.gitlab/renovate.json` resolves to for `packageName`, or
+ * `null` if no applicable rule expresses one.
+ *
+ * Last match wins, mirroring Renovate: `packageRules` are merged in file order and
+ * a later entry overwrites an earlier one's keys. A helper that returned the
+ * *first* match — or the most specific one — would pass a file Renovate reads the
+ * opposite way round, which is the entire fault being guarded against.
+ *
+ * Only a real boolean counts. A `"false"` string is left as no opinion at that
+ * entry, so a stringly-typed edit reads as the control being absent rather than
+ * as the control being in place.
+ */
+export function effectiveAutomergeFor(
+  packageName: string,
+  packageRules: unknown,
+): boolean | null {
+  if (!Array.isArray(packageRules)) return null;
+  let resolved: boolean | null = null;
+  for (const entry of packageRules) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+    const rule = entry as PackageRule;
+    if (!ruleCouldApply(rule, packageName)) continue;
+    if (typeof rule.automerge === "boolean") resolved = rule.automerge;
+  }
+  return resolved;
 }
