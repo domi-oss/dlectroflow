@@ -14,6 +14,7 @@ import {
 import {
   BadgeKey,
   FocusOutcome,
+  RewardPoints,
   RewardType,
   TaskStatus,
 } from "@/lib/constants";
@@ -26,6 +27,7 @@ import {
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { bestEffort } from "@/lib/best-effort";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 /**
@@ -73,7 +75,17 @@ export async function beginFocus(
     },
   });
   // First focus — awarded the first time a focus session begins (idempotent).
-  await awardBadge(workspaceId, BadgeKey.FirstFocus);
+  //
+  // Best-effort (#257): the session row above is committed and its id is what
+  // the caller navigates with, so a badge insert that failed must not report the
+  // start as failed. The retry cost is what makes this reachable rather than
+  // tidy — the `updateMany` above retires every open session on this step BEFORE
+  // creating the new one, so a person pressing Start again after a false failure
+  // abandons the session that is actually running and opens another, once per
+  // press. The badge is once-ever and idempotent, so the next start earns it.
+  await bestEffort("first_focus_badge_failed", workspaceId, () =>
+    awardBadge(workspaceId, BadgeKey.FirstFocus),
+  );
   return session.id;
 }
 
@@ -189,6 +201,26 @@ async function closeSession(
  * task-complete reward+badge. Returns whether the task's OWN Google Task was
  * patched — `completeFocus` folds that into the `googleSynced` it reports, so
  * the return value is UI-visible rather than bookkeeping (see the call site).
+ *
+ * The payout is BEST-EFFORT (#257). Both callers reach this line with their own
+ * write already committed, and the two writes at the top of this helper commit
+ * before the payout as well — so a `logReward`/`awardBadge` fault here would
+ * report a completion as failed over a task that is Done and inbox rows that are
+ * stamped. In `completeStep` it also skipped the three `revalidatePath` calls,
+ * leaving the person's own tab showing the to-do as open.
+ *
+ * The residual is one `task_complete` payout. The badge is once-ever and
+ * idempotent, so the next completion earns it; the points for this one are lost.
+ * Google is patched either way — it is best-effort already and for the same
+ * reason.
+ *
+ * ## Two calls, not one thunk
+ *
+ * The rule is on `bestEffort` (`src/lib/best-effort.ts`). Local to this site:
+ * `awardBadge` is a once-ever `findUnique` + `skipDuplicates` insert that never
+ * reads `RewardEvent`, so neither payout reads what the other wrote and each is
+ * safe alone. Note the residual stated above is per-payout **because** of that
+ * split — bundled, one fault cost both.
  */
 async function markTaskCompleted(
   workspaceId: string,
@@ -204,8 +236,12 @@ async function markTaskCompleted(
     where: { taskId, workspaceId },
     data: { completedAt: new Date() },
   });
-  await logReward(workspaceId, RewardType.TaskComplete);
-  await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  await bestEffort("task_complete_points_failed", workspaceId, () =>
+    logReward(workspaceId, RewardType.TaskComplete),
+  );
+  await bestEffort("task_complete_badge_failed", workspaceId, () =>
+    awardBadge(workspaceId, BadgeKey.TaskComplete),
+  );
   // #195 — a task can carry its OWN Google id, from having been scheduled while
   // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates
   // a step the moment it is focused, and that step has no id of its own, so the
@@ -235,7 +271,41 @@ async function markTaskCompleted(
  * `reopenItem` never made.
  */
 
-/** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
+/**
+ * Complete a step directly (no focus session). Awards StepDone; finishes the
+ * task on the last step.
+ *
+ * ## The payout is BEST-EFFORT, and here it is a data-integrity fix (#257)
+ *
+ * The step write commits on its own, and the guard at the top is
+ * `if (!step || step.done) return` — so once that write has landed, **every later
+ * press of THIS action returns before reaching anything below it**. A
+ * `rewardStepDone` that propagated therefore did not merely report a false
+ * failure: it aborted the request in front of `markTaskCompleted`, leaving the
+ * task **Active with zero open steps**, plus the three revalidations unrun — so
+ * the person's own tab goes on rendering the step as open, and the task page
+ * shows every step ticked beside a task that is not complete.
+ *
+ * **Not permanent, and the earlier claim that it was is withdrawn** (`!339`
+ * review): `completeStep` is not the only writer of `TaskStatus.Done`. Two other
+ * presses still reach one — `completeItem` (`braindump.ts`) sets it
+ * unconditionally inside its transaction once it takes the completion, and its
+ * own guard (`if (!item || item.completedAt) return`) does NOT bar the way here,
+ * because the `BrainDumpItem.completedAt` stamp is written by `markTaskCompleted`
+ * and that is precisely what did not run; and `completeFocus` reaches
+ * `markTaskCompleted` whenever `openCount === 0`, which is what the stuck state
+ * is. So the honest severity is a **silently wrong render plus a lost
+ * `task_complete` payout, recoverable only by a different press than the obvious
+ * one** — and for a task with no linked `BrainDumpItem` (`taskId` is nullable, so
+ * a task can have none) the inbox route does not exist at all. That is still
+ * worth fixing here rather than filing as a nit, but it is not unrecoverable.
+ * Swallowing the payout is what lets the state write behind it run.
+ *
+ * The residual is the `step_done` points, the ten-steps-in-a-day badge check and
+ * this engagement's streak credit for the day — see `src/lib/best-effort.ts` and
+ * `confirmBreakdown` for why the streak's per-day boolean makes that recoverable
+ * by any other engagement the same day.
+ */
 export async function completeStep(stepId: string) {
   const workspaceId = await currentWorkspaceId();
   const step = await prisma.step.findFirst({
@@ -248,9 +318,13 @@ export async function completeStep(stepId: string) {
   await prisma.step.update({ where: { id: stepId }, data: { done: true } });
   // #233 — the streak credit is attributed to the inbox item behind this step's
   // task, so deleting that item withdraws it. `null` for a task with no item.
-  await rewardStepDone(
-    workspaceId,
-    await itemIdForTask(workspaceId, step.taskId),
+  //
+  // Resolved INSIDE #257's thunk, so its swallow covers this read too: the step is
+  // already marked done above, so no bookkeeping fault may report the completion
+  // as failed. A failure here costs an unattributed — therefore permanent — credit,
+  // which is the conservative direction.
+  await bestEffort("step_done_bookkeeping_failed", workspaceId, async () =>
+    rewardStepDone(workspaceId, await itemIdForTask(workspaceId, step.taskId)),
   );
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
@@ -474,6 +548,14 @@ export async function updateStepEstimate(stepId: string, minutes: number) {
 export type CompleteResult = {
   ok: boolean;
   nextStepId: string | null;
+  /**
+   * What THIS SESSION's own two payouts banked, which is not everything the
+   * request banked — `focus-timer.tsx` renders it as "+N points", so the two
+   * deliberate under-claims behind it are spelled out at the return statement
+   * rather than only here. `0` is a real value: a payout that fails after the
+   * step committed is swallowed (#257), so the figure can legitimately be
+   * nothing and the done screen then shows no points line at all.
+   */
   points: number;
   googleSynced: boolean;
   streak: number | null;
@@ -530,12 +612,40 @@ export async function completeFocus(
   }
 
   // Points + streak + badges (dashboard reads these).
-  // #233 — same attribution as `completeStep`; see `itemIdForTask`.
-  const streak = await rewardStepDone(
+  //
+  // Both best-effort (#257): the session is closed and the step is marked done,
+  // both committed, so no payout fault may report the session as unfinished. A
+  // retry here is not idempotent either — `sessionCheck` matches a session that
+  // is already closed, so a second press re-closes it and banks a SECOND
+  // `step_done` and `session_finished` for one stretch of work. Throwing did not
+  // preserve anything; it invited the double-pay.
+  //
+  // Two calls and two tags — the rule is on `bestEffort`. Local to this site:
+  // `session_finished` pays for time that was really spent and is the one reward
+  // an undo does not take back (`reverseStepCompletionRewards`), so a failed step
+  // payout must not silently cost it, and a failed bonus must not hide a streak
+  // that did advance. The residual is at most one of the two, never both.
+  //
+  // Both outcomes are kept, not just the step payout's value, because `points`
+  // below may only claim what actually banked — see the return statement.
+  //
+  // #233 — same attribution as `completeStep`, resolved inside the thunk for the
+  // reason given there.
+  const stepPayout = await bestEffort(
+    "focus_step_reward_failed",
     workspaceId,
-    await itemIdForTask(workspaceId, step.taskId),
+    async () =>
+      rewardStepDone(
+        workspaceId,
+        await itemIdForTask(workspaceId, step.taskId),
+      ),
   );
-  await logReward(workspaceId, RewardType.SessionFinished);
+  const bonusPayout = await bestEffort(
+    "focus_session_bonus_failed",
+    workspaceId,
+    () => logReward(workspaceId, RewardType.SessionFinished),
+  );
+  const streak = stepPayout.ok ? stepPayout.value : null;
 
   const next = await prisma.step.findFirst({
     where: {
@@ -572,7 +682,40 @@ export async function completeFocus(
   return {
     ok: true,
     nextStepId: next?.id ?? null,
-    points: 15,
+    // Only what banked (#257, Duo review on `!339`). This was the literal `15`,
+    // and the swallow above is what made that a lie the person could read: a
+    // payout that failed no longer aborts the action, so the done screen would
+    // render "+15 points" over rewards that were never written while the
+    // dashboard total stayed put.
+    //
+    // Per payout rather than all-or-nothing, because the two are independent
+    // `bestEffort` calls and either can fail alone — so all four combinations of
+    // THESE TWO are truthful. Read from `RewardPoints` rather than restated, so
+    // the figure cannot drift from the map `logReward` actually writes.
+    //
+    // Under-claims by design in TWO cases, and the count is spelled out because
+    // an exception count stated as "one" was wrong twice on this MR already:
+    //
+    //  1. `rewardStepDone` is a legitimate bundle, so `ok: false` means
+    //     "something in it failed", not "nothing banked" — if the points landed
+    //     and the streak touch then threw, those 10 are real and go unclaimed.
+    //  2. This is the SESSION's figure, not the request's. Finishing the last
+    //     step of a task also reaches `markTaskCompleted` above, whose
+    //     `task_complete` payout is worth 25 and is deliberately outside it —
+    //     exactly as it was when this line was the literal `15`. So a task
+    //     finished from the timer reports 15 over 40 banked, and a session whose
+    //     own two payouts both failed reports nothing at all over the 25 that
+    //     did. Widening it would move a number the done screen shows on every
+    //     task completion, which is a product decision rather than #257's.
+    //
+    // Under-claiming is the only direction that cannot tell someone their work
+    // earned something it did not, which is the same principle as #257 itself
+    // pointed the other way. Both cases are pinned in
+    // `post-commit-bookkeeping.test.ts` so neither can quietly become an
+    // over-claim by someone reading "only what banked" as "all of what banked".
+    points:
+      (stepPayout.ok ? RewardPoints[RewardType.StepDone] : 0) +
+      (bonusPayout.ok ? RewardPoints[RewardType.SessionFinished] : 0),
     googleSynced,
     streak: streak?.current ?? null,
     freshStart: streak?.freshStart ?? false,

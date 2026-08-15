@@ -1977,6 +1977,68 @@ describe("FocusTimer — complete", () => {
       random.mockRestore();
     }
   });
+
+  /**
+   * ── The screen may not claim points nobody was credited (#257, `!339`) ──────
+   *
+   * `completeFocus` now reports what actually banked instead of a hardcoded 15,
+   * because a post-commit payout that fails is swallowed rather than thrown —
+   * so `points: 0` is a state the done screen can genuinely be handed, and
+   * "+0 points" beside a 🎉 is both wrong and dispiriting.
+   *
+   * The session still completed, so this is emphatically NOT a failure notice:
+   * the step is done and the row is committed, which is the whole point of #257.
+   * The points line simply is not owed.
+   */
+  const finishWith = async (
+    result: Partial<Awaited<ReturnType<typeof completeFocus>>>,
+  ) => {
+    (completeFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      nextStepId: null,
+      points: 15,
+      googleSynced: false,
+      streak: null,
+      freshStart: false,
+      ...result,
+    });
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await screen.findByTestId("focus-done-summary");
+  };
+
+  it("shows no points line when the payout banked nothing", async () => {
+    await finishWith({ points: 0 });
+    expect(screen.getByTestId("focus-done-summary")).toBeInTheDocument();
+    expect(screen.queryByText(/points/i)).toBeNull();
+    expect(screen.queryByText(/\+0/)).toBeNull();
+  });
+
+  it("shows the reduced figure when only one payout banked", async () => {
+    await finishWith({ points: 5 });
+    expect(screen.getByText(/\+5 points/)).toBeInTheDocument();
+  });
+
+  // The Google line shares the same paragraph, and it is independent of the
+  // payout — a completion really did reach Google whatever the rewards did. So
+  // suppressing the points must not take it down with it, nor leave the "·"
+  // separator dangling in front of it.
+  it("still reports the Google sync when no points banked", async () => {
+    await finishWith({ points: 0, googleSynced: true });
+    expect(
+      screen.getByText("marked complete in Google Tasks ✅"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/points/i)).toBeNull();
+  });
+
+  it("CONTROL: still shows the full figure and the sync together", async () => {
+    await finishWith({ points: 15, googleSynced: true });
+    expect(
+      screen.getByText("+15 points · marked complete in Google Tasks ✅"),
+    ).toBeInTheDocument();
+  });
 });
 
 // #27 — the in-session Pause/Resume toggle now persists real server state
