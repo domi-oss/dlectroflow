@@ -598,10 +598,12 @@ describe("packagesDeniedAutomerge", () => {
  * ⚠️ **The second arm below is VACUOUS today, and that is recorded rather than
  * hidden.** `.gitlab/renovate.json` currently has no per-package
  * `automerge: false` entry, so `packagesDeniedAutomerge` returns `[]` and the loop
- * asserts nothing. The eleven synthetic `effectiveAutomergeFor` cases above are
- * what carry the ordering coverage; this arm exists so the check arms ITSELF the
- * first time somebody adds a deny entry, rather than being written after the
- * incident by whoever got the ordering wrong.
+ * asserts nothing. The synthetic `effectiveAutomergeFor` cases above are what carry
+ * the ordering coverage — deliberately not counted here, because a count in a
+ * comment goes stale the moment somebody adds a case and this file has no way to
+ * notice. This arm exists so the check arms ITSELF the first time somebody adds a
+ * deny entry, rather than being written after the incident by whoever got the
+ * ordering wrong.
  *
  * The first arm is the one that is not vacuous, and it is here for exactly that
  * reason: a describe block whose only assertion ran zero times is the failure shape
