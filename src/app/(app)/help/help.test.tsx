@@ -52,6 +52,32 @@ describe("HelpPage", () => {
     }
   });
 
+  // The inbox is a board you can rearrange, and this page described none of that:
+  // it listed the four review choices and stopped, so "put this back in Needs
+  // review" had no documented route.
+  //
+  // Both paths are named on purpose, and that is an accessibility point rather
+  // than a completeness one. The drag is a pointer gesture; `MoveToMenu` is its
+  // non-pointer equivalent, which is what carries WCAG 2.1.1 and 2.5.7 for this
+  // interaction (`inbox-view.tsx:4262-4264` states exactly that). Documenting the
+  // drag alone would describe the app to the subset of users who can perform it.
+  // `Move to` is the control's real accessible name (`move-to-menu.tsx:140`) —
+  // #253 removed the older nested "Move to…" ▾ entry, so the ellipsis form would
+  // send a reader looking for something no longer on screen.
+  it("documents moving items between lists, by drag AND by the Move to control", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The inbox & freshness/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/drag/i);
+    expect(text).toMatch(/Move to/);
+    // The non-pointer path must be presented as equivalent, not as a fallback for
+    // when the drag fails — it is the same dispatcher underneath.
+    expect(text).toMatch(/without dragging|keyboard|same/i);
+  });
+
   // The focus session gained real depth in v0.4.0 (#27 pause/resume, #43 + #68
   // music, #66 setup screen) while this page still described none of it. These
   // assertions are deliberately about the CONTROLS a user looks for, so the page

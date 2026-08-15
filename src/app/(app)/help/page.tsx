@@ -100,6 +100,26 @@ export default async function HelpPage({
           </Link>{" "}
           page.
         </p>
+        {/* The board can be rearranged and the page never said so, which left
+            "put this back in Needs review" with no documented route.
+
+            Both paths are named deliberately. The drag is a pointer gesture and
+            the row's `Move to` control is its non-pointer equivalent — the two
+            share one dispatcher, and that equivalence is what carries WCAG 2.1.1
+            and 2.5.7 for this interaction. Describing only the drag would describe
+            the app to whoever happens to be able to perform it. `Move to` is the
+            control's real accessible name; the older nested "Move to…" ▾ entry
+            went with #253, so the ellipsis form would name something absent. */}
+        <p className="text-sm">
+          Nothing is stuck where it landed. Drag a row onto another list to move
+          it — or, for exactly the same result without dragging, use the
+          row&rsquo;s <strong>Move to</strong> control and pick the list by
+          name, which is also the way to do it from the keyboard. The lists are{" "}
+          <strong>Needs review</strong>, <strong>Multi-step to-dos</strong>,{" "}
+          <strong>Single-task to-dos</strong>, <strong>Saved for later</strong>{" "}
+          and <strong>Completed</strong>, and a move is announced either way, so
+          you are told which list an item left as well as where it arrived.
+        </p>
       </section>
 
       <section className="space-y-2">
