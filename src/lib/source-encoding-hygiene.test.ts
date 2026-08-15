@@ -398,9 +398,17 @@ describe("scanControlBytes — what it reports", () => {
     const scan = scanControlBytes(bytesOf("\u0000".repeat(50)));
     expect(scan.findings).toHaveLength(DEFAULT_FINDING_LIMIT);
     expect(scan.total).toBe(50);
-    expect(scan.findings.map((f) => f.offset)).toEqual([
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-    ]);
+    // Derived from the constant rather than written out as [0…9]. Duo review on
+    // !347, and the drift is measured rather than hypothetical: setting
+    // DEFAULT_FINDING_LIMIT to 5 leaves the assertion above passing while the
+    // hard-coded array failed with `expected [0,1,2,3,4] to deeply equal
+    // [0,1,2,3,4,5,6,7,8,9]` — a mismatch that reads like a bug in the cap
+    // rather than a stale literal in the test. Deriving loses nothing: the
+    // property under test is "the FIRST n findings, in file order", and
+    // index-derived values state exactly that without consulting the output.
+    expect(scan.findings.map((f) => f.offset)).toEqual(
+      Array.from({ length: DEFAULT_FINDING_LIMIT }, (_, index) => index),
+    );
   });
 
   it("honours an explicit limit, including zero", () => {
