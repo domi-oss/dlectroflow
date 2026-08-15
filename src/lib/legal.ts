@@ -100,15 +100,25 @@ export const SOURCE_REPO_URL =
  *      while never being disclosed as stored — the page describing a thing it
  *      had not admitted to holding.
  *
- * Also narrowed, and worth its own line because the temptation is to delete it:
- * "nothing infers anything about ... how you are doing" was overstated, because
- * `DayRollup.narrative` is an LLM-written, STORED, second-person text about the
- * reader's day. The sentence stayed and gained the exception, rather than going,
- * because the first half of it is true and verified — no health, mood, energy,
- * sleep, medication or symptom column exists in any model. Note the narrative is
- * NOT opt-in: `roundup-card.tsx` triggers it at the reader's workday end and
- * `roundupEmailEnabled` gates only the email, so wording it as a setting the
- * reader switches on would understate it.
+ * Also corrected, and worth its own line because the temptation is to drop the
+ * subject entirely: "nothing infers anything about your health, your mind, or how
+ * you are doing" was overstated, because `DayRollup.narrative` is an LLM-written,
+ * STORED, second-person text about the reader's day.
+ *
+ * Precisely what happened to it, since this file exists to be precise and an
+ * earlier draft of this very paragraph described its own edit wrongly: the
+ * ABSOLUTE clause was removed and replaced with a NARROWER one — "nothing here
+ * asks you how you are or records why you use it" — and the roll-up exception was
+ * then stated as new prose. That is a rewrite plus an addition, not the original
+ * sentence "gaining an exception". What was kept rather than deleted is the
+ * SUBJECT: the paragraph still makes an affirmative claim about health data
+ * instead of going silent, because the verified part is worth stating — no health,
+ * mood, energy, sleep, medication or symptom column exists in any model, and there
+ * is no questionnaire surface.
+ *
+ * Note the narrative is NOT opt-in: `roundup-card.tsx` triggers it at the reader's
+ * workday end and `roundupEmailEnabled` gates only the email, so wording it as a
+ * setting the reader switches on would understate it.
  *
  *
  * Bumped for #199: /privacy names a NEW CATEGORY OF STORED CONTENT — a shopping
