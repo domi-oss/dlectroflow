@@ -12,7 +12,9 @@ import { cn, controlSurface, touchTarget } from "@/lib/utils";
  *
  * The menu is a complete index of the app; it is not a shortcut. Getting to the
  * shopping list mid-aisle, or to the timer when you have finally decided to
- * start, cost a tap to open the menu, a read of seven labels and a second tap.
+ * start, cost a tap to open the menu, a read of six labels — seven once
+ * shopping-list mode is on, which is exactly when this bar earns its keep — and a
+ * second tap.
  * For a tool whose users are ADHD, "the thing you are about to do is two taps
  * and a list away" is the failure mode, not an inconvenience — the moment of
  * intent is the thing being protected.

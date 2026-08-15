@@ -26,9 +26,9 @@ Six screens, reached via the ☰ menu (menu shows: Inbox, Focus Timer, Dashboard
    - **To do** (prominent) with two sub-buckets: **Single-task to-dos** (committed, no breakdown) and **Multi-step to-dos** (broken-down tasks, showing step progress e.g. "2/5 done"). Multi-step rows open the breakdown.
    - **Saved for later** — deferred items (freshness paused).
    - Each section has a **see all →** deep-link into the matching Library tab.
-2. **Task Breakdown** (`/tasks/[id]`) — chat + editable step list (emoji, text, editable time estimate); confirm; then a confirmed state that branches on scheduling success (scheduled vs saved-not-scheduled).
+2. **Task Breakdown** (`/tasks/[taskId]`) — chat + editable step list (emoji, text, editable time estimate); confirm; then a confirmed state that branches on scheduling success (scheduled vs saved-not-scheduled).
 3. **Focus Timer** (`/focus/[stepId]`) — state machine: Setup → Running/Paused → Time's up → Done. Low-shame **Pause for now** exit keeps the step in its task and surfaces a resume banner in the Inbox.
-4. **Dashboard** — 4 stats, daily spark, end-of-day round-up, best streaks, 6 badges (see the reconciled badge list below).
+4. **Dashboard** — 4 stats, daily spark, end-of-day round-up, best streaks, 9 badges (see the reconciled badge list below, which this line used to contradict).
 5. **Settings** — voice, freshness thresholds, integrations (Reclaim/Google Tasks), notifications, + a **Demo: First-run preview** toggle.
 6. **Everything** (Library hub) — tabs: **Single-task · Multi-step · Saved for later · Done**. Has a **← Back** button. Rows open the breakdown.
 
@@ -89,7 +89,11 @@ Voice toggle **modes are named "Plain" and "Playful"** in the UI.
 ---
 
 ## Open decisions to confirm before/while planning
-1. **Streak rule** — exactly what counts as a day's engagement.
+1. ~~**Streak rule** — exactly what counts as a day's engagement.~~ **Decided and
+   shipped** in Phase 7 — engagement, via `touchStreakOnEngagement` in
+   `src/lib/rewards.ts`, with `touchStreakOnCompletion` retained as a thin alias. The
+   badge section above already recorded this as SHIPPED while this list still asked for
+   a decision on it.
 2. **Voice scope** — per-workspace (matches current `Settings`) vs per-user.
 3. **Freshness reset** — non-destructive `freshenedAt` field (recommended).
 

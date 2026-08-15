@@ -77,23 +77,23 @@ If you have registry access and would rather skip the build, run
 `docker login registry.gitlab.com` and set `DLECTROFLOW_IMAGE` in your
 environment file to a published tag instead.
 
-> **The published tags are currently larger than a local build.** `latest` and
-> `v0.4.0` are the same image, and it is **~892 MB** — the release was tagged
-> hours before the change that took the runtime image down to ~207 MB (#71), so
-> it predates the shrink. Production runs the small one; the newest _release_
-> does not. Pulling therefore costs about four times the disk of building, which
-> is the wrong trade on the small box this guide recommends, so prefer the build
-> above for now.
+> **Check a tag's size before pulling, and pin the tag deliberately.** `latest`
+> now tracks the small runtime image: measured 2026-08-15 it is **198 MiB** as
+> the registry reports it — the same ~207 MB image step 2 builds, and
+> byte-for-byte the same digest as `v0.5.0`. So pulling and building cost about
+> the same disk, and the choice between them is about whether you want registry
+> access, not about size.
 >
-> This corrects itself at the next release, whose tag pipeline builds
-> post-shrink and moves `latest` to it. **Removing this note is tracked as part
-> of #113** — it is deliberately time-limited, and once `latest` is the small
-> image this paragraph would mislead in the opposite direction.
+> **Tags from before the runtime-image shrink (#71) are roughly four times
+> larger** — `v0.4.0` measured 851 MiB on the same date. That is the wrong trade
+> on the small box this guide recommends, so if you pull, pull `latest` or a tag
+> you have measured rather than an older pinned one.
 >
-> To check a tag's size before pulling: the project's **Deploy → Container
-> Registry** page lists every tag with its size, which needs no tooling. From
-> the command line it takes two calls, because the repository listing does not
-> include sizes — only the per-tag endpoint does:
+> Both figures are dated because they move with every release; the way to get a
+> current one is the command, not this paragraph. The project's **Deploy →
+> Container Registry** page lists every tag with its size and needs no tooling.
+> From the command line it takes two calls, because the repository listing does
+> not include sizes — only the per-tag endpoint does:
 >
 > ```bash
 > PROJ=gl-demo-ultimate-dtop%2Fdomi-oss%2Fdlectroflow
@@ -105,7 +105,6 @@ environment file to a published tag instead.
 > #    should hand you the same number back — swap it only for a fork.
 > glab api "projects/$PROJ/registry/repositories/11826214/tags/latest" \
 >   | jq -r '"\(.name)  \(.total_size / 1048576 | round) MiB"'
-> # latest  851 MiB
 > ```
 >
 > `docker manifest inspect` can also do it, but it needs a registry login and
