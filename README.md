@@ -114,7 +114,8 @@ cd dlectroflow
 cp .env.example .env
 
 # 3. Start Postgres, install deps + create the database (one command)
-npm run setup        # = docker compose up -d db && npm install && prisma migrate dev
+# = docker compose -f docker/docker-compose.yml up -d db && npm install && prisma migrate dev
+npm run setup
 
 # 4. Add your Claude API key (see options below), e.g. for this shell session:
 #    (or point the app at a model of your own instead — see "Bring your own LLM")
