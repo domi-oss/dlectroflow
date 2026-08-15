@@ -698,14 +698,14 @@ app's existing at-a-glance card for an optional gated feature, and it renders fr
 `/dashboard` is where the **v2** history visualisation would sit naturally if `/meds` were not
 getting its own page. It is not where today's dose chips go.
 
-⚠️ **Corrected 2026-08-15: this sentence said "today's three chips".** The owner's regimen is **two
-doses** — 2 tablets after breakfast, 1 after lunch — and the strip renders one chip **per dose**, not per
-tablet. Three is the tablet count, and a spec that miscounts the chips in the feature it is specifying
-would be copied. The regimen is configurable anyway, so no number belongs in that sentence.
+**The owner accepted this argument on 2026-08-15 and it is not reopened below.** What the same decision
+*added* is a second surface, which this document did not cover at all — the next section.
 
-**The owner accepted this argument unchanged on 2026-08-15.** It is not reopened below and the section
-is left as it was written. What the same decision *added* is a second surface, which this document did
-not cover at all.
+⚠️ **One arithmetic slip corrected while here, and it is not cosmetic: the sentence above said "today's
+three chips".** The owner's regimen is **two doses** — 2 tablets after breakfast, 1 after lunch — and the
+strip renders one chip **per dose**, not per tablet. Three is the tablet count. A spec that miscounts the
+controls in the feature it is specifying gets copied, and the regimen is configurable anyway, so no
+number belongs in that sentence at all.
 
 ### The nav-bar control — settled 2026-08-15, and it is an addition rather than an alternative
 
