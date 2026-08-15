@@ -59,11 +59,16 @@ const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/;
  * An explicit list rather than a bare `\bnot\b`: "not" is common enough in
  * ordinary prose that matching it alone would exempt a line like
  * `If DATABASE_URL is not set: set -a; . ./.env; set +a`, which is a
- * prescription wearing a negation. Each entry here is a phrase that can only be
- * read as being about the command itself.
+ * prescription wearing a negation about its precondition. Each entry here is a
+ * phrase that can only be read as being about the command itself.
+ *
+ * The list is kept to phrases a person would plausibly write here, and **every
+ * alternative has a case in the colocated test** — an alternative nothing
+ * asserts is untested code, and it stops the next reader telling a deliberate
+ * choice from a typo.
  */
 const DISAVOWED =
-  /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|can|could|would|need)\s+not\b|\b(?:do|does|did|must|should|can|could|would)n['’]t\b/i;
+  /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|need)\s+not\b|\b(?:do|does|must|should)n['’]t\b/i;
 
 /**
  * True when `line` hands the reader the env-sourcing recipe as a thing to run,

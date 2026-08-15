@@ -67,6 +67,33 @@ describe("integration-test docblock hygiene (#256)", () => {
       ).toBe(false);
     });
 
+    // Every alternative in the disavowal pattern gets a case. An unasserted
+    // branch is untested code, and the whole point of the list being explicit
+    // rather than a bare `\bnot\b` is that each entry was chosen deliberately —
+    // so each entry has to be shown to work, or the next person cannot tell a
+    // deliberate phrase from a typo.
+    it.each([
+      "Do not run `set -a; . ./.env; set +a`.",
+      "This does not need `set -a; . ./.env; set +a`.",
+      "Earlier versions did not need `set -a; . ./.env; set +a`.",
+      "You must not run `set -a; . ./.env; set +a`.",
+      "You should not run `set -a; . ./.env; set +a`.",
+      "You need not run `set -a; . ./.env; set +a`.",
+      "You mustn't run `set -a; . ./.env; set +a`.",
+      "You shouldn't run `set -a; . ./.env; set +a`.",
+      "This doesn't need `set -a; . ./.env; set +a`.",
+      "Don't run `set -a; . ./.env; set +a`.",
+      "Never run `set -a; . ./.env; set +a`.",
+      "We no longer use `set -a; . ./.env; set +a`.",
+      "Avoid `set -a; . ./.env; set +a`.",
+      "`set -a; . ./.env; set +a` is unnecessary.",
+      "`set -a; . ./.env; set +a` is not needed.",
+      "Use a real Postgres instead of `set -a; . ./.env; set +a`.",
+      "The config forwards it rather than `set -a; . ./.env; set +a`.",
+    ])("reads %j as a warning, not a prescription", (line) => {
+      expect(prescribesEnvSourcing(` * ${line}`)).toBe(false);
+    });
+
     it("ignores lines that do not mention the recipe", () => {
       expect(prescribesEnvSourcing(" * Needs the real Postgres.")).toBe(false);
       expect(prescribesEnvSourcing("  set -e")).toBe(false);
