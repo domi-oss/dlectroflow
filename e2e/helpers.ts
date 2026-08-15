@@ -137,13 +137,35 @@ export type Theme = "light" | "dark";
 export const THEMES: readonly Theme[] = ["light", "dark"];
 
 /**
- * Sets df-theme in localStorage before the app's own scripts run, matching the
- * inline bootstrap in src/app/layout.tsx (`localStorage.getItem('df-theme') ===
- * 'dark'`) and the toggle in src/components/theme-toggle.tsx. addInitScript
- * re-runs on every subsequent navigation in this page, so it survives
- * page.goto() calls after this — but it must be called BEFORE the first goto.
+ * Pins a theme EXPLICITLY, and pins the OS against it.
+ *
+ * Two things, because #85 made one of them necessary:
+ *
+ *  1. `df-theme` in localStorage before the app's own scripts run, matching the
+ *     bootstrap in `src/app/layout.tsx` (now `@/lib/theme`'s
+ *     `THEME_BOOTSTRAP_SCRIPT`) and the controls in
+ *     `src/components/theme-toggle.tsx`. `addInitScript` re-runs on every
+ *     subsequent navigation in this page, so it survives later `page.goto()`
+ *     calls — but it must be called BEFORE the first goto.
+ *  2. ⚠️ `prefers-color-scheme` emulated to the OPPOSITE of the theme asked for.
+ *
+ * Point 2 is the important one and it is not belt-and-braces. `system` is now
+ * the DEFAULT preference, so "which theme is on screen" is only pinned by the
+ * explicit value in (1) continuing to outrank the OS. Leaving the OS setting
+ * unpinned would make every both-themes gate in this suite depend on Playwright's
+ * default `colorScheme` (`light`), and the day the override broke, the dark half
+ * of those gates would quietly become a SECOND LIGHT SCAN — reporting green on a
+ * page it never looked at, which is the failure this helper's sibling
+ * `expectThemeApplied` exists to catch and which no contrast assertion can see.
+ *
+ * Setting the OS to disagree instead means the override is load-bearing in every
+ * one of those tests: if it stops working, the page renders the wrong theme and
+ * `expectThemeApplied` fails by name. Nothing in the app reads
+ * `prefers-color-scheme` for anything but the theme, so there is no other
+ * behaviour to perturb.
  */
 export async function setTheme(page: Page, theme: Theme): Promise<void> {
+  await page.emulateMedia({ colorScheme: theme === "dark" ? "light" : "dark" });
   await page.addInitScript((value: Theme) => {
     try {
       localStorage.setItem("df-theme", value);
@@ -154,19 +176,45 @@ export async function setTheme(page: Page, theme: Theme): Promise<void> {
 }
 
 /**
+ * Emulate the OS colour scheme WITHOUT storing a preference, so the app is left
+ * on its `system` default (#85). The complement of `setTheme`: that one pins an
+ * explicit override, this one exercises the path a first visit actually takes.
+ */
+export async function setOsColorScheme(
+  page: Page,
+  scheme: "light" | "dark",
+): Promise<void> {
+  await page.emulateMedia({ colorScheme: scheme });
+}
+
+/**
  * Guard the precondition of any theme-scoped assertion: a silently-light "dark"
  * scan is worse than no scan, because it looks like it was checked.
+ *
+ * #85 — also asserts the PREFERENCE on `<html>`, when one is expected. The
+ * resolved class alone can no longer tell "explicitly light" from "system, on a
+ * light device", and for a gate that means an explicit-light scan and an
+ * accidental-light scan are indistinguishable from the class.
  */
 export async function expectThemeApplied(
   page: Page,
   theme: Theme,
+  expectedPreference?: "system" | Theme,
 ): Promise<void> {
+  const state = await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains("dark"),
+    preference: document.documentElement.getAttribute("data-theme"),
+  }));
   expect(
-    await page.evaluate(() =>
-      document.documentElement.classList.contains("dark"),
-    ),
-    `expected the ${theme} theme to be applied (html.dark = ${theme === "dark"})`,
+    state.dark,
+    `expected the ${theme} theme to be applied (html.dark = ${theme === "dark"}; data-theme = ${state.preference})`,
   ).toBe(theme === "dark");
+  if (expectedPreference !== undefined) {
+    expect(
+      state.preference,
+      `expected html[data-theme] to be "${expectedPreference}"`,
+    ).toBe(expectedPreference);
+  }
 }
 
 /**

@@ -10,7 +10,7 @@ import {
   COMPLETE_TEXT,
 } from "@/lib/completion-style";
 import { typefaceRootAttrs } from "@/lib/typeface";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemePreferenceChoice } from "@/components/theme-toggle";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import {
   useSaveStatus,
@@ -111,23 +111,22 @@ export function AppearanceSection({
       defaultExpanded={defaultExpanded}
       headingExtras={<SaveIndicator status={status} voice={voice} />}
     >
-      {/* Theme (moved here so Appearance is a single group). */}
-      <div className="space-y-1">
-        <span className="text-muted-foreground text-xs">
-          {t("appearance.theme", voice)}
-        </span>
-        <div>
-          {/* Theme persists client-side (localStorage) instantly; flash the
-              shared indicator so it gives the same "Saved" feedback as the
-              completion controls below. */}
-          <ThemeToggle
-            onPersist={() => {
-              markSaving();
-              markSaved();
-            }}
-          />
-        </div>
-      </div>
+      {/* Theme (moved here so Appearance is a single group).
+
+          #85 — a three-state radiogroup (Follow my system / Light / Dark) rather
+          than the two-state ThemeToggle, because `system` is now the default and
+          the toggle had no way to express it: once you pressed it you were
+          pinned to an explicit theme for good. The header keeps the toggle,
+          which is what #103 was about. Still persists client-side (localStorage)
+          and instantly; flash the shared indicator so it gives the same "Saved"
+          feedback as the completion controls below. */}
+      <ThemePreferenceChoice
+        voice={voice}
+        onPersist={() => {
+          markSaving();
+          markSaved();
+        }}
+      />
 
       {/* App-wide completion style (Design D). */}
       <p className="text-muted-foreground text-sm">
