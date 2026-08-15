@@ -178,6 +178,15 @@ describe("HelpPage", () => {
     // Activity is where the points and the streak the loop promises actually live.
     expect(text).toMatch(/streak/i);
     expect(text).toMatch(/badge/i);
+    // Duo review, !356 — the round-up's settings are SPLIT and this section used to
+    // claim they "are on that page rather than in Settings", full stop. Two
+    // different things: `workdayEndTime` / `roundupEmailEnabled` live on the
+    // Activity page, while `notifyRoundup` — whether it also raises a DESKTOP
+    // notification — is Settings → Notifications, whose own hint says "the in-app
+    // recap still shows either way". Saying Settings has nothing to do with the
+    // round-up sends a reader hunting in the wrong place for the toggle they want.
+    expect(text).toMatch(/desktop notification/i);
+    expect(text).toMatch(/Notifications/);
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );
@@ -206,6 +215,14 @@ describe("HelpPage", () => {
     // And the reassurance the Settings hint gives, because a feature switch reads
     // as destructive: turning it off hides the list rather than deleting it.
     expect(text).toMatch(/without deleting|does not delete|hides the list/i);
+    // Duo review, !356 — `Saved for later` names TWO unrelated things: a Library
+    // tab holding `BrainDumpItem`s, and this list's own `ShoppingItem.savedForLater`
+    // (a separate model entirely, `schema.prisma`'s `ShoppingItem`). This section
+    // asserts the shopping list is "not a kind of task", so borrowing the tab's name
+    // without saying they are separate implies shopping items enter the task
+    // pipeline. The page has to disown that, since it cannot rename the app's label.
+    expect(text).toMatch(/its own|separate|nothing to do with/i);
+    expect(text).toMatch(/Library/);
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );

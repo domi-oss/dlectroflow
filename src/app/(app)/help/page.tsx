@@ -306,9 +306,27 @@ export default async function HelpPage({
           fill in as you reach them. It also holds the{" "}
           <strong>end-of-day round-up</strong> — a short recap of the day
           written for you when your workday ends, which you can also trigger
-          early to see what it looks like. The round-up&rsquo;s own settings
-          (when your workday ends, and whether to email it) are on that page
-          rather than in Settings.
+          early to see what it looks like.
+        </p>
+        {/* Duo review, !356 — the round-up's settings are SPLIT across two pages,
+            and this used to say they "are on that page rather than in Settings",
+            full stop. `workdayEndTime` and `roundupEmailEnabled` are on the Activity
+            page; `notifyRoundup` — whether it also raises a desktop notification —
+            is Settings → Notifications, whose hint says the in-app recap shows
+            either way. Telling a reader Settings has nothing to do with the round-up
+            sends them hunting in the wrong place for the toggle they actually want. */}
+        <p className="text-sm">
+          Its settings sit in two places, which is worth knowing before you go
+          looking. <strong>When your workday ends</strong> and{" "}
+          <strong>whether it is emailed to you</strong> are on the Activity page
+          itself, tucked under the round-up. Whether it also raises a{" "}
+          <strong>desktop notification</strong> is a separate switch, under{" "}
+          <strong>Notifications</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page — turn that off and the recap still appears on the page, it just
+          does not come and find you.
         </p>
       </section>
 
@@ -336,11 +354,27 @@ export default async function HelpPage({
         <p className="text-sm">
           It is deliberately a plain list, not a kind of task: no estimates, no
           steps, nothing lands in your calendar, and ticking something off does
-          not touch your streak. Add a line, tick it, rename it, or move it to{" "}
-          <strong>Saved for later</strong> for things you buy occasionally —
-          nothing comes back from there on its own, you pull it up when you want
-          it. While the list has anything on it the inbox shows a one-line
-          reminder of how many items are waiting, which you can dismiss.
+          not touch your streak. Add a line, tick it, rename it, or delete it.
+          While the list has anything on it the inbox shows a one-line reminder
+          of how many items are waiting, which you can dismiss.
+        </p>
+        {/* Duo review, !356 — `Saved for later` names two unrelated things: the
+            Library tab of `BrainDumpItem`s, and this list's own
+            `ShoppingItem.savedForLater`, a separate model. Because this section
+            insists the shopping list is "not a kind of task", borrowing the tab's
+            name silently implied shopping items enter the task pipeline. The label
+            is the app's and cannot be renamed from here, so the page disowns the
+            overlap instead of glossing it. */}
+        <p className="text-sm">
+          The list has its own <strong>Saved for later</strong> shelf for things
+          you only buy occasionally. It shares a name with the{" "}
+          <Link href="/library" className="underline">
+            Library
+          </Link>{" "}
+          tab and has <strong>nothing to do with it</strong> — the two are
+          separate, and a shopping item never becomes a task or shows up in your
+          inbox. Nothing comes back off that shelf on its own; you pull an item
+          up when you want it again.
         </p>
       </section>
 
