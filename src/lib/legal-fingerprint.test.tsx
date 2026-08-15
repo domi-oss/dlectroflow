@@ -86,12 +86,30 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  // 2026-08-08, #199 — /privacy only. The stored-data list gains a shopping-list
-  // entry: a new CATEGORY of stored content (Art. 13(1)(c)) plus the retention
-  // sentence that comes with it, since a reader could otherwise infer that
-  // switching the feature off disposes of what it held. `terms` is untouched and
-  // its hash below is unchanged, which is the evidence the two documents are
-  // genuinely disjoint here.
+  // 2026-08-15, the legal-accuracy sweep — /privacy only. Ten measured drifts
+  // between the page and the code, corrected as ONE publication event. Four of
+  // them move the date on their own: a withdrawn Art. 9(2)(a) consent claim that
+  // had no mechanism behind it, two egress paths the page said did not exist
+  // (`Task.notes` into the LLM prompt, and into a scheduled Google Task's
+  // `notes`), a retention sentence promising a purge that nothing runs, and four
+  // newly disclosed categories of stored content. The full reasoning is in
+  // `src/lib/legal.ts`'s docblock rather than duplicated here.
+  //
+  // WHY ONE COMMIT, since the temptation next time will be to split it: this
+  // gate re-records BOTH hashes for whatever text state the tree renders, and
+  // `legal.ts` allows the date to move once per publication. Two MRs each
+  // touching this page would invalidate the other's recorded hash on merge and
+  // bump the date twice for one publication — so a sweep lands together or not
+  // at all.
+  //
+  // `terms` is untouched and its hash below is unchanged, which is the evidence
+  // the two documents are genuinely disjoint here.
+  //
+  // ── the 2026-08-08 state this replaced ──
+  // #199 — /privacy only. The stored-data list gains a shopping-list entry: a
+  // new CATEGORY of stored content (Art. 13(1)(c)) plus the retention sentence
+  // that comes with it, since a reader could otherwise infer that switching the
+  // feature off disposes of what it held.
   //
   // ── the 2026-08-05 state this replaced, kept because the reasoning is reusable ──
   // Two changes shared LEGAL_EFFECTIVE_DATE and they touched DIFFERENT documents,
@@ -118,7 +136,7 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  privacy: "164dc0d1436e1792993e09a1605d4c8d1152ed700a84bb7769451bbec9ca8ad1",
+  privacy: "2063278887ce2768f5e100566812afc9cb94d59c218394621b3ea65138fc23ec",
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 

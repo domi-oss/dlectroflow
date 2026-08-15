@@ -388,8 +388,107 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(text).toMatch(/The export is the exception/i);
   });
 
-  it("admits revocation does not auto-delete content", () => {
-    expect(pageText()).toMatch(/is\s+not\s+deleted automatically today/i);
+  it("admits nothing auto-deletes an account, in both directions", () => {
+    // This asserted the literal phrase "is not deleted automatically today",
+    // which covered only the REVOKED path — and the same bullet simultaneously
+    // said a freeze "marks its content to be removed 30 days later", so the
+    // page described an automatic purge and its absence in consecutive
+    // sentences and this test was satisfied by the half that was true.
+    //
+    // Pinned as substance now, and two-sided, because the two failures are
+    // opposite: understating leaves a reader who wanted erasure believing it
+    // happened, and overstating leaves a reader waiting 30 days for a job that
+    // does not exist. `freezeAccount` writes `User.purgeAfter` and nothing
+    // reads it — `prisma/scheduled-purge.ts` sweeps guest workspaces and guest
+    // counters only, and `deleteAccount` has no caller outside its own tests.
+    // When #159 ships, this test changes with the page.
+    const text = pageText();
+    expect(text).toMatch(/not deleted automatically/i);
+    expect(text, "the page must say who does the deletion").toMatch(/by hand/i);
+    expect(
+      text,
+      "the page must cover the self-deleted path too, not only revocation",
+    ).toMatch(/whether you deleted the account yourself or I revoked it/i);
+    // The old overclaim, in either of its shapes. A recovery window is fine to
+    // state; a scheduled removal at the end of it is not, because none runs.
+    expect(
+      text,
+      "the page is claiming a scheduled purge that does not exist",
+    ).not.toMatch(/marks? its content to be removed/i);
+    // Deliberately NOT a blanket ban on "deleted after 30 days": that sentence
+    // is true and load-bearing three times elsewhere on this page — the access
+    // logs, the guest IP hash and the backups all genuinely age out on a job.
+    // Only ACCOUNT CONTENT lacks one, so the assertion is scoped to it.
+    expect(
+      text,
+      "account content is claiming an automatic 30-day removal",
+    ).not.toMatch(/content[^.]{0,60}(deleted|removed)[^.]{0,20}30 days/i);
+  });
+
+  it("discloses the task note as free text sent to the LLM (#179)", () => {
+    // The finding that motivated this whole revision. From #123 the page said
+    // the breakdown context "contains no free text"; #179 made that false on
+    // 2026-08-08 by selecting `Task.notes` in `breakdown-context.ts`, and
+    // `buildNoteBlock` quotes it verbatim into the prompt at up to
+    // MAX_NOTE_CONTEXT_CHARS. The claim survived for a week because it is a
+    // NEGATIVE one — nothing fails when a "what is sent" list grows a gap.
+    //
+    // So both halves are pinned: the disclosure must be present, AND the
+    // unqualified absence-claim must not come back. Widening that `select`
+    // again should red this test, not ship quietly.
+    const text = pageText();
+    expect(text).toMatch(/your note on the task/i);
+    expect(text, "the 600-character clamp is the bound stated").toMatch(
+      /600 characters/i,
+    );
+    expect(
+      text,
+      "notes on other tasks are NOT selected, and the page should say so",
+    ).toMatch(/notes on other tasks/i);
+    expect(
+      text,
+      'the page is claiming "no free text" again while Task.notes is selected',
+    ).not.toMatch(/contains no free text|no free text,/i);
+  });
+
+  it("does not claim Article 9 explicit consent for health data in a note", () => {
+    // #123 shipped "explicit consent — Article 9(2)(a) UK GDPR" with nothing
+    // behind it: no field asks for health data, so no permission was ever
+    // sought, so there was no consent to be explicit about. Grepping `src/`
+    // for a gate, an acknowledgement or a warning returned only the page's own
+    // prose.
+    //
+    // The owner's decision was to state the true position rather than build a
+    // consent mechanism. This test is the guard on that decision — if the
+    // Art. 9(2)(a) claim is ever reintroduced, it must arrive WITH a mechanism,
+    // and reintroducing it should therefore cost a deliberate red build.
+    const text = pageText();
+    // The whole Article 9 family, not just the (2)(a) literal — any Art. 9
+    // condition asserted here would need a mechanism behind it, and none of
+    // them has one.
+    expect(text).not.toMatch(/article\s*9/i);
+    // The old sentence's own shape. A blanket ban on "explicit consent" would
+    // be wrong: the replacement prose USES the phrase to refuse it, which is
+    // the point, so what is forbidden is the affirmative claim.
+    expect(text).not.toMatch(/sharing them knowingly and explicitly/i);
+    expect(text).not.toMatch(/explicit consent[^.]{0,40}(permits|allows) me/i);
+    // And the honest replacement must actually be there, so the paragraph
+    // cannot be deleted into silence instead.
+    expect(text).toMatch(/not going to call that consent/i);
+    expect(text).toMatch(/no field for it/i);
+  });
+
+  it("says a note is copied into Google Tasks when a step is scheduled (#44)", () => {
+    // `encodeReclaim` writes `buildScheduleNote`'s output — task note, step
+    // note, a prompt line and a focus URL — into the Google Task's `notes`
+    // field, and `patchGoogleTask` sends it. The page described only a title
+    // and a due date, so a reader could not have known a note leaves the app
+    // this way. The subscription FEED is deliberately different and carries
+    // titles and times only (`buildFeedIcs`); the assertion below is about the
+    // written Google Task, and the feed's own promise is pinned elsewhere.
+    const text = pageText();
+    expect(text).toMatch(/notes field/i);
+    expect(text).toMatch(/copied into your Google Tasks list/i);
   });
 
   it("admits the feed token reaches the access log, and does not claim otherwise (#154)", () => {

@@ -64,6 +64,53 @@ export const SOURCE_REPO_URL =
  * direction: the text cannot move without someone deciding about this date.
  *
  *
+ * Bumped for the legal-accuracy sweep: ten measured drifts between /privacy and
+ * what the code does, corrected in one commit. It moves the date on any one of
+ * them; the reason to record them together is that they are one publication
+ * event and the fingerprint gate re-records for a text state no single fix
+ * rendered alone. /terms is untouched and its hash below is unchanged, which is
+ * the evidence the two documents are disjoint here.
+ *
+ * The four that would each have moved it on their own:
+ *
+ *   1. A CHANGED LEGAL BASIS. The page claimed "explicit consent — Article
+ *      9(2)(a) UK GDPR" permitted holding health details typed into a note.
+ *      Nothing in src/ asks for that consent — no gate, no acknowledgement, no
+ *      warning — so there was no consent to be explicit about. The claim is
+ *      withdrawn rather than mechanised: the page now says it is not calling it
+ *      consent and why. Retracting a claimed lawful basis is substance in the
+ *      un-reassuring direction, which is the direction that must never ship
+ *      quietly.
+ *   2. A NEW DISCLOSURE OF WHAT LEAVES. `Task.notes` is selected by
+ *      `breakdown-context.ts` and quoted verbatim into the LLM prompt by
+ *      `buildNoteBlock` (#179, 2026-08-08) — while the page said the context
+ *      "contains no free text". The same note is written into a scheduled
+ *      Google Task's `notes` field by `encodeReclaim`, so it reaches a
+ *      recipient the page described as receiving only a title and a due date.
+ *      Two egress paths a reader was told did not exist.
+ *   3. A CHANGED RETENTION STATEMENT. The page said a freeze "marks its content
+ *      to be removed 30 days later". `freezeAccount` writes `User.purgeAfter`
+ *      and nothing reads it, so no removal is scheduled. A reader waiting for a
+ *      job that does not run is the failure this correction exists to stop, and
+ *      the page had it both ways in consecutive sentences.
+ *   4. NEW CATEGORIES OF STORED CONTENT: notes on tasks, steps and captures (up
+ *      to 2,000 characters each), `User.displayName`, `FocusPlaylist.name` and
+ *      `BreakdownTurn.message`. Art. 13(1)(c) disclosures, and the last was
+ *      already named in the portability bullet as "the coaching conversations"
+ *      while never being disclosed as stored — the page describing a thing it
+ *      had not admitted to holding.
+ *
+ * Also narrowed, and worth its own line because the temptation is to delete it:
+ * "nothing infers anything about ... how you are doing" was overstated, because
+ * `DayRollup.narrative` is an LLM-written, STORED, second-person text about the
+ * reader's day. The sentence stayed and gained the exception, rather than going,
+ * because the first half of it is true and verified — no health, mood, energy,
+ * sleep, medication or symptom column exists in any model. Note the narrative is
+ * NOT opt-in: `roundup-card.tsx` triggers it at the reader's workday end and
+ * `roundupEmailEnabled` gates only the email, so wording it as a setting the
+ * reader switches on would understate it.
+ *
+ *
  * Bumped for #199: /privacy names a NEW CATEGORY OF STORED CONTENT — a shopping
  * list, its items, their ticked state and whether each has been moved to "saved
  * for later". A new kind of personal data being stored is an Art. 13(1)(c)
@@ -150,7 +197,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-08";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-15";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

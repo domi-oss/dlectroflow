@@ -226,8 +226,16 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Tasks and steps</strong> — titles, step text, emoji, time
-            estimates and the history of those estimates, what is done, and the
-            scheduling intent you picked.
+            estimates and the history of those estimates, what is done, the
+            scheduling intent you picked, and{" "}
+            <strong>any note you write on a task or on a single step</strong>{" "}
+            (up to 2,000 characters each). A note you write on a capture before
+            you triage it is kept the same way.
+          </li>
+          <li>
+            <strong>Coaching conversations</strong> — the messages you send the
+            breakdown coach and the step lists it proposed back, kept against
+            the task so you can see how it got there.
           </li>
           <li>
             <strong>Shopping list</strong> — the items you type on it, whether
@@ -241,6 +249,10 @@ export default function PrivacyPage() {
           <li>
             <strong>Focus sessions</strong> — start and end times, pauses,
             planned and added minutes, and how the session ended.
+          </li>
+          <li>
+            <strong>Focus playlists</strong> — any playlist you create and the
+            name you give it, plus which tracks you put in it.
           </li>
           <li>
             <strong>Daily roll-ups</strong> — the day&rsquo;s counts, and a
@@ -296,6 +308,11 @@ export default function PrivacyPage() {
             and your email address if GitLab returns one. The only permission
             requested is <code>read_user</code> — no repositories, no code, no
             groups, no ability to act as you.
+          </li>
+          <li>
+            <strong>A display name</strong>, if you set one — the name you would
+            like to be greeted by, instead of your GitLab username. Optional,
+            and blank until you type one.
           </li>
           <li>
             <strong>The invitation record</strong>: the username or email
@@ -531,6 +548,12 @@ export default function PrivacyPage() {
             have not broken down are not sent anywhere.
           </li>
           <li>
+            <strong>Your note on the task</strong>, if you have written one. The
+            first 600 characters of it are quoted into the request, so the steps
+            take account of what you already knew. Notes on other tasks, and on
+            anything you have not asked to break down, are never sent.
+          </li>
+          <li>
             <strong>When the end-of-day roll-up is written</strong> (signed-in
             accounts only): the text of up to five steps you finished and up to
             three carrying over, so the narrative can mention them.
@@ -543,14 +566,25 @@ export default function PrivacyPage() {
         </ul>
 
         <LegalSubheading>What is not sent</LegalSubheading>
+        {/* This paragraph said the breakdown context "contains no free text"
+            from #123 until this revision, and #179 had made that false on
+            2026-08-08 by adding `Task.notes` to `breakdown-context.ts`'s
+            select. The claim survived because it is a NEGATIVE one: the "what
+            is sent" list above grew a gap nobody could see, while the sentence
+            that read as a guarantee went unread. Keep the shape below — name
+            everything that IS sent, then say what the remainder is — because
+            an unqualified "no free text" is the exact sentence that broke. */}
         <p>
-          The context sent alongside a breakdown, so the model knows roughly
-          where you are in your day, is <strong>numbers and flags only</strong>{" "}
-          — small integers, booleans and one preference. It contains no free
-          text, no identifiers, no email addresses and no dates. Your email
-          address, your GitLab identity, your Google tokens and your settings
-          are never sent. The daily quote is generated from a fixed prompt
-          containing nothing about you.
+          Apart from the task title, the proposed steps, your note on that task
+          and anything you typed into the &ldquo;tell Claude how to
+          adjust&rdquo; box, the context sent alongside a breakdown is{" "}
+          <strong>numbers and flags only</strong> — small integers, booleans and
+          one preference. No identifiers, no email addresses and no dates. Your
+          email address, your GitLab identity, your Google tokens and your
+          settings are never sent. Neither is the text of your other captures,
+          your other tasks&rsquo; steps, or any other task&rsquo;s note. The
+          daily quote is generated from a fixed prompt containing nothing about
+          you.
         </p>
 
         <LegalSubheading>
@@ -677,8 +711,11 @@ export default function PrivacyPage() {
           Creating and updating tasks in a Google Tasks list inside your own
           connected Google account, so that a scheduling tool which syncs from
           that list can find them and book time for them. What is written is a
-          task title (built from your task and step text, with a duration) and a
-          due date.
+          task title (built from your task and step text, with a duration), a
+          due date, and a <strong>notes field</strong> containing any note you
+          wrote on that task or step, a short prompt line, and a link back into
+          the focus timer. So if you write a note and schedule the step to
+          Google, that note is copied into your Google Tasks list.
         </p>
         <p>
           The only thing <em>read</em> from your Google account is the list of
@@ -928,18 +965,35 @@ export default function PrivacyPage() {
             are deleted after <strong>30 days</strong> by the same nightly job.
           </li>
           <li>
-            <strong>Account data</strong> is kept for as long as you have an
-            account, and until you ask for it to go.{" "}
             {/* #153 — deleting your own account reaches exactly the same state
                 the owner's Revoke reaches (both go through `freezeAccount`), so
-                the honest sentence below covers both and is not weakened for
-                the new control. */}
-            Deleting your own account, or having your access revoked, freezes it
-            and marks its content to be removed 30 days later.{" "}
-            <strong>Being honest about a gap:</strong> if an account&rsquo;s
-            access is revoked, its content is <em>not</em> deleted automatically
-            today. It stays until it is deleted by hand. Email me and it will
-            be.
+                the sentence below covers both and is not weakened for the new
+                control.
+
+                Rewritten because the previous version said the freeze "marks
+                its content to be removed 30 days later", which read as a
+                countdown and is not one. `freezeAccount` writes
+                `User.purgeAfter` and NOTHING reads it: `prisma/scheduled-purge
+                .ts` sweeps guest workspaces and guest counters only, and
+                `deleteAccount` has no caller outside its own tests. The old
+                text then contradicted itself two sentences later by conceding
+                a revoked account is not deleted automatically — so the bullet
+                described both an automatic purge and the absence of one. It now
+                describes only what runs. #159 is the code half and this text
+                changes when that ships, not before. */}
+            <strong>Account data</strong> is kept for as long as you have an
+            account, and until you ask for it to go. Deleting your own account,
+            or having your access revoked, freezes it straight away: you are
+            signed out, your Google connection here ends, and nothing can be
+            written under it again.{" "}
+            <strong>
+              Being honest about what happens next: the content is not deleted
+              automatically.
+            </strong>{" "}
+            There is a 30-day recovery window recorded against the account, but
+            no job acts on it — the deletion is done by hand, by me, when you
+            ask. Email me and it will be done. That is true whether you deleted
+            the account yourself or I revoked it.
           </li>
           <li>
             <strong>Google tokens</strong> are kept until you disconnect, until
@@ -1092,20 +1146,59 @@ export default function PrivacyPage() {
             Using this app is not a diagnosis, and I do not record why you use
             it.
           </strong>{" "}
-          There is no health field, no diagnosis field, no questionnaire, and
-          nothing infers anything about your health, your mind, or how you are
-          doing. It is a to-do app with a kind tone. Plenty of people use it who
-          have never been near an assessment.
+          There is no health field, no diagnosis field and no questionnaire, and
+          nothing here asks you how you are or records why you use it.{" "}
+          <strong>
+            One thing comes close and is worth naming rather than glossing:
+          </strong>{" "}
+          at the end of your working day a short narrative about that day is
+          written from your own counts — how many steps you finished, how long
+          you focused, your streak — and stored with that day&rsquo;s roll-up.
+          It is a friendly summary of what you did, generated for you and shown
+          only to you. It is not an assessment of your health or your state of
+          mind, and nothing acts on it. Beyond that, it is a to-do app with a
+          kind tone. Plenty of people use it who have never been near an
+          assessment.
         </p>
         <p>
           What I cannot control is what you type into a free-text box. If you
           write &ldquo;phone the psychiatrist about the dose change&rdquo;, that
           is health information, and it is treated exactly like every other
           task: stored, and sent to the AI provider if you ask for a breakdown
-          of it. Where you choose to include details like that, you are sharing
-          them knowingly and explicitly, and it is that explicit consent —
-          Article 9(2)(a) UK GDPR — that permits me to hold them. You can delete
-          the item yourself at any time, or ask me to.
+          of it.
+        </p>
+        {/* This paragraph claimed "explicit consent — Article 9(2)(a) UK GDPR"
+            until this revision, and there was nothing behind it. Grepping the
+            source for a consent gate, an acknowledgement or a warning on any
+            free-text surface returns only this page's own prose: no field asks
+            for health data, so nothing ever asked for permission to hold it,
+            so there was no consent to be explicit about. Art. 9(2)(a) requires
+            consent that was actually sought.
+
+            The owner's decision (2026-08-15) was to state the true position
+            rather than build a consent mechanism — a modal on the note box
+            would be a dark pattern in the shape of compliance, and would make
+            the app worse at the one thing it exists to do. So this text claims
+            no Art. 9 condition. Do not reintroduce one, and do not add a
+            consent gate to make the old sentence true; the two would then have
+            to be kept in step forever.
+
+            The voice is borrowed deliberately from the breakdown's lawful-basis
+            bullet in "My lawful basis for each purpose", which already refuses
+            to relabel a necessity as consent. Same refusal, same reason. */}
+        <p>
+          <strong>And I am not going to call that consent.</strong> Nothing here
+          asks you for health information: there is no field for it, no question
+          that invites it, and nothing that goes looking for it in what you
+          write. What arrives is whatever you decided to put in a box you were
+          using for something else. Calling that explicit consent would be the
+          same dressing-up this page refuses a few sections earlier — I never
+          asked you, and consent nobody sought is not consent. So what I hold is
+          held for one reason only: it is an unavoidable part of doing the thing
+          you directed me to do with the words you typed — keep them, show them
+          back to you, and break them into steps if you press the button.
+          Nothing else is done with it, and you can delete the item yourself at
+          any time, or ask me to.
         </p>
         <p>
           <strong>A practical suggestion, not a rule:</strong> the app works
@@ -1162,11 +1255,11 @@ export default function PrivacyPage() {
                 happens next and the two must not disagree. */}
             <strong>Erasure</strong> — deletion of your data. If you have an
             account, <strong>Settings → Account → Delete my account</strong>{" "}
-            does it: you are signed out, your Google connection here ends, and
-            the retention window described above starts. Or ask, and it goes.
-            The instance owner&rsquo;s own account is the exception — it is the
-            only one that can administer the instance, so it cannot be deleted
-            from the app.
+            starts it: you are signed out, your Google connection here ends, and
+            the 30-day recovery window described above begins. Removing the
+            content itself is a hand operation, so ask and it goes. The instance
+            owner&rsquo;s own account is the exception — it is the only one that
+            can administer the instance, so it cannot be deleted from the app.
           </li>
           <li>
             <strong>Restriction</strong> — you can ask me to stop using your
@@ -1206,25 +1299,37 @@ export default function PrivacyPage() {
           <strong>Access and portability you can do yourself.</strong>{" "}
           <strong>Settings → Account → Export your data</strong> downloads
           everything this app holds about your account, in formats that open
-          with no special software. Two things are deliberately left out: the
-          OAuth tokens for your Google connection, and any LLM API key you have
-          stored — both are credentials, and putting a copy of them in a file
-          you might forward to somebody would be the opposite of protecting your
-          data. Anything the export does not cover, email <ContactLink /> and I
-          will send it by hand.
+          with no special software. Some things are deliberately left out.{" "}
+          <strong>Two are credentials</strong>: the OAuth tokens for your Google
+          connection, and any LLM API key you have stored — putting a copy of
+          either in a file you might forward to somebody would be the opposite
+          of protecting your data.{" "}
+          <strong>The rest is account bookkeeping</strong> rather than content:
+          your invitation record and any note whoever invited you wrote on it,
+          your AI usage count, the timestamps on your calendar feed, and the
+          internal flags saying whether your account is active and when it was
+          last seen. Ask at <ContactLink /> and I will send any of it by hand —
+          the invitation note included, since it is about you.
         </p>
         {/* #153 — erasure came off that list, so this paragraph had to stop
             saying it was on it. The caveat is not a hedge: the control freezes
-            the account and starts the retention window, and removing the
-            content sooner than that window is still a hand operation, so
-            somebody who wants it gone today has to ask. */}
+            the account, and removing the content is a hand operation.
+
+            Reworded here because the previous version said the content is
+            removed "before that window is up", which implies something happens
+            WHEN it is up. Nothing does — see the account-data bullet in "How
+            long I keep it": `purgeAfter` is written and read by nothing. A
+            reader who waited 30 days expecting the content to go would have
+            been misled by a page that never actually promised it, which is the
+            worst version of this: technically silent, practically a promise. */}
         <p>
-          <strong>Erasure is the one you can do yourself.</strong>{" "}
+          <strong>Erasure you can start yourself.</strong>{" "}
           <strong>Settings → Account → Delete my account</strong> ends your
-          access straight away and starts the retention window. You can still
-          email instead — and you will need to if you want the content itself
-          removed before that window is up, because that last step is done by
-          hand.
+          access straight away and starts a 30-day recovery window, so an
+          accident can be undone. It does not delete the content — that step is
+          done by hand today, not by a scheduled job, and it does not happen on
+          its own when the window is up. So if you want the content gone, email
+          me and say so. I will do it and confirm.
         </p>
         <p>
           I will respond <strong>within one month</strong> of your request,
