@@ -6,8 +6,9 @@
  * we know that N concurrent claims on the same (workspace, day) row resolve to
  * exactly one winner — the property the check-then-act version lacked.
  *
- * Needs DATABASE_URL from .env (not auto-loaded by vitest):
- *   set -a; . ./.env; set +a; npm run test
+ * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";

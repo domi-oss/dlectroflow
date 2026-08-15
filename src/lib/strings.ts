@@ -75,12 +75,61 @@ export const STRINGS = {
   // self-hoster's voice override can reach, so pinning the pair is still worth
   // something, and deleting a key is the breaking half of the change.
   //
-  // This issue leaves FOUR keys in that state, not the three this comment used to
-  // claim: `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
-  // `task-steps.tsx` lost its `Edit step title` entry) and this one. Re-derive
-  // rather than trust the list — a key is orphaned when
+  // Re-derived by this comment's own recipe during the /help copy audit, which is
+  // what it asks for: **TEN** keys are in that state, not the four claimed here
+  // before (and not the three claimed before that). The four already named —
+  // `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
+  // `task-steps.tsx` lost its `Edit step title` entry) and this one — plus six
+  // that were never listed: `action.confirmSteps`, `focus.complete`,
+  // `focus.pauseForNow`, `focus.hyper.turnOff`, `focus.launcher.intro` and
+  // `pill.toDo`. All ten are KEPT, on the same reasoning as above; only the count
+  // was wrong.
+  //
+  // Re-derive rather than trust the list — a key is orphaned when
   // `git grep -n '"<key>"' -- src e2e` matches only `strings.ts` and
   // `strings.test.ts`.
+  //
+  // ⚠️ That recipe over-reports, and the audit had to correct for it: it is
+  // literal-string-only, so a key reached by a COMPUTED lookup reads as orphaned
+  // while being live. `freshness.recent` is the one such key today — it is
+  // built from a template literal by `status-pill.tsx:49`, whose key is the tier
+  // interpolated after "freshness.".
+  //
+  // ⚠️ Substitute review of record, !356 — this paragraph used to end "that
+  // template literal is the only non-literal `t()` call in the tree", and that is
+  // false by 34. Production `t()` has **35** call sites whose first argument is not
+  // a literal, across five mechanisms: 18 ternaries of two literals, 6 map indexes,
+  // 5 `StringKey`-returning functions (`focus-timer.tsx:1262`,
+  // `inbox-view.tsx:2496,2646`, `library-done-delete.tsx:378`,
+  // `shopping-list.tsx:996`), 3 member accesses (`library/page.tsx:189,227`,
+  // `section-nav.ts:29`), 2 bare variables (`app-menu.tsx:133`,
+  // `quick-access.tsx:68`) — and the 1 template literal. Sending the next reader
+  // to check one file when there are thirty-five is the dangerous half of a
+  // delete-recipe, so state the property the recipe actually rests on:
+  //
+  //   the template literal is the only `t()` call whose key TEXT never appears
+  //   literally anywhere in `src`.
+  //
+  // Every other computed caller resolves to a key that is spelled literally at its
+  // source, which is why the grep still finds it: the four key-returning functions
+  // `return "<literal>"` in every arm, and the key tables spell theirs out —
+  // `BUCKET_LABEL`, `THEME_LABEL`, `TYPEFACE_LABEL`, `BADGE_STRING_KEY`,
+  // `EJECT_MESSAGE`, plus `DESTINATIONS` (`app-menu.tsx:9-20`), `TABS`
+  // (`library/page.tsx:54-59`), `SETTINGS_SECTIONS` (`section-nav.ts:49`) and
+  // `quick-access.tsx:102,110`. Verify THAT before trusting the sweep, not the map
+  // list, which was never the complete set.
+  //
+  // Two things narrow the residual risk, and one widens it:
+  //  * `tsc` refuses the `freshness.recent` deletion outright. `FreshnessTier`
+  //    (`aging.ts:39`) is a literal union, so the template literal is contextually
+  //    typed against `StringKey` and removing a key is a compile error, not a
+  //    silent breakage. The type system covers this whole class wherever the
+  //    interpolated type is a literal union.
+  //  * ⚠️ It does not cover an UNTYPED carrier. `scheduling/types.ts:75` declares
+  //    `readonly labelKey: string` — not `StringKey` — and holds
+  //    "action.addToCalendar" and "action.schedule" (`providers.ts:24,51`).
+  //    Nothing type-checks those against this table. Dormant (not yet passed to
+  //    `t()`), and the reason to widen the type rather than to trust the grep.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
@@ -1414,11 +1463,21 @@ export const STRINGS = {
     playful:
       "Single action items you committed without breaking into steps. Do them whole, or snack-size one later.",
   },
+  // Substitute review of record, !356 — this used to say "the freshness clock is
+  // paused until each one wakes", and nothing pauses it. Age is
+  // `now − max(createdAt, freshenedAt)` (`aging.ts:44-53`); `snoozeBrainDumpItem`
+  // (`braindump.ts:157-175`) writes `snoozedUntil` and never stamps `freshenedAt`.
+  // Parking only drops the row out of `needsReview` (`bucket.ts:180-182`), which
+  // is what hides the pill and stops the nudge — the clock runs on underneath, so
+  // an item parked at 3h30 returns after its 60-minute snooze reading `Aging`
+  // against the default 4-hour threshold. The hint now claims the behaviour that
+  // exists rather than the one the wording implied; whether parking SHOULD reset
+  // the clock is a behaviour change and is reported separately.
   "lib.pantry.hint": {
     plain:
-      "Stored for later — the freshness clock is paused until each one wakes.",
+      "Stored for later — these are out of the queue until each one wakes.",
     playful:
-      "Stored for later — the freshness clock is paused until each one wakes.",
+      "Stored for later — these are out of the queue until each one wakes.",
   },
   "lib.sorted.hint": {
     plain:
@@ -1566,6 +1625,29 @@ export const STRINGS = {
   // ✓ is a functional glyph (allowed in plain).
   "appearance.heading": { plain: "Appearance", playful: "🎨 Appearance" },
   "appearance.theme": { plain: "Theme", playful: "Theme" },
+  // ── #85 — the theme setting is three-state, and `system` is the default. ──
+  // The intro is the sentence that answers the request this came from ("dark
+  // mode automatic with time of day"): the platforms already do it on a
+  // schedule, so following them IS the automatic behaviour and there is no
+  // in-app scheduler to look for.
+  //
+  // Both voices are IDENTICAL, matching the tick-colour and typeface option
+  // labels beside them, and #103's finding applies with extra force here: a
+  // ☀️/🌙 pair in these labels renders differently on every platform and its
+  // advance width is unpredictable, which is exactly why the theme control lost
+  // its emoji in the first place.
+  "appearance.themeIntro": {
+    plain:
+      "Follow my system matches your device's appearance, including any automatic day/night schedule it has. Light and Dark override it.",
+    playful:
+      "Follow my system matches your device's appearance, including any automatic day/night schedule it has. Light and Dark override it.",
+  },
+  "appearance.themeSystem": {
+    plain: "Follow my system",
+    playful: "Follow my system",
+  },
+  "appearance.themeLight": { plain: "Light", playful: "Light" },
+  "appearance.themeDark": { plain: "Dark", playful: "Dark" },
   "appearance.completionIntro": {
     plain: "How finished to-dos and steps look across the app.",
     playful: "How your checked-off bites look across the app.",

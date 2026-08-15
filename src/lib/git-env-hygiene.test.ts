@@ -493,14 +493,18 @@ describe("the repo itself", () => {
 
   it("finds the git-reaching call sites that are known to exist", () => {
     // Two in registry-prune.test.ts (the `git` wrapper and the `bash
-    // prune-registry.sh` spawn, which runs git seven times) and two in
-    // ci-docs-only.test.ts (`ls-tree` and the decoy repo builder).
+    // prune-registry.sh` spawn, which runs git seven times), two in
+    // ci-docs-only.test.ts (`ls-tree` and the decoy repo builder), and one in
+    // source-encoding-hygiene.test.ts (`ls-files`, which is how the whole-repo
+    // sweep for #224 learns which files are tracked — a recursive readdir from
+    // the repo root would walk node_modules and sibling worktrees).
     const reaching = gitReachingCalls();
-    expect(reaching.length).toBeGreaterThanOrEqual(4);
+    expect(reaching.length).toBeGreaterThanOrEqual(5);
     expect(new Set(reaching.map(({ file }) => file))).toEqual(
       new Set([
         path.join("src", "lib", "registry-prune.test.ts"),
         path.join("src", "lib", "ci-docs-only.test.ts"),
+        path.join("src", "lib", "source-encoding-hygiene.test.ts"),
       ]),
     );
   });

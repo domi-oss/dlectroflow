@@ -2,7 +2,13 @@
 
 **Purpose:** Fold the finalized wireframe (Task Snacking voice, freshness scale, Focus states, Business/Snack toggle, Settings hub) into the live `dlectroflow` codebase.
 **Delivery:** feature branches off `main`, one MR per phase, CI + review on each.
-**Author:** design/wireframe session hand-off. **Status:** proposed — needs sign-off on the Open Decisions before Phase 1 code lands.
+**Author:** design/wireframe session hand-off.
+**Status: SUPERSEDED — historical record, do not implement from this file.**
+All five phases have shipped, but not as written here: the voice vocabulary landed as
+`plain`/`playful` (not `business`/`snack`), and the notification columns landed as
+`notifyAging` / `notifyRoundup` / `notifyDailyReview` (not `notificationsEnabled`).
+`IMPLEMENTATION-HANDOFF.md` is the reconciled version and wins wherever the two differ.
+The body below is left as the record of what was proposed.
 
 ---
 
@@ -19,7 +25,9 @@ Principles:
 - **No behaviour regressions** to auth/workspace-scoping (recent, security-sensitive work). All new `Settings` reads/writes must stay workspace-scoped.
 
 ### Tech baseline (from `package.json`)
-Next.js 16.2.10 · React 19.2.4 · TypeScript · Tailwind CSS 4 · Prisma 6.19.3 · Anthropic SDK · Framer Motion · shadcn/ui.
+Next.js 16.2.10 · React 19.2.4 · TypeScript · Tailwind CSS 4 · Prisma 6.19.3 · Anthropic SDK · `motion` · shadcn/ui.
+(Versions are this document's date-stamped snapshot, not current. The animation package
+is and was `motion`; "Framer Motion" was never the dependency name here.)
 
 ### Branch / MR naming
 `feat/snack-voice-foundation` → `feat/freshness-tiers` → `feat/breakdown-eject` → `feat/settings-hub` → `feat/streak-and-badges`.

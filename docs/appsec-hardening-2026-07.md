@@ -10,10 +10,14 @@ branch and the rationale behind each change. It serves as an audit trail for SOC
 
 **What changed:** Included four GitLab-managed scanner templates, which run in the `test`
 stage (the stage these templates target by default):
-- `Security/SAST.gitlab-ci.yml` — static analysis of TypeScript/JavaScript source
-- `Security/Dependency-Scanning.gitlab-ci.yml` — npm advisory database checks against `package-lock.json`
-- `Security/Secret-Detection.gitlab-ci.yml` — detects accidentally committed secrets
-- `Security/Container-Scanning.gitlab-ci.yml` — CVE scan of the built Docker image
+- `Jobs/SAST.gitlab-ci.yml` — static analysis of TypeScript/JavaScript source
+- `Jobs/Dependency-Scanning.gitlab-ci.yml` — npm advisory database checks against `package-lock.json`
+- `Jobs/Secret-Detection.gitlab-ci.yml` — detects accidentally committed secrets
+- `Jobs/Container-Scanning.gitlab-ci.yml` — CVE scan of the built Docker image
+
+  (These were written as `Security/…` when this was filed. The paths in
+  `.gitlab-ci.yml` are `Jobs/…`, which is what GitLab actually serves; the
+  `Security/` form 404s the include.)
 
 **Why:** The pipeline previously had zero security scanning — no automated vulnerability
 detection on MRs.
@@ -78,7 +82,7 @@ primary controls; these annotations add a defence-in-depth backstop.
 
 ---
 
-### 5. Container Image Slimming (`Dockerfile` / `Dockerfile.ci`)
+### 5. Container Image Slimming (`docker/Dockerfile` / `docker/Dockerfile.ci`)
 
 **What changed:** The images are built on the **`node:22-alpine`** (musl) base — a much
 smaller attack surface than Debian slim. openssl (required by the Prisma query engine) is
@@ -119,9 +123,9 @@ These require GitLab UI/admin actions and cannot be applied via code:
 |---|---|---|
 | Enable Secret Push Protection | Settings → Security & Compliance | 🔴 Critical |
 | Assign SOC 2 Compliance Framework | Group Settings → Compliance | 🟡 High |
-| Add Scan Result Policy (block Critical vulns on merge) | Security & Compliance → Policies | 🟡 High |
+| ~~Add Scan Result Policy (block Critical vulns on merge)~~ **done** — live, and gates on *new* Critical/High only | Security & Compliance → Policies | 🟡 High |
 | Require 1 MR approval (Security team) | Settings → Merge Requests | 🟡 High |
-| Enable Container Registry cleanup policy | Settings → Packages & Registries | 🟠 Medium |
+| ~~Enable Container Registry cleanup policy~~ **done** — configured and draining; `scripts/check-registry-drain.sh` is the check | Settings → Packages & Registries | 🟠 Medium |
 
 See the full review in the MR description for details on each.
 
@@ -146,9 +150,13 @@ rescan **never** rolls prod — it only detects.
 which runs only the `renovate` job (`renovate/renovate` image). Renovate opens update MRs for
 npm dependencies and the Docker/CI base image, using `config:best-practices` (pins Docker
 digests, enforces a minimum release age, weekly lockfile maintenance). Config lives in-repo at
-`renovate.json`. Patch / minor / digest / pin updates **automerge** once the MR pipeline
+`.gitlab/renovate.json`. Patch / minor / digest / pin updates **automerge** once the MR pipeline
 passes (`platformAutomerge`); majors always require manual review. Security-advisory-driven
 bumps (`vulnerabilityAlerts`) are labelled but **not** automerged — a human reviews those.
+**Correction:** that block is **inert on GitLab**. Renovate implements
+`platform.getVulnerabilityAlerts` on GitHub only, so no advisory source reaches it
+and nothing is ever labelled by it. Treat advisory-driven bumps as arriving through
+the ordinary dependency flow plus the scanners, not through this key.
 Base bumps reach prod the normal way: Renovate MR → merge to `main` → push pipeline →
 `deploy_production`.
 

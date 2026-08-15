@@ -10,6 +10,46 @@ This document records what shipped. The full pre-implementation spec lives as a
 comment on #14; this is the as-built version, including the four places the
 implementation deliberately diverged from it (§6).
 
+> ## ⚠️ Superseded in part — checked 2026-08-15
+>
+> This is an *as-built* record of 2026-07-27, and four of its standing claims
+> stopped being true after it. The body below is left as written, because it is
+> the record of what was decided and built then; read these four first.
+>
+> **The privacy claim is the one that matters.** §"Goal" says *"No free text is
+> added"*, and that is **no longer true**. `#179` (`!281`, 2026-08-08) added
+> `Task.notes` — the person's own free text on the task being broken down — to
+> the context block on an explicit owner decision, and the code names the
+> trade-off it accepted: *"the BYO-LLM egress of the note itself"*
+> (`src/lib/breakdown.ts`). One task's note is sent; the notes of tasks in the
+> history summary are still never fetched, which is what keeps breakdown history
+> from becoming a self-feeding injection channel. So the shape of the guarantee
+> changed rather than disappearing — but anyone using this document to answer
+> "what leaves for a third-party endpoint?" needs the note in the answer.
+> `buildNoteBlock()` is absent from §"Files" below for the same reason.
+>
+> The other three, all from the same follow-on work:
+>
+> - **§6 deviation 3 says `currentTaskId` is unreachable and "the route passes
+>   nothing".** The deferred request-body change landed: `BreakdownRequest` now
+>   carries `taskId`, and the route reads it (`src/app/api/breakdown/route.ts`)
+>   and hands it to `gatherBreakdownContext`. This also retires the Non-goal
+>   forbidding a request-shape change.
+> - **The model-tier lookup is no longer gated on `owner`.** `#96` gave a member
+>   a model preference to read, so the route resolves settings for the current
+>   workspace. `OWNER_WORKSPACE_ID` itself went with `#35` Phase A and now
+>   survives only in explanatory comments and as `LEGACY_OWNER_WORKSPACE_ID` in
+>   `prisma/scheduled-purge.ts`.
+> - **The `Step.estMinutes` "known gap" is closed.** §"Known gaps" says adding a
+>   CHECK constraint would need a migration that `#14` ruled out. The migration
+>   `20260727194512_step_est_minutes_check` exists, with a colocated
+>   integration test.
+>
+> Everything else re-verified accurate, including both character budgets
+> (`MAX_APP_CONTEXT_CHARS` 1200 with 1,197 used, `MAX_CONTEXT_CHARS` 600), the
+> absence of prompt caching, and the numeric/enum-only `select` on the history
+> reads.
+
 ## Goal
 
 Before this change the breakdown SYSTEM prompt knew nothing about dlectroflow.

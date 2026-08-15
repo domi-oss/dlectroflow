@@ -28,13 +28,20 @@ export default async function HelpPage({
 
   return (
     <div className="space-y-8">
-      <header className="space-y-1">
+      {/* A `<div>`, not a `<header>`. `<header>` maps to the `banner` landmark
+          unless it is inside `article`/`aside`/`main`/`nav`/`section`, and
+          `(app)/layout.tsx:151` wraps `{children}` in a plain `<div>` — so there
+          is no sectioning ancestor above this point and a `<header>` here
+          resolved to a SECOND banner, beside the shell's own at `layout.tsx:83`.
+          /help was the only `(app)` page with this shape. The `h1` is what names
+          the page either way, so the element buys nothing back. */}
+      <div className="space-y-1">
         <h1 className="text-2xl font-semibold">Help &amp; getting started</h1>
         <p className="text-muted-foreground text-sm">
           A quick tour of how dlectroflow works — capture, review, break down,
           focus, done.
         </p>
-      </header>
+      </div>
 
       {/* #72 — the page map. Sticky so it stays reachable on a long scroll.
           #131 — and the way OUT rides with it. It is the page's only back
@@ -86,12 +93,33 @@ export default async function HelpPage({
           an item asks &ldquo;still needed?&rdquo; — choose{" "}
           <strong>Still need it</strong> to reset its clock or{" "}
           <strong>Dismiss</strong> to stop the nudge. Use{" "}
-          <strong>Save for later</strong> to pause freshness on something you
-          are not ready for. You can tune the tier thresholds on the{" "}
+          <strong>Save for later</strong> to take something you are not ready
+          for out of the queue, so it stops asking. You can tune the tier
+          thresholds under <strong>Aging &amp; reminder</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
           page.
+        </p>
+        {/* The board can be rearranged and the page never said so, which left
+            "put this back in Needs review" with no documented route.
+
+            Both paths are named deliberately. The drag is a pointer gesture and
+            the row's `Move to` control is its non-pointer equivalent — the two
+            share one dispatcher, and that equivalence is what carries WCAG 2.1.1
+            and 2.5.7 for this interaction. Describing only the drag would describe
+            the app to whoever happens to be able to perform it. `Move to` is the
+            control's real accessible name; the older nested "Move to…" ▾ entry
+            went with #253, so the ellipsis form would name something absent. */}
+        <p className="text-sm">
+          Nothing is stuck where it landed. Drag a row onto another list to move
+          it — or, for exactly the same result without dragging, use the
+          row&rsquo;s <strong>Move to</strong> control and pick the list by
+          name, which is also the way to do it from the keyboard. The lists are{" "}
+          <strong>Needs review</strong>, <strong>Multi-step to-dos</strong>,{" "}
+          <strong>Single-task to-dos</strong>, <strong>Saved for later</strong>{" "}
+          and <strong>Completed</strong>, and a move is announced either way, so
+          you are told which list an item left as well as where it arrived.
         </p>
       </section>
 
@@ -133,13 +161,25 @@ export default async function HelpPage({
           chips; nothing is discarded until you actually start, and you can back
           out with <strong>Keep my paused session</strong>.
         </p>
+        {/* #89 — the pacer is RING-STYLE ONLY, and this paragraph used to read as
+            though every session had it ("From the moment you start, the ring is
+            also a slow breathing pacer … there is nothing to switch on").
+            `timer-visual.tsx` reaches the breathing markup only in its `ring`
+            branch — `digits`, `bar` and `mug` each return before it — so three of
+            the four styles never breathe, and `resolveTimerStyle(null, voice)`
+            resolves an unset style to `mug` on the playful voice. A reader who
+            picked Bar, or who never picked anything on the playful voice, was
+            being told about something their session cannot do. */}
         <p className="text-sm">
-          From the moment you start, the ring is also a slow breathing pacer:
-          four seconds growing, six seconds settling back. It runs for the whole
-          session — through a pause and out the other side — and stops when time
-          is up. Follow it if you want something to steady yourself against,
-          ignore it the rest of the time; it never moves the clock or the
-          buttons, and there is nothing to switch on. If your system asks for
+          The <strong>Ring</strong> timer style doubles as a slow breathing
+          pacer: from the moment you start, four seconds growing, six seconds
+          settling back. It runs for the whole session — through a pause and out
+          the other side — and stops when time is up. Follow it if you want
+          something to steady yourself against, ignore it the rest of the time;
+          it never moves the clock or the buttons, and it needs no setting of
+          its own. The other three timer styles do not breathe, so if you want
+          it, pick <strong>Ring</strong> under{" "}
+          <strong>Focus timer → Timer style</strong>. If your system asks for
           reduced motion, the ring simply holds still.
         </p>
         {/* #142 — the app navigates ON ITS OWN five seconds after a step is
@@ -234,16 +274,185 @@ export default async function HelpPage({
         </p>
       </section>
 
+      {/* The getting-started list above ends by promising the reader they will
+          "earn points toward your streak" — a payoff whose address this page never
+          gave. Library and Activity are two of the app menu's six default
+          destinations (`app-menu.test.tsx:53-63` pins that list) and neither was
+          named anywhere here.
+
+          Library is described as a fuller VIEW, never as a destination work moves
+          to (Duo review round 4, !356). `libraryBuckets` (`bucket.ts:255-260`)
+          returns `base.singleTask`, `base.multiStep` and `base.savedLater` — the
+          same arrays `bucketItems` hands the inbox, which renders all five of its
+          lists on screen. Only `Done` differs, being uncapped where the inbox's
+          `Completed` is `slice(0, 10)`. Two drafts got this wrong in the same way:
+          "once something leaves the inbox it lives in Library" was wrong about all
+          four tabs, and conceding the overlap for `Saved for later` alone was wrong
+          about the other three. A reader who believes work moves house goes looking
+          for where it went.
+
+          Both are linked by their MENU labels rather than their routes, because
+          those are the words on screen: `/dashboard` renders `nav.dashboard` →
+          "Activity", so a reader sent to look for "Dashboard" finds nothing. */}
+      <section className="space-y-2">
+        <SectionHeading id="help-where-things-go" voice={voice} />
+        <p className="text-sm">
+          <Link href="/library" className="underline">
+            Library
+          </Link>{" "}
+          gathers everything you have reviewed, under four tabs:{" "}
+          <strong>Single-task</strong> and <strong>Multi-step</strong> for work
+          in progress, <strong>Saved for later</strong> for anything parked, and{" "}
+          <strong>Done</strong> for finished work. Nothing has moved house —
+          these are the <strong>same lists</strong> the inbox page keeps below
+          its review queue, so you can work from either. The one difference is{" "}
+          <strong>Done</strong>: the inbox shows a short preview of your most
+          recent completions, with a count of how many you finished today, while{" "}
+          <strong>Done</strong> is the whole history. Opening a multi-step row
+          expands its steps in place, so you can carry on without leaving the
+          page.
+        </p>
+        <p className="text-sm">
+          <Link href="/dashboard" className="underline">
+            Activity
+          </Link>{" "}
+          is where the points and streaks land: what you earned today, your
+          current streak, your best streaks, and <strong>badges</strong> that
+          fill in as you reach them. It also holds the{" "}
+          <strong>end-of-day round-up</strong> — a short recap of the day
+          written for you when your workday ends, which you can also trigger
+          early to see what it looks like.
+        </p>
+        {/* Duo review, !356 — the round-up's settings are SPLIT across two pages,
+            and this used to say they "are on that page rather than in Settings",
+            full stop. `workdayEndTime` and `roundupEmailEnabled` are on the Activity
+            page; `notifyRoundup` — whether it also raises a desktop notification —
+            is Settings → Notifications, whose hint says the in-app recap shows
+            either way. Telling a reader Settings has nothing to do with the round-up
+            sends them hunting in the wrong place for the toggle they actually want. */}
+        <p className="text-sm">
+          Its settings sit in two places, which is worth knowing before you go
+          looking. <strong>When your workday ends</strong> and{" "}
+          <strong>whether it is emailed to you</strong> are on the Activity page
+          itself, tucked under the round-up. Whether it also raises a{" "}
+          <strong>desktop notification</strong> is a separate switch, under{" "}
+          <strong>Notifications</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page — turn that off and the recap still appears on the page, it just
+          does not come and find you.
+        </p>
+      </section>
+
+      {/* #199 — shopping-list mode. `Settings.shoppingList` is `@default(false)`
+          and `/shopping` answers `notFound()` while it is off, so this section has
+          to lead with the switch: the feature is not merely undocumented without
+          it, it is unreachable. Its own section rather than a line inside
+          "Voice & settings", matching why `settings-shopping` is its own section —
+          a feature switch filed under a heading that does not name it is a feature
+          nobody finds. */}
+      <section className="space-y-2">
+        <SectionHeading id="help-shopping-list" voice={voice} />
+        <p className="text-sm">
+          <strong>Off until you turn it on.</strong> Tick{" "}
+          <strong>Show the shopping list</strong> under{" "}
+          <strong>Shopping list</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page and a <strong>Shopping list</strong> entry appears in the menu,
+          alongside a trolley button in the top bar. Turning it back off hides
+          the list <strong>without deleting it</strong> — everything is still
+          there if you switch it on again.
+        </p>
+        <p className="text-sm">
+          It is deliberately a plain list, not a kind of task: no estimates, no
+          steps, nothing lands in your calendar, and ticking something off does
+          not touch your streak. Add a line, tick it, rename it, or delete it.
+          While the list has anything on it the inbox shows a one-line reminder
+          of how many items are waiting, which you can dismiss.
+        </p>
+        {/* Duo review, !356 — `Saved for later` names two unrelated things: the
+            Library tab of `BrainDumpItem`s, and this list's own
+            `ShoppingItem.savedForLater`, a separate model. Because this section
+            insists the shopping list is "not a kind of task", borrowing the tab's
+            name silently implied shopping items enter the task pipeline. The label
+            is the app's and cannot be renamed from here, so the page disowns the
+            overlap instead of glossing it. */}
+        <p className="text-sm">
+          The list has its own <strong>Saved for later</strong> shelf for things
+          you only buy occasionally. It shares a name with the{" "}
+          <Link href="/library" className="underline">
+            Library
+          </Link>{" "}
+          tab and has <strong>nothing to do with it</strong> — the two are
+          separate, and a shopping item never becomes a task or appears as an
+          inbox row. (The reminder above is a count of the list, not the items
+          themselves.) Nothing comes back off that shelf on its own; you pull an
+          item up when you want it again.
+        </p>
+      </section>
+
       <section className="space-y-2">
         <SectionHeading id="help-voice-settings" voice={voice} />
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
-          snack-themed voice, set your freshness thresholds, and manage
-          reminders on the{" "}
+          snack-themed voice, set your freshness thresholds, choose your{" "}
+          <strong>notifications</strong>, adjust the <strong>appearance</strong>
+          , connect your <strong>integrations</strong>, and set{" "}
+          <strong>the name the app calls you</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
           page.
+        </p>
+        {/* #40 — the Typeface radios include two legibility aids, and this page
+            offered nothing to the reader most likely to be looking for them.
+            Someone who cannot comfortably read the app is exactly who opens a help
+            page, so the two faces are named: the NAME is the search term. */}
+        <p className="text-sm">
+          <strong>Appearance</strong> covers the colour scheme, how completed
+          items are struck through and ticked, and the <strong>typeface</strong>{" "}
+          the whole app uses. The scheme has three settings and starts on{" "}
+          <strong>Follow my system</strong>, so by default the app matches your
+          device — including any automatic day/night schedule it already has,
+          which is why there is no separate timer for it here.{" "}
+          <strong>Light</strong> and <strong>Dark</strong> override that.
+        </p>
+        <p className="text-sm">
+          Two of the four typefaces are there to make reading easier —{" "}
+          <strong>Atkinson Hyperlegible</strong> and{" "}
+          <strong>OpenDyslexic</strong> — so if the default is hard going, that
+          is the setting to try first.
+        </p>
+        {/* The section is called `Notifications`, not "reminders", and every toggle
+            in it is inert until the browser grants permission. A user can tick all
+            three, be told nothing, and receive nothing — so the precondition is
+            stated here rather than left to be inferred from silence. */}
+        <p className="text-sm">
+          <strong>Notifications</strong> is where the round-up, aging reminders
+          and the daily review nudge are switched on or off, and where the
+          nudge&rsquo;s time is set. They are desktop notifications, so{" "}
+          <strong>your browser has to grant permission first</strong> — until it
+          does, the switches save but nothing arrives. The page offers you that
+          permission prompt when it can.
+        </p>
+        {/* Two integrations existed and neither was mentioned. The feed URL is a
+            bearer capability — anyone holding it reads the feed unauthenticated —
+            and this page documents data rights two sections down, so the caveat
+            `calendar-feed.tsx` puts on screen is carried here too rather than being
+            met only after the URL has been pasted somewhere. */}
+        <p className="text-sm">
+          <strong>Integrations</strong> holds two, and both are yours alone
+          rather than the instance&rsquo;s: connect{" "}
+          <strong>Google Tasks</strong> to schedule your steps into your own
+          account, and create a <strong>calendar feed</strong> your calendar app
+          can subscribe to. Treat that feed&rsquo;s address like a password —
+          anyone who has it can read your step titles and times{" "}
+          <strong>without signing in</strong>, so regenerate it if it gets out.
+          You can turn either off again, and a single task can be added to a
+          calendar as a one-off file without connecting anything.
         </p>
         {/* #252 — the header used to greet people by their provider username,
             which is nobody's name. Says where the field is, and that it changes

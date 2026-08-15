@@ -5,11 +5,24 @@
     ":dependencyDashboard",
     ":semanticCommits"
   ],
+  "description": [
+    "Renovate runs on more than one GitLab pipeline schedule here, and the `schedule` window below is what makes that safe (#243). The Monday window is the only time new update MRs may be opened; the other runs exist to finish an automerge that was lost when its MR was created. Delete the window and every one of those runs starts opening MRs of its own, up to `prConcurrentLimit`.",
+    "Why a second cadence is needed at all: Renovate's GitLab platform arms platform-native automerge exactly once, from `createPr`, and re-arms only on a run that pushes a new commit to the branch — so an arming attempt lost at creation is never retried by itself, and it fails silently (see `logLevelRemap`). What does recover it is Renovate's own automerge, the fallback the docs promise for when native automerge is unavailable: on a later run where the branch is unchanged, Renovate merges the MR itself once the branch status is green, and that path is reachable outside `schedule` because an existing branch plus MR falls through the schedule gate to 'will update if necessary'. A weekly cadence left that recovery seven days away, which is why five MRs opened on 2026-08-10 sat unmerged until they were merged by hand.",
+    "Keep the minute field of any cron window as `*`: Renovate has no minute granularity and rejects anything else, so the pipeline schedule's own cron (`0 7 * * 1`) is the one string not to paste here. Widen the window if the Monday run starts missing it — the docs ask for a 3-4 hour window unless Renovate runs more often than that, which here it does. `src/lib/renovate-hygiene.test.ts` asserts that the window exists and that its minute field is a wildcard, because nothing in CI runs renovate-config-validator."
+  ],
   "timezone": "Europe/London",
   "labels": ["dependencies", "renovate"],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "platformAutomerge": true,
+  "schedule": ["* 7-8 * * 1"],
+  "logLevelRemap": [
+    {
+      "description": "Make a failed automerge arming attempt visible. Every failure inside Renovate's `tryPrAutomerge` is logged at `debug` and swallowed, and this job runs at `info` — so five MRs that never armed automerge produced no output at all, anywhere, and the cause took a day to find (#243). `warn` is the level that reaches a person rather than a log file: Renovate registers its problems stream at `warn`, and the Dependency Dashboard reprints whatever lands there under a '## Repository Problems' heading, so the next lost attempt appears on #17 instead of only in a job nobody opens. Raising the whole job to `LOG_LEVEL=debug` was the alternative and is worse — tens of MB of log per run with this one line buried in it, which is a different way of being invisible. The `/…/` regex form is used rather than a glob because `src/lib/renovate-hygiene.ts` reads that form when it asserts this entry still exists; both of Renovate's two wordings for this failure are covered by the prefix.",
+      "matchMessage": "/^Automerge on PR creation failed/",
+      "newLogLevel": "warn"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",

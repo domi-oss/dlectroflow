@@ -398,6 +398,11 @@ const REVIEWED_DYNAMIC_PATTERNS: Record<
       reason:
         "`table` and `column` are Postgres identifiers from this repo's own migration SQL, evaluated at test time. Same argument as the DROP CONSTRAINT pattern above: no request can reach them.",
     },
+  "src/lib/renovate-hygiene.ts::source": {
+    count: 1,
+    reason:
+      "`source` is the inside of a `matchMessage` read out of .gitlab/renovate.json — a versioned, reviewed config file — and it is compiled only by renovate-hygiene.test.ts, which is the module's sole caller. Nothing at runtime reaches this function: it ships in src/lib/ because that is where this repo keeps the pure half of every file-parsing guard, not because a request path uses it. The construction is deliberately a compile of a config value rather than a module constant, because the guard's whole job is to evaluate whatever pattern the config actually carries the way Renovate would (#243); a literal here would only prove the file contains a string somebody typed. An uncompilable pattern is caught and reported by unevaluatableMatchMessages rather than thrown, and the colocated test asserts that list is empty.",
+  },
 };
 
 /** Every `.ts`/`.tsx` under a root, excluding build output. */
