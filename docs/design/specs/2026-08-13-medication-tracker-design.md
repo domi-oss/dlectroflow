@@ -4,6 +4,12 @@ Owner brainstorm held 2026-08-13. Every product decision below was settled by th
 session; this document's job is to write them up precisely, check each claim against the tree, and
 name the consequences the brainstorm could not have known about.
 
+**Four further decisions were settled on 2026-08-15 and are folded into the sections they belong to,
+each marked *settled 2026-08-15*** — the rotating reward set against a single voice, the privacy copy
+as a blocker that ships first, the nav-bar control alongside the home strip, and that control's two
+modes. They are recorded where they bear on the design rather than in an annex, because an annex is
+read once and a section is read every time somebody implements from it.
+
 **There is no issue for this work yet.** This spec is written first deliberately, because two of its
 decisions — the derived `Missed` state and the presentational-only reward — determine the data model,
 and a data model is the expensive thing to get wrong. The v1 slice below is what an issue should be
@@ -80,6 +86,27 @@ standing on. **Every row where the re-read corrected what the brainstorm asserte
 | ⚠️ `/terms` already names medication | Under *Where being wrong would cost you*: "Do not rely on an AI suggestion for anything with real consequences: **medication or dosing**, legal or tax deadlines, medical appointments…". Scoped to *AI suggestions*, so it is not contradicted — and it is why no-AI is a declared non-goal above rather than an oversight |
 | ⚠️ A new workspace-scoped model is auto-enrolled in two guards | `src/lib/export/__tests__/model-coverage.test.ts` and `src/lib/__tests__/scoping.harness.test.ts` both derive their model list from `Prisma.dmmf` **at runtime**, filtered on carrying a `workspaceId` field. So declaring `workspaceId` enrols the model with **no registry entry to forget** — and the export guard will red until `collect.ts` and `json.ts` both name it |
 | No medication feature or duplicate issue exists | Zero matches for `medication` in `src/`, `prisma/` or `charts/` other than the `/terms` sentence above. Open-issue search for `medication` returns **0**; `meds` and `pill` return only substring hits (`needs`, `Spotify`, `bulky`) |
+
+### Second pass — verified 2026-08-15 against `origin/main` at `47e015d`
+
+The table above is evidence about `90d97dd` and is left as written. `main` has moved on, and the four
+decisions of 2026-08-15 rest on facts the first pass never queried, so those are re-read at the
+**named later commit** rather than assumed to have carried over. Same method, same `git show`.
+
+| Claim under test | What the tree says |
+| --- | --- |
+| ⚠️ `/privacy`'s "no health field" sentence is **still live** | **Confirmed at `47e015d`**, `src/app/privacy/page.tsx:1096–1097`. Two days and ten merges after the first pass, the blocker below has not moved |
+| The nav cluster's controls compose `controlSurface` + `touchTarget`, at 44×44 | **Confirmed.** `src/lib/utils.ts` — `touchTarget` is `"inline-flex items-center justify-center min-h-11 min-w-11"`, and `src/components/nav/quick-access.tsx` applies `cn(controlSurface, touchTarget)` to each link. `min-h-11` is `2.75rem` = 44px |
+| Those controls are **individually toggleable**, gated on `Settings` columns | **Confirmed, and the pattern is not "one column each".** `focusQuickAccess Boolean @default(true)` (`prisma/schema.prisma:234`) governs the timer icon; the trolley icon is gated on the **feature's own** column, `shoppingList` (`:242`). #252's comment states the discriminator: `/focus` "is not optional, so nothing governed its AVAILABILITY", which is why the icon needed a column of its own, whereas `/shopping` already had one. **That decides the meds column below** |
+| ⚠️ `quick-access.tsx` resolves its labels through `t(labelKey, voice)` | **Confirmed** — `const label = t(labelKey, voice)`, used as both `aria-label` and `title`. So a nav control following this pattern takes a `voice` prop, and **#86's voice deletion reaches this file** |
+| ⚠️ The owner has decided to **delete the playful voice** | **Confirmed on the item, not inferred.** `#86 — Make the plain/playful voice convention enforceable` carries an *OWNER DECISION, 2026-08-14* section: delete the playful half of every pair, collapse the accessor to a single string, and remove the `Settings.voice` column. #86 cites **this MR** for that column being the schema's one CHECK-less pseudo-enum. It is in **Backlog**, unscheduled — so the deletion has **not** happened, and the sequencing note in *The reward* is why that matters |
+| `FALLBACK_SPARKS` is 8 lines and `FABLE_LINES` is 6 | **Confirmed by count at `47e015d`**, unchanged from the first pass. Recipe already in *Reproducing these numbers* |
+| ⚠️ A guard polices WCAG number↔name welds, **and it reads `docs/`** | **Confirmed, and this is the row that binds this file.** `src/lib/a11y-class-hygiene.test.ts` drives a `CRITERION_SPEC` table (`2.5.5` → `Target Size`, qualifier `Enhanced`, `AAA`; `2.5.8` → `Target Size`, qualifier `Minimum`, `AA`) and iterates `for (const root of ["src", "e2e", "docs"])` plus four root Markdown files. **An inverted citation in this spec reds the pipeline.** Bare numbers are legal by design — its own comment: *"only a number wearing the wrong name is a defect"* |
+| ⚠️ `touchTarget`'s **own docblock** is one of the inverted sites | **Yes**, and it is the one an implementer will read. `src/lib/utils.ts:9–13` welds `2.5.5` to the word *minimum*. `#268 — Three WCAG target-size citations are inverted, and the guard built to catch them cannot see any` owns the sweep. `controlSurface`'s docblock two declarations below it (`:35–41`) states the pair correctly and is the citation to follow instead |
+| ⚠️ `format:check` **cannot** gate this file | `.prettierignore` lists `*.md` **and** `docs/`, with the reasoning inline. Measured, not read off the file: appending deliberately mangled Markdown to this spec still gives `npx prettier --check <file>` → *"All matched files use Prettier code style!"*, exit 0, while `--ignore-path /dev/null` on the same bytes reports `[warn]`. **This MR's own description claimed the check passes; that was a zero from a run that matched no files**, and it is corrected there. Recipe below |
+| ⚠️ A legal-accuracy sweep of `/privacy` is in flight | **`!357 — Draft: fix(legal): correct ten measured drifts between the legal pages and the code`**, branch `docs/legal-accuracy-sweep`, milestone **v0.7.0**, still Draft on one open owner decision. ⚠️ **It does not touch `/terms`** — its own description records that `/terms`' fingerprint "comes back byte-identical". It does touch `/privacy`, `docs/legal.md`, `src/lib/export/readme.ts`, `/help` and the export code. See *The legal copy* |
+| ⚠️ "nothing infers anything about … how you are doing" was **already** overstated | **Confirmed, and by the sweep rather than by this document.** `!357`: *"What was overstated is 'nothing infers anything about how you are doing', because `DayRollup.narrative` is an LLM-written, stored, second-person text about the reader's day. Narrowed, not deleted."* The column is `narrative String?` (`prisma/schema.prisma:669`); `src/lib/rollup.ts`'s `generateTodayRollup` fills it from `getLLM().generate()` for an owner workspace and from a local builder for a guest |
+| ⚠️ Amending `/privacy` is a **publication event**, not a copy edit | `src/lib/legal.ts`: `LEGAL_EFFECTIVE_DATE` is *"ONE date [covering] both documents"*, and a fingerprint gate means *"the text cannot move without someone deciding about this date"*. `!357`'s description states the consequence — split across MRs, *"each merge would invalidate the other's recorded hash and the date would move N times for one publication"*. **So the meds amendment is one commit, and it cannot ride alongside `!357`'s** |
 
 ## Design
 
