@@ -29,6 +29,20 @@ import type { ExportSnapshot } from "./types";
  * "another workspace's export contains no trace of the first workspace's
  * content" reporting the leaked strings.
  *
+ * **The invitation pair was verified the same way, and the result changed what
+ * had to be written.** Replacing `allowlist.findUnique({ where: { claimedById:
+ * userId } })` with `allowlist.findFirst({ where: {} })` — a genuinely unscoped
+ * read of a table holding a private note about every invited person — failed
+ * exactly ONE of the two tests: "and the invitation scoping is symmetric". The
+ * other direction PASSED, because `findFirst` with no filter returned the first
+ * row in the table, which happened to be that account's own.
+ *
+ * So a single-direction test would have reported green on a completely unscoped
+ * read. The symmetry is not thoroughness here, it is the entire mechanism, and
+ * that generalises to any `findFirst`-shaped leak: whichever account's row sorts
+ * first gets a correct answer by luck. The same reasoning is why the
+ * workspace-content checks above are also written in both directions.
+ *
  * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
  * deploy` first; locally `vitest.config.ts` forwards DATABASE_URL from `.env`).
  */
