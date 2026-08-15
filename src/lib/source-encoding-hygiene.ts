@@ -65,6 +65,27 @@
  * "Total" would be the wrong word for the scanner side, per refinement 1 above:
  * the file is not dropped, it is counted as scanned and then not parsed.
  *
+ * ── The window is git's, not everyone's: the defect hides its own FIX ────────
+ * Measured on !347, and it is the reason the paragraph above must not be read
+ * as "no human-facing surface is affected". GitLab's merge-request diff
+ * renderer has no 8000-byte window. Asked for this branch's diff against its
+ * merge base, the API returns
+ *
+ *   Binary files src/lib/breakdown.test.ts and src/lib/breakdown.test.ts differ
+ *
+ * — 76 bytes, no hunks — for each of the two files whose OLD blob carries the
+ * NUL, while `git diff` over the very same commit pair renders an ordinary text
+ * hunk. The classification follows the old blob, so the commit that REMOVES a
+ * raw NUL is unreviewable in the merge request that removes it. Every review
+ * round on !347 reported it could not see those two files; that is the defect's
+ * own signature, not a reviewer fault, and the two fixture diffs had to be read
+ * through `git diff` instead.
+ *
+ * Which is the strongest argument for a guard over a one-off fix: the analyzer
+ * cannot parse the file, the security report cannot show the gap, and review
+ * cannot read the patch that closes it. A test that runs before the byte is
+ * ever committed is the only surface left.
+ *
  * ── The rule is `file`'s text table, NOT "valid UTF-8" ──────────────────────
  * #224's scope line asked for a check that a tracked file "is not valid UTF-8
  * text". Measuring `file` on single-byte fixtures shows that to be the wrong
