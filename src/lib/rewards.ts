@@ -789,6 +789,15 @@ export async function revokeUnqualifiedStreakBadges(
   // already gone (the cascade ran with the item delete), so the lock order is
   // EngagementDay-then-Streak — identical to the engagement path's, which is what
   // stops the two deadlocking against each other.
+  //
+  // ⚠️ This lock is only worth anything when `db` is a TRANSACTION client: outside
+  // one, Postgres releases a `FOR UPDATE` at the end of the statement that took it,
+  // so the read-decide-write below would be an unguarded TOCTOU again. The `db`
+  // default exists for the same reason `reverseItemCompletionRewards`' does — to
+  // keep the unit tests unchanged — and the one production caller,
+  // `deleteBrainDumpItem`, passes its own `tx`. It has to, for a second reason
+  // stated at that call site: a revocation that committed independently would
+  // survive a rollback that put the to-do back.
   await db.$queryRaw`SELECT 1 FROM "Streak" WHERE "workspaceId" = ${workspaceId} FOR UPDATE`;
 
   const streak = await db.streak.findUnique({
