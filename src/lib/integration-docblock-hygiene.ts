@@ -50,8 +50,12 @@
  * The recipe. Tolerant of the whitespace and of `npm test` / `npm run test`,
  * because what matters is `set -a` followed by sourcing the env file — the two
  * halves that together export it — not how the run is spelled afterwards.
+ *
+ * Global, because a single line can carry the recipe **more than once** — a
+ * warning and a bare copy in the same sentence — and each occurrence has to be
+ * judged on its own. See {@link prescribesEnvSourcing}.
  */
-const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/;
+const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/g;
 
 /**
  * Phrases that turn a mention of the recipe into a warning against it.
@@ -70,42 +74,64 @@ const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/;
 const DISAVOWED =
   /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|need)\s+not\b|\b(?:do|does|must|should)n['’]t\b/i;
 
+/** A backtick code span. */
+const CODE_SPAN = /`[^`]*`/g;
+
 /**
- * The recipe sitting inside a backtick code span, i.e. **quoted rather than
- * handed over**.
+ * The [start, end) offsets of every backtick code span in `line`.
  *
- * This is the second half of the exemption, and it is what stops a disavowal
- * elsewhere in the sentence waving a prescription through — `!350`'s review
- * raised exactly that (a line reading "You should not skip the DB setup; run:
- * set -a; …" carries a disavowal phrase but still prescribes the command).
- *
- * Requiring the code span is a tighter answer than measuring the distance
- * between the negation and the command, and a better one: a bounded distance is
- * a number that has to be tuned against adversarial examples, whereas the code
- * span is how this repo's prose already distinguishes a command being discussed
- * from one being given. Every real warning in the tree quotes it; every
- * prescription wrote it bare, as something to copy.
+ * Quoting is what separates a command being **discussed** from one being
+ * **given**: this repo's prose fences the former and indents the latter. That is
+ * a tighter test than measuring the distance between a negation and the command,
+ * and a better one, because a bounded distance is a number that has to be tuned
+ * against adversarial examples.
  */
-const QUOTED_RECIPE = /`[^`]*set\s+-a\s*;\s*\.\s+\.\/\.env[^`]*`/;
+function codeSpans(line: string): [number, number][] {
+  return [...line.matchAll(CODE_SPAN)].map((m) => [
+    m.index,
+    m.index + m[0].length,
+  ]);
+}
 
 /**
  * True when `line` hands the reader the env-sourcing recipe as a thing to run,
  * as opposed to naming it in order to warn against it.
  *
- * A mention is exempt only when it is **both** quoted as a code span **and**
- * disavowed on the same line. Both are required because either alone is
- * reachable by an ordinary prescription: a bare command with an unrelated
- * negation nearby, or a quoted command someone is telling you to run.
+ * **Judged per occurrence, not per line.** A single line can both warn about the
+ * recipe and hand over a bare copy of it —
+ * `Do not use \`set -a; …\` any more — instead run: set -a; …` — and an
+ * exemption that only asked whether *some* quoted mention existed would let the
+ * bare copy through. `!350`'s review raised that, and it is the same
+ * missed-violation class as the unrelated-negation hole fixed before it. So each
+ * occurrence is exempt only if **that** occurrence sits inside a code span and
+ * the line disavows the recipe; one bare occurrence condemns the line.
  *
- * The residual is documented and asserted in the colocated test: a line that
- * quotes the recipe AND carries a disavowal phrase AND still prescribes it is
- * exempt. That sentence has to be contorted on purpose, and this is a drift
- * guard rather than an adversarial boundary — the control is
- * `config/vitest.config.ts`'s one-variable forwarding, not this.
+ * ── Two known limits, both asserted in the colocated test ───────────────────
+ * 1. The disavowal must sit on the same line as the command, so a warning that
+ *    wraps the command onto a line of its own is flagged. The failure message
+ *    says to keep them together.
+ * 2. A recipe **split across several docblock lines** (`set -a` on one line,
+ *    `. ./.env` on the next) is not detected, because the scan unit is the line.
+ *    Joining lines before matching would mean a second detection mode with its
+ *    own quoting and disavowal semantics — a disavowal on the first line would
+ *    otherwise exempt a prescription on the fourth, reintroducing exactly the
+ *    hole above. #256 caps this guard at one assertion for that reason, so the
+ *    gap is recorded here rather than closed. All twelve real occurrences wrote
+ *    the recipe on one line.
+ *
+ * Both limits are the same trade: this is a drift guard, not an adversarial
+ * boundary. The control is `config/vitest.config.ts`'s one-variable forwarding.
  */
 export function prescribesEnvSourcing(line: string): boolean {
-  if (!SOURCES_ENV_FILE.test(line)) return false;
-  return !(QUOTED_RECIPE.test(line) && DISAVOWED.test(line));
+  const occurrences = [...line.matchAll(SOURCES_ENV_FILE)];
+  if (occurrences.length === 0) return false;
+
+  const disavowed = DISAVOWED.test(line);
+  const spans = codeSpans(line);
+  return occurrences.some((m) => {
+    const quoted = spans.some(([from, to]) => m.index >= from && m.index < to);
+    return !(quoted && disavowed);
+  });
 }
 
 /** A prescription found in a file, as a 1-based line number and its text. */

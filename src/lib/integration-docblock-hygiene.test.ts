@@ -131,6 +131,46 @@ describe("integration-test docblock hygiene (#256)", () => {
       expect(prescribesEnvSourcing(line)).toBe(true);
     });
 
+    // `!350`'s third round: a line can both warn about the recipe and hand over
+    // a bare copy of it. An exemption that only asked whether SOME quoted
+    // mention existed let the bare copy through — the same missed-violation
+    // class as the unrelated-negation hole, reached via a second occurrence.
+    // One bare occurrence now condemns the line.
+    it.each([
+      " * Do not use `set -a; . ./.env; set +a` any more — instead run: set -a; . ./.env; set +a",
+      " * Never `set -a; . ./.env; set +a`; just do set -a; . ./.env; set +a",
+    ])("flags a bare copy sitting beside a quoted warning: %j", (line) => {
+      expect(prescribesEnvSourcing(line)).toBe(true);
+    });
+
+    it("is a known gap that a recipe split across lines is not detected", () => {
+      // Limit 2 in the module docblock, recorded the same way limit 1 is rather
+      // than left as an undocumented blind spot — which is what `!350`'s review
+      // asked for, and it offered exactly this as one of its two options.
+      //
+      // Closing it means joining lines before matching, and that needs a second
+      // detection mode with its own quoting and disavowal semantics: a
+      // disavowal on the first line would otherwise exempt a prescription on
+      // the fourth, reintroducing the hole the cases above just closed. #256
+      // caps this guard at one assertion for that reason.
+      //
+      // Asserted rather than merely written down, so that anyone who does add
+      // joining has to come here and change it deliberately.
+      const split = [
+        " * Run:",
+        " *   set -a",
+        " *   . ./.env",
+        " *   set +a",
+        " *   npm run test",
+      ];
+      expect(split.filter(prescribesEnvSourcing)).toEqual([]);
+      // The same commands on one line ARE caught, which is what the twelve real
+      // sites looked like.
+      expect(
+        prescribesEnvSourcing(" *   set -a; . ./.env; set +a; npm run test"),
+      ).toBe(true);
+    });
+
     it("exempts only a mention that is BOTH quoted and disavowed", () => {
       // The residual, recorded rather than left to be discovered. A line has to
       // quote the recipe AND carry a disavowal AND still be prescribing it,
