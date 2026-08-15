@@ -827,7 +827,9 @@ export async function revokeUnqualifiedStreakBadges(
 
   const streak = await db.streak.findUnique({
     where: { workspaceId },
-    select: { current: true, ledgerFrom: true },
+    // `lastActiveWorkday` is read because it is REPAIRED below on its own
+    // condition, not because the counter needs it — see the write.
+    select: { current: true, lastActiveWorkday: true, ledgerFrom: true },
   });
   if (!streak) return []; // no streak row: nothing was ever credited
 
@@ -867,11 +869,35 @@ export async function revokeUnqualifiedStreakBadges(
   }
   const runStartsAt = parseYmd(run.runStart);
 
-  if (run.current < streak.current) {
+  // Two answers, two conditions — raised in review round 10 on !352, where they
+  // shared one and the date was the casualty.
+  //
+  // `current` is **lowered, never raised**: a delete may take a streak day away
+  // and must never grant one, so a counter already below the ledger is left
+  // alone (`Math.min` says that in the write itself rather than relying on the
+  // branch it sits in). `lastActiveWorkday` has no such asymmetry — it is not a
+  // score, it is the date the surviving evidence ends on, and the ledger is
+  // strictly better informed about that than the stored value is.
+  //
+  // Carrying the date on the counter's condition meant that whenever the length
+  // did NOT move, a moved END was not written back. Reachable with a run of one:
+  // delete its only day, fall back to an earlier isolated day, and the length is
+  // one either way while the date is stale by however long the gap was.
+  //
+  // That matters because `lastActiveWorkday` is a **precondition**, not a display
+  // value. `touchStreakOnEngagement` compares it to `today` to decide the day is
+  // already counted, and to `prevWorkingDay` to decide a run continues — so a
+  // date sitting ahead of the real evidence makes the next engagement continue a
+  // run that had actually broken, granting a day nobody earned. Benign in this
+  // module's direction of travel, and still the ledger and the counter
+  // disagreeing, so it is repaired rather than documented.
+  const lowerCounter = run.current < streak.current;
+  const repairDate = run.lastActiveWorkday !== streak.lastActiveWorkday;
+  if (lowerCounter || repairDate) {
     await db.streak.update({
       where: { workspaceId },
       data: {
-        current: run.current,
+        current: Math.min(run.current, streak.current),
         lastActiveWorkday: run.lastActiveWorkday,
       },
     });

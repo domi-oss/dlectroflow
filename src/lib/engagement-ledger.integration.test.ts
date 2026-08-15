@@ -655,6 +655,47 @@ describe("streak-badge revocation on delete (#233, closing #251's residual)", ()
 });
 
 describe("the recompute never RAISES a streak (#233)", () => {
+  /**
+   * Review round 10 on !352. The counter and the run's END DATE are two separate
+   * answers, and the write used to carry them on ONE condition
+   * (`run.current < streak.current`), so whenever the length happened not to move
+   * the date was not corrected either.
+   *
+   * The case is not contrived: a run of ONE day, deleted, falling back to an
+   * earlier isolated day is also a run of one. Length equal, end date two days
+   * earlier, so the old condition was false and `lastActiveWorkday` kept pointing
+   * at a day whose evidence had just been cascaded away.
+   *
+   * ⚠️ It matters because `lastActiveWorkday` is a PRECONDITION, not a display
+   * value. `touchStreakOnEngagement` reads it two ways — `=== today` to decide the
+   * day is already counted, and `=== prevWorkingDay` to decide a run continues —
+   * so a date left in the future of the real evidence GRANTS a streak day nobody
+   * earned on the next engagement. That direction is the benign one for this
+   * module, which is why it is fixed rather than merely noted, but it is still the
+   * ledger and the counter disagreeing about a day.
+   */
+  it("corrects a stale lastActiveWorkday when the run's END moves but its LENGTH does not", async () => {
+    await seedWorkspace(WS, { current: 1, ledgerFromDaysAgo: 10 });
+    // Two isolated days with a gap between them, so each is a run of exactly 1.
+    // `seedWorkspace` sets `lastActiveWorkday` to today, matching the credit
+    // below that is about to be deleted.
+    await itemCrediting(WS, "earlier", [dayAgo(2)]);
+    const doomed = await itemCrediting(WS, "doomed", [dayAgo(0)]);
+
+    const { deleteBrainDumpItem } = await import("@/app/actions/braindump");
+    await deleteBrainDumpItem(doomed);
+
+    const streak = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
+    // The counter is genuinely unchanged — both runs are one day long. That is
+    // the control: it proves this case really is the equal-length one, so the
+    // date below cannot have been carried by a counter change.
+    expect(streak?.current).toBe(1);
+    // …and the date follows the surviving evidence rather than the deleted row.
+    expect(streak?.lastActiveWorkday).toBe(dayAgo(2));
+  });
+
   it("leaves a counter that is lower than the ledger alone", async () => {
     // Reachable when a ledger row landed and the counter's own transaction then
     // failed. A delete may take a streak day away and must never grant one, so
