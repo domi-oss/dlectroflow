@@ -79,8 +79,18 @@ export const HELP_SECTIONS = [
   { id: "help-task-breakdown", heading: { text: "Task breakdown" } },
   { id: "help-focus-session", heading: { text: "The focus session" } },
   // The app menu carries seven destinations and this page documented three of
-  // them. These two close that gap, in the menu's own order (Library, Shopping
-  // list, Activity — content destinations, before the settings-shaped sections):
+  // them. These two close that gap, as content destinations placed before the
+  // settings-shaped sections.
+  //
+  // They deliberately do NOT follow the menu's literal order, which interleaves
+  // Shopping list BETWEEN Library and Activity. Grouping wins over that here:
+  // Library and Activity answer one question between them, and splitting them
+  // around an optional feature most workspaces have switched off would put a
+  // section about groceries in the middle of the answer. So the rendered order is
+  // Library + Activity, then Shopping list. (Duo review, !356 — this comment used
+  // to claim it followed the menu's order, which the entries below do not
+  // produce. Stated rather than fixed, because the grouping is the right call and
+  // the claim was the wrong half.)
   //
   //  * `help-where-things-go` covers Library and Activity together, because they
   //    answer one question between them — "my work left the inbox, where is it
