@@ -90,10 +90,19 @@ recover a value that never varies for a given deployment.
 manifest's own URL, so an app installed from `dlectroflow.dev` launches on `dlectroflow.dev`. No env
 coupling, no caching opt-out, no dynamic route.
 
-**The #174 hardening is not lost — it just comes from somewhere better.** `canonicalOriginRedirect`
-(`src/proxy.ts`) already forces every request onto `PUBLIC_ORIGIN`'s host, so a user cannot linger on a
-non-canonical hostname long enough to install from one. The guarantee is enforced by shipped code rather
-than restated in a config file, which is the stronger arrangement.
+**The #174 hardening is not lost — but it is narrower than this paragraph claimed.**
+`canonicalOriginRedirect` is defined in `src/lib/origin.ts` (`src/proxy.ts` imports and calls it — the
+spec one day earlier had to correct this same citation), and it only fires for paths matching
+`CANONICAL_ORIGIN_PREFIXES`: `/api/auth/`, `/api/google/oauth/` and `/login`. It does **not** force
+*every* request onto `PUBLIC_ORIGIN`'s host, and that is deliberate — the homepage, the privacy notice
+and the terms answer 200 on every served hostname so a consent-screen reviewer's cold fetch gets no hop.
+
+⚠️ **So the original argument here does not hold, and the design needs to answer it rather than inherit
+it.** A user *can* linger on a non-canonical hostname indefinitely on exactly the pages an install
+prompt appears on, because those are the pages excluded from the redirect. What the redirect guarantees
+is that they cannot complete a *sign-in* there. With `start_url` and `scope` relative, an install from
+the apex therefore yields an app pinned to the apex whose first sign-in attempt hops to the canonical
+host — which is the behaviour to design for, not a case the redirect rules out.
 
 **#174's cause, for the record, because it has been misread twice.** It was **not** a browser-context
 problem. The app answered on more than one hostname while `PUBLIC_ORIGIN` named one, and host-only
