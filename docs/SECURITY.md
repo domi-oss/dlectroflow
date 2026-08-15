@@ -49,9 +49,11 @@ authority over anything that changes trust boundaries or production state.
   baseline approval requirement (`approvals_before_merge: 0`, no approval rules),
   so the required scanners plus the Scan Result Policy are the whole gate: a
   clean pipeline merges unattended, and a new Critical/High finding is what
-  summons a human. **This bullet used to sit under the "human approves the MR"
-  heading below**, which the config has never supported — see *Dependency update
-  triage*.
+  summons a human. **That gate has a known hole and has been beaten once** —
+  `!245` re-introduced a High-severity range under a `patch` classification and was
+  stopped only by an open review thread; see *The gate has been beaten once* below.
+  **This bullet also used to sit under the "human approves the MR" heading
+  below**, which the config has never supported.
 
 **Agents may perform autonomously (human approves the MR):**
 - Drafting false-positive dismissal rationale for human confirmation.
@@ -196,35 +198,70 @@ is data, not drift. Without the bound a container scanner three weeks dead read
 
 Most dependency work here happens without a person. Renovate opens the MRs, the
 required scanners gate them, and patch/minor/digest/pin merge themselves once the
-pipeline is green. What is left for a person is a weekly pass over the
-**Dependency Dashboard** (#17): the residue the automation deliberately does not
-touch, the deferred caps, and one failure the dashboard cannot report about
-itself.
+pipeline is green.
 
-**What a missed pass costs, stated plainly, because it is the reason this cadence
-can be published honestly:** routine updates keep landing without it, and an
-outstanding security fix does not wait on it either (see *Where a security fix
-actually appears*). What accumulates is the deferred residue — majors, capped
-packages, abandoned packages — and a dashboard whose claims nobody has checked.
-That is a slow cost, not an incident. It is also the entire reason the previous
-version of this section overstated: a weekly review nobody had defined was easier
-to promise than to do.
+**The pass exists to do the one thing none of that does: read the live dependency
+findings.** Everything else it covers is residue the automation deliberately
+leaves. The subsections below are reference material, in rough order of how
+surprising they are; the pass itself runs in this order:
+
+1. **Read the live findings** — *The zero to check, and how to earn it*. This is
+   the security-relevant step and it is deliberately first, even though it is the
+   last section on the page.
+2. **Check the dashboard is telling you about now** — *Noticing the dashboard has
+   gone stale*. Everything in steps 3–4 is read off that page, so its freshness is
+   a precondition rather than a detail.
+3. **Work the residue** — the *Awaiting Schedule* list, reading the update type
+   before each tick, and *Repository Problems* first of all.
+4. **Re-check the deferred caps** — *The deferred caps, and when each one expires*.
+   A cap whose lift condition has expired is a finding.
+
+**What a missed pass costs.** Not merely deferred residue: three facts already on
+this page compose into a detection gap. The Scan Result Policy gates only *new*
+Critical/High findings, so an advisory that widens against a dependency already in
+the baseline blocks nothing. Renovate's `vulnerabilityAlerts` path is inert on
+GitLab here, so no advisory-driven MR jumps the queue (see *Where a security fix
+actually appears*). And the monthly `security_assessment` is otherwise the only
+scheduled thing that reads live findings. **Between assessments this pass is the
+only thing looking — so skipping it can leave an advisory unnoticed for up to
+about four weeks, against the 24-hour triage and 72-hour fix targets in *Response
+targets* on this same page.**
+
+Routine updates do keep landing without the pass, which is precisely what makes
+the gap easy to miss: the system looks like it is working because most of it is.
+That is also why the earlier version of this section overstated — a weekly review
+nobody had defined was easier to promise than to perform.
 
 ### Three schedules, one flag, and only one may open an MR
 
-| Schedule | Cron (Europe/London) | What it may do |
-|---|---|---|
-| Weekly base-image rescan | `0 6 * * 1` | Rebuild and re-scan `main`; carries `ops_digest`. Never deploys. |
-| **Weekly Renovate** | `0 7 * * 1` | **The only run that may open update MRs.** |
-| Renovate automerge recovery | `0 1,5,9,13,17,21 * * *` | Finish an automerge lost at MR creation. Opens nothing. |
+| Schedule | Cron (Europe/London) | Fires | What it may do |
+|---|---|---|---|
+| Weekly base-image rescan | `0 6 * * 1` | Mon 06:00 | Rebuild and re-scan `main`; carries `ops_digest`. Never deploys. |
+| **Weekly Renovate** | `0 7 * * 1` | Mon 07:00 | **The only run that may open update MRs.** |
+| Renovate automerge recovery | `0 1,5,9,13,17,21 * * *` | Daily 01:00, 05:00, 09:00, 13:00, 17:00, 21:00 | Finish an automerge lost at MR creation. Opens nothing. |
 
 Both Renovate schedules carry `RENOVATE_RUN=true` and run the same job; what
 separates them is the clock. `.gitlab/renovate.json` sets
-`"schedule": ["* 7-8 * * 1"]` under `"timezone": "Europe/London"`, and none of
-the six recovery hours falls inside that window. Out of window Renovate finishes
-work already in flight and creates no branches, so **a recovery run that rewrites
-nothing is the design working, not a fault** — the commonest way to misread this
-system is to check it on a Saturday and conclude it is broken.
+`"schedule": ["* 7-8 * * 1"]` under `"timezone": "Europe/London"` — Mondays
+07:00–08:59 — and **none of the recovery hours falls inside that window.** That is
+the whole safety property. Out of window Renovate finishes work already in flight
+and creates no branches, so **a recovery run that rewrites nothing is the design
+working, not a fault** — the commonest way to misread this system is to check it on
+a Saturday and conclude it is broken.
+
+Read that property precisely: it is a claim about the **recovery hours against the
+update window**, not about the project's schedules against each other. Several of
+those do share a clock slot — the weekly registry prune and a recovery run both
+fire Monday 05:00, and the hourly production-state check overlaps everything every
+hour — which is harmless, because they are different jobs in different pipelines,
+each gated on its own variable. Only the window/hours relationship is
+load-bearing, and it is the one to re-check if either changes.
+
+**The 09:00 recovery slot is the one worth noticing.** It is the first run after
+the window closes at 08:59, so an automerge lost by the 07:00 run is retried the
+same morning instead of waiting for the next Monday. That is the mechanism #243
+was built for: a seven-day recovery became a four-hour one in general, and a
+one-hour one for the case that actually produces lost automerges.
 
 Delete the window and all six daily runs start opening MRs of their own, up to
 `prConcurrentLimit: 5`. `src/lib/renovate-hygiene.test.ts` asserts the window
@@ -257,6 +294,38 @@ them. That is what #243 is, and what the recovery schedule addresses. Expect the
 automerge path to start firing, and treat the checkbox warning above as the
 standing rule rather than a future one.
 
+#### ⚠️ The gate has been beaten once — `!245`
+
+The most important thing to carry away from this section is that "green pipeline"
+is not the same as "safe change", and there is a recorded case rather than a
+hypothetical.
+
+`!245`, titled *"update dependency brace-expansion to v2.1.4"*, rewrote the
+top-level `brace-expansion` override from `^5.0.8` back to `^2.1.3` — **inside
+CVE-2026-14257's affected range**. It was classified `patch`, so `packageRules[0]`
+applied to it and it was eligible to merge itself. The Scan Result Policy did not
+object, because the head pipeline's security summary was **identical to `main`'s**:
+the policy gates on *new* Critical/High findings, and re-introducing a
+vulnerability that is already in the baseline produces nothing new to gate on.
+**Only an unresolved review discussion stopped it merging unattended.** It was
+closed rather than merged.
+
+Two things follow. First, the phrase used earlier on this page — that the required
+scanners plus the Scan Result Policy are the whole gate — describes what the
+configuration provides, **not a guarantee that a bad patch cannot land**; the
+baseline exemption is the hole, and it is the same hole the ⚠️ note under *Security
+program cadence* describes. Second, this was not a one-off: `.gitlab/renovate.json`
+records that the underlying mis-resolution recurs on **every future 2.x release**,
+because Renovate reads that entry's current version from the hoisted copy of the
+package, which a *different* override pins to 2.x. The `>=5.0.8` floor is what
+makes those proposals ineligible, and `override-hygiene` asserts the override still
+matches the rule that pins it.
+
+Practical rule: **a patch or digest bump touching a package that appears in
+`package.json`'s `overrides` gets read, whatever its update type says.** Those
+entries exist because a resolved version was deliberately overridden, and an
+update type is computed against the resolution, not against the intent.
+
 ### What each dashboard section means
 
 | Section | What it is | What to do with it |
@@ -271,6 +340,26 @@ standing rule rather than a future one.
 
 A section that is empty is omitted entirely rather than shown empty, so its
 absence carries no information.
+
+**Worked example, since "read Repository Problems first" is only worth anything
+applied.** `#17` currently carries `⚠️ WARN: No docker auth found - returning`, and
+the job log names what it gave up on: this project's own
+`gl-demo-ultimate-dtop/domi-oss/dlectroflow`. Every other image the config tracks
+sits on a public registry and resolves without credentials; the exception is the
+one image in this project's private registry, and Renovate is configured with no
+container-registry credentials, so it does not look. **This is expected and not
+worth chasing** — that image's tag is set by CI at deploy time
+(`charts/dlectroflow/values.yaml` carries `tag: ""`), so there is no version for a
+dependency bot to propose in the first place. The same empty tag is why the
+dashboard lists that image under helm-values as `unknown version`; it is one cause
+showing up twice, not two faults.
+
+The general lesson outlives the specific warning: a permanent benign entry here is
+exactly what trains a reader to skip the section the table above tells them to read
+first. **Read what the warning names, not merely whether one is present** — the
+same warning text against a *public* image, or against a manifest rather than a
+registry, would mean Renovate had stopped resolving something it is supposed to
+resolve.
 
 ### Noticing the dashboard has gone stale
 
@@ -338,12 +427,32 @@ silently, because a cap produces no MR to notice.
 | `brace-expansion`, nested `minimatch@^3` override | `<3` | `minimatch@3` leaving the ESLint plugin chain; the override and this rule are then deleted together (#82, #161). |
 | `postgres` (docker) | `<17` | A planned dump/restore migration moving all three pins in one commit. Digest refreshes and 16.x minors are unaffected. |
 
-⚠️ **`allowedVersions` is not bypassed for a security fix.** Two of these caps —
-`typescript` and the nested `brace-expansion` — would therefore also hold back an
-advisory fix. Both are recorded accepted trade-offs and both cover dev-only
-dependencies whose real remediation is lifting the cap rather than routing around
-it. Do not add a cap to a production-reachable package without recording that
-same reasoning next to it.
+⚠️ **`allowedVersions` is not bypassed for a security fix**, so a cap can hold one
+back. All six are accounted for below rather than only the ones with a comfortable
+answer — a reader checking these for production exposure needs the complete list:
+
+- **Two are floors, not ceilings, and cannot block anything.** `tsx >=4.22.0` and
+  the top-level `brace-expansion >=5.0.8` exclude *lower* versions, so an advisory
+  fix — which is always a higher version — stays eligible. The `brace-expansion`
+  floor exists precisely to keep a patched version from being walked backwards.
+- **Three ceilings cover the lint and type toolchain.** `eslint <10` and
+  `typescript <6.1` are `devDependencies`; the nested `brace-expansion <3` reaches
+  only the ESLint plugin chain. All three are recorded accepted trade-offs, and in
+  each case a fix that cleared the cap would break the toolchain it constrains, so
+  the real remediation is lifting the cap rather than routing around it.
+- **One ceiling governs production: `postgres <17`.** It applies to three pins that
+  must move together — `charts/dlectroflow/values.yaml` and
+  `docker/docker-compose.prod.yml` twice — and to the backup path with them, since
+  `backup.dumpImage` defaults to `postgres.image` to keep `pg_dump` matched to the
+  server major. What makes it safe is not that it is unimportant but that it is a
+  **major ceiling only**: Postgres 16 remains upstream-supported, and 16.x patch
+  and digest releases — which is how a Postgres security fix actually arrives — are
+  unaffected. **If 16 leaves upstream support this cap stops being a scheduling
+  decision and becomes a security one**, so that is the condition to watch, not
+  just the migration it is waiting on.
+
+Do not add a ceiling to a production-reachable package without recording that same
+reasoning beside it.
 
 ### Reasoning about an advisory
 
@@ -366,10 +475,13 @@ project.vulnerabilities(
 `solution` is the patched set.
 
 **`solution` usually names more than one patched line, and the highest number in
-it is usually the wrong target.** A live record here reads `fast-uri` at `3.1.4`
-with *"Upgrade to versions 2.4.4, 3.1.5, 4.1.2 or above."* The fix for our line
-is **3.1.5**, a patch. Reading only `4.1.2` converts a patch bump into a major
-one and invents a migration that the advisory never asked for.
+it is usually the wrong target.** One of this project's own records reads
+`fast-uri` at `3.1.4` with *"Upgrade to versions 2.4.4, 3.1.5, 4.1.2 or above."*
+The fix for our line is **3.1.5**, a patch. Reading only `4.1.2` converts a patch
+bump into a major one and invents a migration the advisory never asked for. (That
+record's own state is `RESOLVED` — it is quoted for the version arithmetic, which
+is what the next two paragraphs are about, and calling it "live" would beg the
+question they answer.)
 
 **The worked example, from this repo.** #55 bumped `brace-expansion`
 1.1.16 → 2.1.2 for CVE-2026-14257 and closed. The advisory later widened to cover
