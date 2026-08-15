@@ -1148,7 +1148,7 @@ export default function PrivacyPage() {
             it.
           </strong>{" "}
           There is no health field, no diagnosis field and no questionnaire, and
-          nothing here asks you how you are or records why you use it.{" "}
+          nothing here asks you how you are.{" "}
           <strong>
             One thing comes close and is worth naming rather than glossing:
           </strong>{" "}

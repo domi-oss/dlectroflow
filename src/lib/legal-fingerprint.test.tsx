@@ -179,7 +179,13 @@ const PUBLISHED = {
   // within-branch move, and the same lesson: a completeness claim has to be
   // checked on the defect's own axis (per omitted COLUMN here), not by counting
   // the categories that were easy to phrase.
-  privacy: "f5677ddd57343d59c2052d4dd97a006874f9ccb0819d3548614677e6ef0c1ef2",
+  // And once more, on the third review round, for a COPY change: the health
+  // clause repeated "records why you use it" one sentence after the bold lead-in
+  // had already said it. Redundancy rather than inaccuracy — no disclosure moved,
+  // so the date does not move for it either. Recorded because the alternative is
+  // a hash whose provenance nobody can reconstruct, and because it is the third
+  // re-record inside one branch: two for substance and merge, one for copy.
+  privacy: "eed96f5d51654fcfb9207b1892d6f4fc432e6715b7ccd7f5c0dafbe2e806d7e8",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
