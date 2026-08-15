@@ -70,6 +70,35 @@ import {
  * tab has already told its user the words are queued**, and this is the only thing
  * that recovers them.
  *
+ * ── ⚠️ Residual, NOT fixed: another tab's Discard is undone by this one ───────
+ *
+ * The re-enqueue infers "clobbered" from **absence**, and a Discard in another tab
+ * is absence too. `claimed` and `inFlightKeys` are per-tab refs, so neither can
+ * see it: with the inbox open twice, pressing *Discard for good* in one tab has
+ * the other put the capture straight back and save it on the next reconnect —
+ * words the user explicitly destroyed landing in their inbox. Found while
+ * resolving Duo review round 2 on `!348`, which reported the in-tab window rather
+ * than this one; measured, not reasoned about.
+ *
+ * **Left open deliberately, because the fix is a design decision and not a patch.**
+ * The cheapest correct discriminator is already in the tree and needs no new
+ * storage: **the mirror.** `discard` deletes the IndexedDB entry *before* the
+ * `localStorage` one — an ordering this file already calls "the whole fix" — while
+ * a clobber writes only `localStorage`. So *"still in the mirror"* means *"nobody
+ * removed this on purpose"*. Two things make it more than a one-line change and
+ * both want a reviewer: it makes this handler asynchronous (safe in principle —
+ * the re-enqueue is a recovery after the fact, never on a critical path, and
+ * `enqueue` treats a repeated `clientKey` as the same capture so a doubled
+ * recovery is idempotent), and it needs a stated answer for a browser with no
+ * IndexedDB, where nothing can be told apart. That answer should be **fail open**
+ * — re-enqueue, keeping today's behaviour and today's bug — because this module's
+ * governing rule is that a wasted retry is recoverable and a dropped capture is
+ * not.
+ *
+ * What IS fixed: a discard no longer leaves a recovery claim behind on any arm,
+ * so the single-tab version of this — a confirm resolving against an entry that
+ * has already left the queue — cannot resurrect anything.
+ *
  * ── Nothing here throws either ───────────────────────────────────────────────
  *
  * Every failure resolves to "still queued, still visible". A capture bar that
@@ -267,6 +296,11 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
       // ⚠️ The losing tab of a clobber finds its own pending capture gone from a
       // queue it never removed it from. Re-enqueueing is the ONLY recovery: this
       // tab has already told its user the words are safe.
+      //
+      // ⚠️ **It infers "clobbered" from ABSENCE, and absence has three causes.**
+      // The two guards below are how the other two are told apart, and each one
+      // reads as redundant while the other stands — see the residual note in this
+      // module's docblock before removing either.
       for (const [key, capture] of awaiting.current) {
         if (present.has(key)) continue;
         // A capture whose flush is outstanding may legitimately have been removed
@@ -275,6 +309,21 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
         // opposite mistake cheap — a duplicate POST answered 200 — so the entry is
         // only put back while nothing is in flight for it.
         if (inFlightKeys.current.has(key)) continue;
+        // The third cause: the user asked for these words to be thrown away, and
+        // `discard` holds the claim across its mirror delete. Putting them back is
+        // the "silent save after an explicit refusal" that `discard`'s mirror-first
+        // ordering exists to prevent, arriving by a different door — and it is
+        // strictly worse than the flush case above, because a never-saved capture
+        // has no `200` duplicate to absorb the re-POST. It is created.
+        //
+        // Duo review round 2 on `!348` asked for exactly this guard. Honest note
+        // on its status: the window is **not reachable today**, because
+        // `discardCapture`, `broadcast()` and the `awaiting` purge all run in one
+        // synchronous block after that await, so anything re-added is removed
+        // again before control returns. One extra `await` between them — an
+        // ordinary future edit — makes it durable with nothing going red, which is
+        // why the guard is here rather than an argument in a comment.
+        if (claimed.current.has(key)) continue;
         enqueue(store, capture);
       }
       onChange();
@@ -450,6 +499,12 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
       const live = new Set(readQueue(store).map((c) => c.clientKey));
       const stillQueued = clientKeys.filter((key) => live.has(key));
       if (stillQueued.length === 0) {
+        // ⚠️ Drop the recovery claim even though nothing is being removed. The
+        // entry left the queue while the confirm was open, so `awaiting` still
+        // held it — and the NEXT `storage` event would then re-enqueue words the
+        // user had just asked to destroy, permanently. That re-POST is created
+        // rather than answered `200`, because this capture never saved.
+        for (const key of clientKeys) awaiting.current.delete(key);
         announce("already-saved");
         return "already-saved";
       }
@@ -479,7 +534,10 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
           announce("storage-unavailable");
           return "storage-unavailable";
         }
-        for (const key of stillQueued) awaiting.current.delete(key);
+        // Every key the user named, not only the ones still queued: any that were
+        // already gone are the `already-saved` case per key, and leaving them in
+        // `awaiting` is the same resurrection one entry at a time.
+        for (const key of clientKeys) awaiting.current.delete(key);
         return "discarded";
       } finally {
         for (const key of stillQueued) claimed.current.delete(key);
