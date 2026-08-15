@@ -54,15 +54,31 @@
  */
 
 /**
- * The recipe. Tolerant of the whitespace and of `npm test` / `npm run test`,
- * because what matters is `set -a` followed by sourcing the env file — the two
- * halves that together export it — not how the run is spelled afterwards.
+ * The recipe: turn on auto-export, then source the env file. What matters is
+ * those two halves, so **each half accepts every spelling that shell accepts**
+ * rather than only the one the twelve real sites happened to use —
+ *
+ *   - auto-export: `set -a` or its long form `set -o allexport`;
+ *   - separator: `;` or `&&`;
+ *   - sourcing: `.` or `source`, of `./.env` or `.env`.
+ *
+ * `!350`'s review found this pattern matched only `set -a; . ./.env` while this
+ * docstring claimed to be about the two halves generally. Every variant above
+ * exports the identical set of values, so recognising one and missing four made
+ * the sentence you are reading the same kind of claim the MR is deleting from
+ * twelve docblocks — one a reader would trust, describing something the code
+ * does not do. Each is now asserted in the colocated test.
+ *
+ * Whitespace and the trailing `npm test` / `npm run test` stay unconstrained:
+ * the defect is the export, not how the run is spelled afterwards. Case stays
+ * significant because shell is — `SET -A` is not a command.
  *
  * Global, because a single line can carry the recipe **more than once** — a
  * warning and a bare copy in the same sentence — and each occurrence has to be
  * judged on its own. See {@link prescribesEnvSourcing}.
  */
-const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/g;
+const SOURCES_ENV_FILE =
+  /set\s+(?:-a|-o\s+allexport)\s*(?:;|&&)\s*(?:\.|source)\s+(?:\.\/)?\.env/g;
 
 /**
  * Phrases that turn a mention of the recipe into a warning against it.

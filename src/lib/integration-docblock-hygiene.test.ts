@@ -99,6 +99,24 @@ describe("integration-test docblock hygiene (#256)", () => {
       expect(prescribesEnvSourcing(` * ${line}`)).toBe(false);
     });
 
+    // The pattern's own docstring says what matters is `set -a` followed by
+    // sourcing the env file, "not how the run is spelled afterwards" — so every
+    // spelling of those two halves has to be caught, or that sentence is the
+    // same kind of claim this MR is deleting: a docblock a reader would trust,
+    // describing something the code does not do. All twelve real sites wrote one
+    // spelling; a thirteenth author typing the command from memory would not
+    // reliably reproduce it, and the export is identical either way.
+    it.each([
+      "set -a && . ./.env && set +a; npm run test",
+      "set -a; source ./.env; set +a; npm test",
+      "set -a; . .env; set +a",
+      "set -a && source .env",
+      // The long spelling of `set -a`; `allexport` IS the flag `-a` sets.
+      "set -o allexport; . ./.env; set +o allexport",
+    ])("flags an equivalent spelling of the same export: %j", (line) => {
+      expect(prescribesEnvSourcing(` *   ${line}`)).toBe(true);
+    });
+
     it("ignores lines that do not mention the recipe", () => {
       expect(prescribesEnvSourcing(" * Needs the real Postgres.")).toBe(false);
       expect(prescribesEnvSourcing("  set -e")).toBe(false);
