@@ -26,16 +26,29 @@
  *    the load-bearing reason, and `axe.getRules()` re-takes the measurement in one
  *    line, so re-measure rather than trust this sentence.
  *
- *    The tag list is a second and independent reason, not a redundant one:
- *    `e2e/a11y/axe-helpers.ts` asks for `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`,
- *    which are version-and-level tags, and a criterion new in WCAG 2.2 carries
- *    `wcag22aa` instead — never `wcag2a`, because it did not exist in 2.0. So a
- *    2.2 rule would not run here even if axe had one for these criteria. That is
- *    shown rather than assumed, because axe does ship exactly one: `target-size`,
- *    the only rule tagged `wcag22aa`, covering 2.5.8 Target Size (Minimum) at AA.
- *    Those four tags do not select it, so it does not run — a different gap from
- *    this module's, recorded rather than fixed, and the same 24x24 floor is cited
+ *    ⚠️ **The tag list USED to be a second and independent reason. #263 removed
+ *    it, so it is not one any more** — do not read the rest of this paragraph as
+ *    a live second leg. `e2e/a11y/axe-helpers.ts`'s `WCAG_TAGS` asked only for
+ *    `wcag2a`/`wcag2aa`/`wcag21a`/`wcag21aa`, which are version-and-level tags,
+ *    and a criterion new in WCAG 2.2 carries `wcag22aa` instead — never `wcag2a`,
+ *    because it did not exist in 2.0. So a 2.2 rule could not run here even if
+ *    axe had one for these criteria. That was shown rather than assumed, because
+ *    axe ships exactly one: `target-size`, the only rule tagged `wcag22aa`,
+ *    covering 2.5.8 Target Size (Minimum) at AA, whose 24x24 floor is also cited
  *    in `utils.ts`.
+ *
+ *    **`WCAG_TAGS` now also carries `wcag22a` and `wcag22aa`, so `target-size`
+ *    does run**, and the gap this paragraph recorded is closed rather than
+ *    outstanding. The consequence for THIS module is that its own four criteria
+ *    now rest on **one** reason instead of two: no axe rule exists for them at
+ *    all. That is the load-bearing reason and it is unaffected — but it is now
+ *    load-bearing alone, so `axe.getRules()` re-taking the measurement matters
+ *    more than it did, not less.
+ *
+ *    Distinct from `utils.ts`'s other citation, which is a house convention
+ *    rather than a conformance bar: 2.5.5 Target Size (Enhanced) is **AAA** at
+ *    44x44. The two are different criteria at different levels and #258 exists
+ *    because they had been welded the wrong way round.
  *
  *    Do not re-derive any of this from a grep for `wcag22`. axe has two shapes of
  *    tag and only one of them is a version: `wcagXYZ` names success criterion
