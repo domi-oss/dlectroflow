@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { sectionById, sectionLabel } from "@/lib/section-nav";
 import { exportReadme } from "./readme";
 import { EXPORT_FILES } from "./manifest";
 import { makeSnapshot, makeEmptySnapshot } from "./__tests__/fixture";
@@ -30,6 +31,90 @@ describe("README.md — the file that explains the archive", () => {
     expect(readme).toMatch(/Google/);
     expect(readme).toMatch(/not included|is not in|excluded/i);
     expect(readme.toLowerCase()).toContain("token");
+  });
+
+  it("says the account records ARE in the archive, and names credentials as the exclusion", () => {
+    // /privacy and this file are one disclosure read in two places, and
+    // `docs/legal.md` says so: "those two wordings move together".
+    //
+    // POLARITY FLIPPED. The previous version of this test asserted that the
+    // archive NAMED four kinds of held-but-unexported bookkeeping — the invitation
+    // row and its note (`Allowlist`), the AI usage count (`UserAiUsage`), the
+    // calendar feed's timestamps (`CalendarFeed`) and the account flags on `User`.
+    // All four are now IN the download, so an archive still listing them as
+    // withheld would be false, and the accurate wording is the one this asserts.
+    // The pattern kept, the polarity reversed — the same move `docs/legal.md`
+    // records for the Terms' export sentence when #129 shipped.
+    expect(readme).toContain("What is not in this archive");
+
+    // What remains excluded is credentials, and all THREE of them: the two the
+    // page already named plus the calendar feed's token, which had never been
+    // called one because the whole row was absent.
+    expect(readme.toLowerCase()).toMatch(/oauth token/); // GoogleAuth
+    expect(readme.toLowerCase()).toMatch(/api key/); // User.llmKeyEnc
+    // CalendarFeed.token. The row IS exported now, so the archive has to account
+    // for its one missing column instead of the reader finding a feed record with
+    // an unexplained hole in it.
+    expect(readme.toLowerCase()).toContain(
+      "address of your calendar subscription feed",
+    );
+    // And where to get it — the claim that nothing is lost holds only because
+    // `calendar-feed.tsx` renders the live URL in a readOnly input with a copy
+    // button, so it is re-copyable rather than shown once.
+    //
+    // Derived from `SETTINGS_SECTIONS` rather than repeated as a literal: this
+    // MR's first draft wrote "Settings → Calendar" into all three surfaces, a
+    // section that does not exist, and literal assertions cannot tell a real path
+    // from an invented one.
+    const integrations = sectionLabel(
+      sectionById("settings-integrations"),
+      "plain",
+    );
+    expect(readme).toContain(
+      `Settings → ${integrations} → Calendar subscription`,
+    );
+
+    // And the four records must be positively described as present, or "not in
+    // this archive" could simply have gone quiet about them — which is the
+    // failure this whole change exists to remove, one layer up.
+    expect(readme.toLowerCase()).toContain("invitation"); // Allowlist
+    expect(readme.toLowerCase()).toMatch(/usage count|ai usage/); // UserAiUsage
+    // Pinned to the inclusion bullet's own sentence, not to the words "calendar
+    // subscription": the EXCLUSION bullet above carries those words twice, in
+    // "address of your calendar subscription feed" and in the Settings path, so
+    // the short form was satisfied by the paragraph that says the opposite.
+    // Measured — deleting the inclusion bullet outright left this file green.
+    expect(readme.toLowerCase()).toContain(
+      "when your calendar subscription feed was created",
+    ); // CalendarFeed
+    expect(readme.toLowerCase()).toMatch(/active or revoked/); // User.status
+    expect(readme.toLowerCase()).toMatch(/last seen/); // User.lastSeenAt
+    // `revokedAt`. Restored after the rewrite of this block dropped it while the
+    // README's prose still carried it and `privacy/page.test.tsx` still asserted
+    // it — a guard listing three of the four columns its own surface discloses,
+    // which is the partial-list defect this MR exists to remove, committed inside
+    // the guard for it for the third time. Counted per column on purpose.
+    expect(readme.toLowerCase()).toMatch(/access was withdrawn/); // User.revokedAt
+    expect(readme.toLowerCase()).toMatch(/id your sign-in provider issued/); // providerSub
+
+    // The stale claims, asserted absent so the flip cannot be half-done. Each is
+    // a phrase that was TRUE when written and is false now.
+    expect(
+      readme,
+      "the README still says the account records are not in these files",
+    ).not.toMatch(/they are not in these files/i);
+    expect(
+      readme,
+      "the README still tells the reader to ask for the invitation note by hand",
+    ).not.toMatch(
+      /the Privacy Policy at `\/privacy` says how to ask, and the invitation note is included in that/i,
+    );
+    // The overclaim in the other direction. Fixing the omission must not bring
+    // back "everything", because credentials are still withheld.
+    expect(
+      readme,
+      "the README claims to hold everything, which is still not true",
+    ).not.toMatch(/This is everything dlectroflow holds/);
   });
 
   it("explains why VEVENT and not VTODO", () => {
@@ -76,10 +161,18 @@ describe("README.md — the file that explains the archive", () => {
     const guest = exportReadme(
       makeSnapshot({
         account: null,
+        // A guest sandbox has no account, so none of the three account records
+        // exists to hang off one.
+        accountRecords: {
+          invitation: null,
+          aiUsage: null,
+          calendarFeed: null,
+        },
         workspace: {
           id: "ws-guest",
           kind: "guest",
           createdAt: new Date(Date.UTC(2026, 7, 3, 6, 0, 0)),
+          lastSeenAt: new Date(Date.UTC(2026, 7, 3, 8, 0, 0)),
           expiresAt: new Date(Date.UTC(2026, 7, 4, 6, 0, 0)),
         },
       }),

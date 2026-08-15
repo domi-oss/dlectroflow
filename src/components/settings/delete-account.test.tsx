@@ -251,8 +251,20 @@ describe("DeleteAccount — what the confirmation says", () => {
     // sweeps guest workspaces and guest counters only. /privacy has said so
     // since #123 ("Being honest about a gap"), and this dialog must not be the
     // place that quietly starts claiming otherwise.
+    //
+    // `/by hand/i` ALONE could not do that job, and this test is the proof:
+    // the copy it was written against also said "After that they are deleted"
+    // one clause earlier, so the dialog promised an automatic purge AND denied
+    // one, and this assertion passed on the half that was true. A review round
+    // caught it in the prose, not here. So the negative is asserted too — that
+    // is what makes this a guard rather than a spot-check.
     const dialog = await open();
     expect(dialog).toHaveTextContent(/by hand/i);
+    expect(
+      dialog,
+      "the dialog is promising a deletion at the end of the window; nothing performs one",
+    ).not.toHaveTextContent(/after that (they|it) (are|is) deleted/i);
+    expect(dialog).toHaveTextContent(/nothing deletes the content/i);
   });
 
   it("does not rely on colour alone to say the action is destructive", async () => {

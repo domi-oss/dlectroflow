@@ -254,7 +254,7 @@ export function DeleteAccount({
                   it intact. The People panel hit exactly this (see its
                   windowLabel note). */}
               <li>
-                {`Your tasks, steps, notes and settings are kept for ${purgeGraceDays} days, so an accident can be undone — ask whoever runs this instance within that window. After that they are deleted. Being honest about a gap: that last step is done by hand today, not by a scheduled job.`}
+                {`Your tasks, steps, notes and settings are not deleted by this. A recovery window of ${purgeGraceDays} days is recorded, so an accident can be undone — ask whoever runs this instance within it. Being honest about the gap: nothing deletes the content when those ${purgeGraceDays} days are up. It is done by hand today, not by a scheduled job, so if you want it gone, say so and it will be.`}
               </li>
               <li>
                 Your invitation stays on record. It is how your account got

@@ -86,12 +86,59 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  // 2026-08-08, #199 — /privacy only. The stored-data list gains a shopping-list
-  // entry: a new CATEGORY of stored content (Art. 13(1)(c)) plus the retention
-  // sentence that comes with it, since a reader could otherwise infer that
-  // switching the feature off disposes of what it held. `terms` is untouched and
-  // its hash below is unchanged, which is the evidence the two documents are
-  // genuinely disjoint here.
+  // 2026-08-15, the legal-accuracy sweep — /privacy only. Ten measured drifts
+  // between the page and the code, corrected as ONE publication event. Four of
+  // them move the date on their own: a withdrawn Art. 9(2)(a) consent claim that
+  // had no mechanism behind it, two egress paths the page said did not exist
+  // (`Task.notes` into the LLM prompt, and into a scheduled Google Task's
+  // `notes`), a retention sentence promising a purge that nothing runs, and four
+  // newly disclosed categories of stored content. The full reasoning is in
+  // `src/lib/legal.ts`'s docblock rather than duplicated here.
+  //
+  // WHY ONE COMMIT, since the temptation next time will be to split it: this
+  // gate re-records BOTH hashes for whatever text state the tree renders, and
+  // `legal.ts` allows the date to move once per publication. Two MRs each
+  // touching this page would invalidate the other's recorded hash on merge and
+  // bump the date twice for one publication — so a sweep lands together or not
+  // at all.
+  //
+  // `terms` is untouched and its hash below is unchanged, which is the evidence
+  // the two documents are genuinely disjoint here.
+  //
+  // RE-DERIVED FROM THE MERGED TREE, and this is the second recorded time that
+  // mattered rather than a ritual — see the 2026-08-05 note further down for the
+  // first. #85 landed on `main` while this sweep was in flight and it edits the
+  // SAME page (the theme sentence, below Cookies), so the hash this branch
+  // recorded before merging described a text state that will never be published:
+  // this branch's ten corrections without #85's sentence. Neither side's hash is
+  // correct for the merge. The rule generalises — if `main` moves under a branch
+  // that touches a legal page, re-run this test after merging and paste the
+  // result, never carry the pre-merge value across.
+  //
+  // ── 2026-08-14, #85 — /privacy only, and classified COPY, so
+  // LEGAL_EFFECTIVE_DATE was deliberately NOT bumped; it stayed on 2026-08-08. ──
+  // The theme setting became three-state (follow my system / light / dark), so
+  // the sentence naming the stored value as a "light/dark theme choice" no
+  // longer described what can be in `df-theme`. Everything the paragraph
+  // DISCLOSES is unchanged: same key, same location (the browser's local
+  // storage), same category (a UI preference), same retention, same recipients
+  // (none), and the same promise that it never leaves the device. No new
+  // processing exists to disclose either — following the OS is a `matchMedia`
+  // read, which sends nothing anywhere.
+  //
+  // A first draft of that change also added a sentence asserting that reading
+  // the OS setting stores and transmits nothing. It was dropped rather than
+  // pinned: a claimed ABSENCE of processing is the one shape this file's own
+  // docblock records having had to retract (#154's "no log of when it was
+  // fetched", false on both deploy targets), and it earns nothing a reader does
+  // not already get from the sentence above it. That instinct is the same one
+  // the sweep above is correcting ten instances of, from the other end.
+  //
+  // ── the 2026-08-08 state those replaced ──
+  // #199 — /privacy only. The stored-data list gains a shopping-list entry: a
+  // new CATEGORY of stored content (Art. 13(1)(c)) plus the retention sentence
+  // that comes with it, since a reader could otherwise infer that switching the
+  // feature off disposes of what it held.
   //
   // ── the 2026-08-05 state this replaced, kept because the reasoning is reusable ──
   // Two changes shared LEGAL_EFFECTIVE_DATE and they touched DIFFERENT documents,
@@ -118,26 +165,133 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  // ── 2026-08-14, #85 — /privacy only, and classified COPY, so
-  // LEGAL_EFFECTIVE_DATE is deliberately NOT bumped. ──
-  // The theme setting became three-state (follow my system / light / dark), so
-  // the sentence naming the stored value as a "light/dark theme choice" no
-  // longer described what can be in `df-theme`. Everything the paragraph
-  // DISCLOSES is unchanged: same key, same location (the browser's local
-  // storage), same category (a UI preference), same retention, same recipients
-  // (none), and the same promise that it never leaves the device. No new
-  // processing exists to disclose either — following the OS is a `matchMedia`
-  // read, which sends nothing anywhere.
+  // Moved once more within this same sweep, on review, and the reason is worth
+  // keeping. The export-exclusion paragraph listed the account flags as "whether
+  // your account is active and when it was last seen" — naming `User.status` and
+  // `lastSeenAt` but silently dropping `revokedAt` and `providerSub`, which are
+  // also held and also unexported. That is the SAME defect this sweep exists to
+  // correct, committed inside the correction: a disclosure that lists some of
+  // what it holds and reads as if it listed all of it.
   //
-  // A first draft of this change also added a sentence asserting that reading
-  // the OS setting stores and transmits nothing. It was dropped rather than
-  // pinned: a claimed ABSENCE of processing is the one shape this file's own
-  // docblock records having had to retract (#154's "no log of when it was
-  // fetched", false on both deploy targets), and it earns nothing a reader does
-  // not already get from the sentence above it.
-  privacy: "0fe73291b1fd5c8f0725c8df88348118a753834f88d47f2644de98b4accce936",
-  // Untouched by #85, and unchanged — the evidence that this change reaches one
-  // document and not both.
+  // Nothing was published under the earlier hash — this branch has not merged —
+  // so LEGAL_EFFECTIVE_DATE stays on 2026-08-15 rather than accumulating a
+  // correction notice for a version no reader ever saw. Same handling as #154's
+  // within-branch move, and the same lesson: a completeness claim has to be
+  // checked on the defect's own axis (per omitted COLUMN here), not by counting
+  // the categories that were easy to phrase.
+  // And once more, on the third review round, for a COPY change: the health
+  // clause repeated "records why you use it" one sentence after the bold lead-in
+  // had already said it. Redundancy rather than inaccuracy — no disclosure moved,
+  // so the date does not move for it either. Recorded because the alternative is
+  // a hash whose provenance nobody can reconstruct, and because it is the third
+  // re-record inside one branch: two for substance and merge, one for copy.
+  // SIXTH re-record, and the reason is the most instructive one in this file:
+  // THE ROUND-8 FIX INTRODUCED ITS OWN CONTRADICTION. Correcting "shown only to
+  // you" produced "written for you and for nobody else — ... which means the
+  // email provider ... handles it", which asserts and then refutes itself inside
+  // a single sentence. Round 9 caught it.
+  //
+  // The lesson is narrower and more useful than "check the page against itself":
+  // when a fix ADDS a qualifier to an absolute claim, the absolute has to be
+  // RESCOPED, not merely qualified. "Nobody else" plus an exception is a
+  // contradiction; "no other person using this app" plus the processor path is a
+  // disclosure. Re-run the absolutes check on the FIX, not just on the original
+  // prose — a correction is new text and inherits none of the checking done on
+  // what it replaced.
+  //
+  // FIFTH re-record. Round 8 exposed a defect CLASS this sweep had no method
+  // for — page-versus-page rather than page-versus-code — so the same check was
+  // then run deliberately over every absolute claim the branch added, and it
+  // found two more that Duo had not reached:
+  //
+  //   • "your settings are never sent" sat in the SAME PARAGRAPH as "one
+  //     preference", and that preference is `Settings.voice`. A paragraph
+  //     contradicting itself across two sentences, inherited from the pre-#123
+  //     wording and carried through this rewrite. The voice is now named, which
+  //     is a stronger disclosure than the denial it replaces.
+  //   • the health paragraph's "keep them, show them back to you, and break them
+  //     into steps" omitted the calendar and Google Tasks copy that F4 of this
+  //     very MR discloses two sections earlier. "Nothing else is done with it"
+  //     was therefore false against this branch's own new text.
+  //
+  // The method is the lesson: grep the added prose for absolutes — only, never,
+  // nothing, nobody — and check each against the OTHER sections, not just the
+  // code. Nine of the ten original findings were page-versus-code, which is why
+  // this class went unexamined until a reviewer walked into it.
+  //
+  // Fourth re-record, for the self-contradiction round 8 DID find:
+  // the roll-up narrative was described as "shown only to you" while
+  // "Who else is involved" discloses that Resend receives the round-up email
+  // containing that same narrative. One section's confidentiality claim against
+  // another section's recipient disclosure — the exact defect class this branch
+  // exists to remove, inside the paragraph the branch added.
+  //
+  // Worth keeping as the clearest lesson of the whole sweep: the new prose was
+  // checked against the CODE, thoroughly, and not against the REST OF THE PAGE.
+  // A page this long is its own consistency surface, and a recipient named in one
+  // section falsifies an "only you" written in another. Nothing was published
+  // under the earlier hashes, so the date stays 2026-08-15 for all four.
+  //
+  // SEVENTH re-record, and the only one in this branch where the CODE moved rather
+  // than the prose. The export now includes the four account records the page had
+  // been describing as withheld — the `Allowlist` invitation row with its private
+  // note, the `UserAiUsage` count, the `CalendarFeed` timestamps and six columns of
+  // `User` — so the F6 paragraph was rewritten to describe the new behaviour.
+  //
+  // The instructive part is which way round the defect was. **The page was
+  // accurate and the code was wrong.** Every other finding in this sweep is a page
+  // claiming something the code does not do; this one is a page honestly
+  // disclosing a gap, where closing the gap was the better answer than describing
+  // it more precisely. An invitation note is free text somebody else wrote about
+  // the reader, and "ask and I will send it by hand" is a worse discharge of
+  // Art. 15 than putting it in the file they already downloaded.
+  //
+  // So the lesson for the next sweep is that "does the page match the code?" is
+  // only half the question. The other half is "and is the behaviour the page
+  // accurately describes the RIGHT behaviour?" — which no amount of
+  // page-versus-code checking can raise, because that check passes.
+  //
+  // Substance in both directions at once, which is why it would move the date on
+  // its own: a widened scope for a right the reader exercises, AND the withdrawal
+  // of a published statement that things were deliberately left out. The date
+  // stays 2026-08-15 on the same reasoning as the six re-records above — nothing
+  // has been published under any of these hashes, because this branch has not
+  // merged.
+  //
+  // `terms` is untouched again, which is what makes the two documents' hashes
+  // independent evidence rather than two copies of one claim.
+  // EIGHTH re-record, and the cheapest possible lesson: the seventh shipped a
+  // Settings path that does not exist. The new export paragraph told readers their
+  // calendar feed address was in "Settings → Calendar". There is no Calendar
+  // section — `src/lib/section-nav.ts` declares `{ id: "settings-integrations",
+  // heading: { text: "Integrations" } }` and the control's own label is "Calendar
+  // subscription" (`integrations-panel.tsx`'s `FEED_NAME`, and the heading
+  // `calendar-feed.tsx` renders). Corrected to the real path on all three
+  // surfaces.
+  //
+  // **This MR's own defect class, committed by the MR, in the paragraph closing
+  // it.** Nine of the ten original findings were page-versus-code; so was this,
+  // and it survived a full page-versus-page pass because that pass compared the
+  // new prose against the OTHER SECTIONS and against the sibling surfaces — which
+  // all agreed, because all three carried the same wrong string. **Three surfaces
+  // agreeing is not evidence when one hand wrote all three.**
+  //
+  // The durable fix is not the corrected string, it is where the string now comes
+  // from: all three copy tests DERIVE the section name from `SETTINGS_SECTIONS`
+  // via `sectionLabel(sectionById("settings-integrations"))` instead of repeating a
+  // literal. A literal assertion cannot tell a real path from an invented one, and
+  // that is exactly how a test suite stays green while a page lies. So the rule for
+  // the next sweep: **any UI path, section name or control label asserted in copy
+  // is checked against the component that renders it, and pinned to that component's
+  // own source of truth wherever one exists.**
+  //
+  // COPY, not substance: the paragraph discloses the same exclusion, the same
+  // recipient (none) and the same retention — it corrects a wayfinding instruction.
+  // LEGAL_EFFECTIVE_DATE stays 2026-08-15, and nothing has been published under
+  // any of the eight hashes because the branch has not merged. `terms` unchanged.
+  privacy: "f555d63e514a066aef4f054d4dcf90d632ce9f818e0adcd1f7653d3ee07abc83",
+  // Untouched by both #85 and this sweep, and unchanged — the evidence that
+  // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 

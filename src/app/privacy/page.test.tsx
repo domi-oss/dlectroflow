@@ -8,6 +8,7 @@ import {
   LEGAL_CONTACT_EMAIL,
   formatEffectiveDate,
 } from "@/lib/legal";
+import { sectionById, sectionLabel } from "@/lib/section-nav";
 import PrivacyPage, { metadata } from "./page";
 
 afterEach(cleanup);
@@ -18,6 +19,41 @@ function pageText(): string {
   // Collapse whitespace: JSX splits sentences across lines and interpolations,
   // so raw textContent is full of incidental newlines and double spaces.
   return container.textContent!.replace(/\s+/g, " ");
+}
+
+/**
+ * ONE paragraph of the page, found by a lead-in only that paragraph carries, and
+ * normalised the same way as {@link pageText}.
+ *
+ * **The scoping is itself the assertion.** The export disclosure's per-item
+ * checks used to run against `pageText()`, and every phrase in them also appears
+ * in "3. If you have an account" — the section that discloses what is HELD, a
+ * thousand lines up. Measured on this branch: deleting SIX of the export
+ * paragraph's eight claims (the invitation record, the private note, the AI usage
+ * count, the feed timestamps, active-or-revoked and last-seen) left all 51 cases
+ * in this file green, because the other section satisfied them one by one. Only
+ * the two phrases that appear nowhere else — `access was withdrawn` and
+ * `account id GitLab issued` — were doing any work.
+ *
+ * "Two sections of one page agreeing" is the same false evidence as three
+ * surfaces agreeing when one hand wrote all three, which is the defect this
+ * sweep exists to correct. `legal-fingerprint.test.tsx` does catch the text
+ * change, but it says "the text moved, re-record the hash" — not "you deleted a
+ * disclosure", so it cannot be the guard for whether a claim is still made.
+ */
+function paragraphWith(marker: string): string {
+  const { container } = render(<PrivacyPage />);
+  const found = Array.from(container.querySelectorAll("p")).filter((el) =>
+    (el.textContent ?? "").includes(marker),
+  );
+  // A helper matching nothing would make every assertion below vacuous, and one
+  // matching two paragraphs would let either satisfy them — the exact failure
+  // this scoping removes, so it is asserted rather than assumed.
+  expect(
+    found,
+    `no single paragraph of /privacy contains "${marker}"`,
+  ).toHaveLength(1);
+  return found[0].textContent!.replace(/\s+/g, " ");
 }
 
 describe("Privacy Policy page: structure", () => {
@@ -388,8 +424,228 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(text).toMatch(/The export is the exception/i);
   });
 
-  it("admits revocation does not auto-delete content", () => {
-    expect(pageText()).toMatch(/is\s+not\s+deleted automatically today/i);
+  it("admits nothing auto-deletes an account, in both directions", () => {
+    // This asserted the literal phrase "is not deleted automatically today",
+    // which covered only the REVOKED path — and the same bullet simultaneously
+    // said a freeze "marks its content to be removed 30 days later", so the
+    // page described an automatic purge and its absence in consecutive
+    // sentences and this test was satisfied by the half that was true.
+    //
+    // Pinned as substance now, and two-sided, because the two failures are
+    // opposite: understating leaves a reader who wanted erasure believing it
+    // happened, and overstating leaves a reader waiting 30 days for a job that
+    // does not exist. `freezeAccount` writes `User.purgeAfter` and nothing
+    // reads it — `prisma/scheduled-purge.ts` sweeps guest workspaces and guest
+    // counters only, and `deleteAccount` has no caller outside its own tests.
+    // When #159 ships, this test changes with the page.
+    const text = pageText();
+    expect(text).toMatch(/not deleted automatically/i);
+    expect(text, "the page must say who does the deletion").toMatch(/by hand/i);
+    expect(
+      text,
+      "the page must cover the self-deleted path too, not only revocation",
+    ).toMatch(/whether you deleted the account yourself or I revoked it/i);
+    // The old overclaim, in either of its shapes. A recovery window is fine to
+    // state; a scheduled removal at the end of it is not, because none runs.
+    expect(
+      text,
+      "the page is claiming a scheduled purge that does not exist",
+    ).not.toMatch(/marks? its content to be removed/i);
+    // Deliberately NOT a blanket ban on "deleted after 30 days": that sentence
+    // is true and load-bearing three times elsewhere on this page — the access
+    // logs, the guest IP hash and the backups all genuinely age out on a job.
+    // Only ACCOUNT CONTENT lacks one, so the assertion is scoped to it.
+    expect(
+      text,
+      "account content is claiming an automatic 30-day removal",
+    ).not.toMatch(/content[^.]{0,60}(deleted|removed)[^.]{0,20}30 days/i);
+  });
+
+  it("discloses the task note as free text sent to the LLM (#179)", () => {
+    // The finding that motivated this whole revision. From #123 the page said
+    // the breakdown context "contains no free text"; #179 made that false on
+    // 2026-08-08 by selecting `Task.notes` in `breakdown-context.ts`, and
+    // `buildNoteBlock` quotes it verbatim into the prompt at up to
+    // MAX_NOTE_CONTEXT_CHARS. The claim survived for a week because it is a
+    // NEGATIVE one — nothing fails when a "what is sent" list grows a gap.
+    //
+    // So both halves are pinned: the disclosure must be present, AND the
+    // unqualified absence-claim must not come back. Widening that `select`
+    // again should red this test, not ship quietly.
+    const text = pageText();
+    expect(text).toMatch(/your note on the task/i);
+    expect(text, "the 600-character clamp is the bound stated").toMatch(
+      /600 characters/i,
+    );
+    expect(
+      text,
+      "notes on other tasks are NOT selected, and the page should say so",
+    ).toMatch(/notes on other tasks/i);
+    expect(
+      text,
+      'the page is claiming "no free text" again while Task.notes is selected',
+    ).not.toMatch(/contains no free text|no free text,/i);
+  });
+
+  it("does not claim Article 9 explicit consent for health data in a note", () => {
+    // #123 shipped "explicit consent — Article 9(2)(a) UK GDPR" with nothing
+    // behind it: no field asks for health data, so no permission was ever
+    // sought, so there was no consent to be explicit about. Grepping `src/`
+    // for a gate, an acknowledgement or a warning returned only the page's own
+    // prose.
+    //
+    // The owner's decision was to state the true position rather than build a
+    // consent mechanism. This test is the guard on that decision — if the
+    // Art. 9(2)(a) claim is ever reintroduced, it must arrive WITH a mechanism,
+    // and reintroducing it should therefore cost a deliberate red build.
+    const text = pageText();
+    // The whole Article 9 family, not just the (2)(a) literal — any Art. 9
+    // condition asserted here would need a mechanism behind it, and none of
+    // them has one.
+    expect(text).not.toMatch(/article\s*9/i);
+    // The old sentence's own shape. A blanket ban on "explicit consent" would
+    // be wrong: the replacement prose USES the phrase to refuse it, which is
+    // the point, so what is forbidden is the affirmative claim.
+    expect(text).not.toMatch(/sharing them knowingly and explicitly/i);
+    expect(text).not.toMatch(/explicit consent[^.]{0,40}(permits|allows) me/i);
+    // And the honest replacement must actually be there, so the paragraph
+    // cannot be deleted into silence instead.
+    expect(text).toMatch(/not going to call that consent/i);
+    expect(text).toMatch(/no field for it/i);
+  });
+
+  it("says the four account records are IN the download, with credentials as the only exclusion", () => {
+    // `docs/legal.md`: /privacy and `src/lib/export/readme.ts` are one
+    // disclosure read in two places, and "those two wordings move together", so
+    // this test and `readme.test.ts`'s equivalent move together too.
+    //
+    // POLARITY FLIPPED. This test previously asserted that the page NAMED four
+    // withheld bookkeeping categories, counted per omitted COLUMN because the
+    // paragraph had shipped a partial list twice — once as the original F6
+    // defect, and once inside its own correction, when it named `status` and
+    // `lastSeenAt` while dropping `revokedAt` and `providerSub`. The owner's
+    // decision was to INCLUDE all four rather than keep disclosing the gap, so
+    // the accurate page now says they are in the download and the assertions
+    // invert. The per-column counting is kept, because a partial list is just as
+    // wrong in this direction: a page claiming three of four columns are included
+    // reads as if all of them are.
+    const text = pageText();
+    // Scoped to the two paragraphs that actually carry these claims rather than
+    // to the whole page. What running them against `pageText()` concealed, and
+    // the measurement, are in `paragraphWith`'s docblock.
+    const heldBack = paragraphWith("held back, and all three are keys");
+    const included = paragraphWith("records kept");
+
+    // The exclusion is credentials, and there are THREE — the calendar feed's
+    // token joins the two already named, because exporting the row's timestamps
+    // is what made its token an explicit decision rather than an absence.
+    // Both of these matched elsewhere on the page unscoped: "OAuth tokens" in the
+    // encryption-at-rest paragraph, and "API key" in six other places.
+    expect(heldBack).toMatch(/OAuth tokens/i); // GoogleAuth
+    expect(heldBack).toMatch(/API key/i); // User.llmKeyEnc
+    // CalendarFeed.token. The row IS exported, so its one withheld column has to
+    // be accounted for on the page rather than left as an unexplained absence —
+    // and it is the only one of the three stored in plain text.
+    expect(heldBack).toMatch(/secret address of your calendar feed/i);
+    // Where to get it, since the page tells the reader they lose nothing by its
+    // absence. That claim is only true because the live URL is one click away —
+    // `calendar-feed.tsx` renders it in a readOnly input with a copy button, so
+    // it is re-copyable rather than shown once.
+    //
+    // The section name is DERIVED from `SETTINGS_SECTIONS`, not repeated as a
+    // literal, and that is the whole point of this assertion. The first draft of
+    // this MR wrote "Settings → Calendar" into all three surfaces — a section
+    // that does not exist — and three literal assertions agreeing with three
+    // wrong strings is exactly how a page and a tree drift apart while the suite
+    // stays green. Renaming the section now reds the copy.
+    const integrations = sectionLabel(
+      sectionById("settings-integrations"),
+      "plain",
+    );
+    expect(heldBack).toContain(
+      `Settings → ${integrations} → Calendar subscription`,
+    );
+    // The label is voice-independent (`{ text: "Integrations" }`, not a `{ key }`),
+    // which is what makes it safe to hardcode a path in copy that every voice
+    // reads. `settings-account` IS keyed, so this check is not redundant.
+    expect(sectionLabel(sectionById("settings-integrations"), "playful")).toBe(
+      integrations,
+    );
+    expect(
+      heldBack,
+      "the page must say the three keys are the WHOLE exclusion, not some of it",
+    ).toMatch(/Nothing else is held back/i);
+
+    // Each of the four, positively described as included, and read from the
+    // inclusion paragraph ALONE. Five of these seven phrases also occur in "3. If
+    // you have an account", which discloses what is HELD — so against the whole
+    // page they were reporting that section's coverage, not this one's. The feed
+    // one is pinned to the timestamps claim rather than to the bare words, which
+    // the exclusion sentence carries too.
+    expect(included).toMatch(/invitation record/i); // Allowlist
+    expect(included).toMatch(/AI usage count/i); // UserAiUsage
+    expect(included).toMatch(/when your calendar feed was created/i); // CalendarFeed
+    expect(included).toMatch(/active or revoked/i); // User.status
+    expect(included).toMatch(/last seen/i); // User.lastSeenAt
+    expect(included).toMatch(/access was withdrawn/i); // User.revokedAt
+    expect(included).toMatch(/account id GitLab issued/i); // User.providerSub
+
+    // The note specifically, because it is the one field that is data ABOUT the
+    // reader written by somebody else, and the reason the set was worth including
+    // rather than continuing to offer by hand.
+    // Was `/note/i` against the whole page — a page that says "your note on the
+    // task" and "notes on other tasks" elsewhere, so it could not fail. Deleting
+    // the invitation-note claim outright left this file green.
+    expect(
+      included,
+      "the page must say the invitation note itself is in the download",
+    ).toMatch(/private note whoever invited you wrote/i);
+
+    // The stale claims. Each was true when written and is false the moment the
+    // code ships, so their absence is asserted rather than left to review.
+    expect(
+      text,
+      "the page still says some things are deliberately left out of the export",
+    ).not.toMatch(/Some things are deliberately left out/i);
+    expect(
+      text,
+      "the page still calls the four records account bookkeeping withheld from the export",
+    ).not.toMatch(/The rest is account bookkeeping/i);
+    expect(
+      text,
+      "the page still offers to send the records by hand, which is now redundant",
+    ).not.toMatch(/I will send any of it by hand/i);
+  });
+
+  it("discloses the three stored-content categories added by this sweep (#252, F7/F8)", () => {
+    // `User.displayName`, `FocusPlaylist.name` and `BreakdownTurn.message` were
+    // all stored and none was disclosed. The last is the instructive one: it was
+    // already NAMED in the Portability bullet as "the coaching conversations"
+    // while never appearing in "What I collect" — the page describing a thing it
+    // had not admitted to holding, which is why a Portability mention is not a
+    // substitute for a collection disclosure and this test asserts the latter.
+    const text = pageText();
+    expect(text).toMatch(/A display name/i);
+    expect(text).toMatch(/Focus playlists/i);
+    expect(text).toMatch(/Coaching conversations/i);
+    // Each needs its substance, not just its heading, or the bullet could be
+    // reduced to a label and still pass.
+    expect(text).toMatch(/instead of your GitLab username/i);
+    expect(text).toMatch(/which tracks you put in it/i);
+    expect(text).toMatch(/step lists it proposed back/i);
+  });
+
+  it("says a note is copied into Google Tasks when a step is scheduled (#44)", () => {
+    // `encodeReclaim` writes `buildScheduleNote`'s output — task note, step
+    // note, a prompt line and a focus URL — into the Google Task's `notes`
+    // field, and `patchGoogleTask` sends it. The page described only a title
+    // and a due date, so a reader could not have known a note leaves the app
+    // this way. The subscription FEED is deliberately different and carries
+    // titles and times only (`buildFeedIcs`); the assertion below is about the
+    // written Google Task, and the feed's own promise is pinned elsewhere.
+    const text = pageText();
+    expect(text).toMatch(/notes field/i);
+    expect(text).toMatch(/copied into your Google Tasks list/i);
   });
 
   it("admits the feed token reaches the access log, and does not claim otherwise (#154)", () => {

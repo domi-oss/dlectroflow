@@ -152,6 +152,7 @@ thing in the left column, the pages are wrong until you fix them.
 | **Backup restore granularity** (whole-database dumps, restored whole — there is no per-workspace or per-user restore path anywhere in `charts/dlectroflow/templates/backup.yaml` or the runbook) | The whole "no per-person restore, and nothing brings back a deletion" clause. If a per-person restore ever becomes something the operator is willing to offer, **that clause becomes false in the reassuring direction** — a reader would have been told to keep their own copy on a premise that no longer holds | Terms → *Your data* → *What the backups can and cannot do* (#164) |
 | **Any model gaining a soft-delete column** (today `BrainDumpItem`, `Task` and `Step` are hard `deleteMany`/`delete` — see `src/app/actions/braindump.ts`, `src/app/actions/breakdown.ts`) | "delete a capture, a task or a step and it is gone from the app there and then". A recycle bin would make that sentence wrong, and it is the sentence people act on | `prisma/schema.prisma`; Terms → *Your data* (#164) |
 | **The self-service export existing, and living in Settings** (`GET /api/export`, surfaced by `ExportData` in Settings → Account) | "You can download a copy of everything from Settings" — the *only* sentence on either page that tells a reader they can act on their own data without emailing anybody. Move the control and the sentence is a wild goose chase; remove it and the sentence is false. Both pages name it, so both move together. A test in `src/app/terms/page.test.tsx` renders the real control and asserts its `href`, so this row has a build failure behind it rather than only a reminder | `src/app/api/export/route.ts`, `src/components/settings/export-data.tsx`, `src/components/settings/account-panel.tsx`; Terms → *Your data* (#164); Privacy → *Your rights* → Access, Portability (#129) |
+| **What the export CONTAINS, and what it holds back** (`collectExport`'s reads, and the `select` on each) | **Three wordings move together, and this row exists because the table had none that fired on this.** The row above covers the export *existing*; nothing covered its *scope*, which is how the pages came to spend months accurately disclosing four records as withheld while the right answer was to include them. Any model or column added to or removed from the export changes /privacy's exclusion paragraph, the archive's own `README.md` and the in-app Help page — and Help is the one that gets forgotten, because it is not a legal page. **Anything held back must be nameable as a KEY**, because that is now the published claim; a new non-credential omission falsifies "nothing else is held back" on all three. There are build failures behind it on **all three** surfaces: `privacy/page.test.tsx`, `readme.test.ts` and `help/help.test.tsx` each assert per record and per *disclosed* `User` column, and each derives the Settings path from `SETTINGS_SECTIONS` rather than repeating it as a literal. `model-coverage.test.ts` is the one that covers **every** `User` column, from `Prisma.dmmf`, because the prose surfaces deliberately do not enumerate `llmProvider` or `purgeAfter` — naming `purgeAfter` in copy would re-assert the purge that F2 of this same MR removed | `src/lib/export/collect.ts`, `src/lib/export/types.ts`, `src/lib/export/readme.ts`, `src/lib/export/__tests__/model-coverage.test.ts`; Privacy → *Your rights* → *How that actually works here*; `src/app/(app)/help/page.tsx` |
 | **Guest purge schedule** (03:30 UTC) | The stated purge time | `charts/dlectroflow/values.yaml` → `purge.schedule`; Privacy → *How long I keep it* |
 | **Guest TTL** (`GUEST_SANDBOX_TTL_HOURS`, default 24) | "about a day" in three places, and the `df_guest` cookie lifetime | Privacy → *Cookies*, *How long I keep it*; Terms → *Who can use it* |
 | **LLM provider** (`LLM_PROVIDER`, default `anthropic`) | Who the AI processor is, and the international-transfer section. **A switch to a non-UK provider is a new transfer disclosure**; a switch to a self-hosted model may remove one | Privacy → *Sending your text to an AI provider*, *Data that leaves the UK* |
@@ -162,7 +163,7 @@ thing in the left column, the pages are wrong until you fix them.
 | **A lifecycle path that stops revoking at Google** (#126 made freeze and delete revoke first; `tryDisconnectGoogle` is the one wrapper both use) | The "if your access here is withdrawn, the grant goes with it" paragraph. **Dropping the revoke makes it wrong in the reassuring direction** — a live grant its holder cannot withdraw through the product is the Art. 7(3) problem #126 fixed | `src/lib/google.ts` → `disconnectGoogle` / `tryDisconnectGoogle`, `src/app/actions/people.ts` → `revokePerson`, `src/lib/account-lifecycle.ts` → `deleteAccount`; Privacy → *Tokens, and how to disconnect* |
 | **Anything deleting a `User` outside `deleteAccount`** | Same paragraph, from the other direction: the FK cascade drops the credential without telling Google, so a second delete path silently reintroduces the gap. `src/lib/account-lifecycle.test.ts` fails the build if one appears | `src/lib/account-lifecycle.ts`; Privacy → *Tokens, and how to disconnect*, *How long I keep it* |
 | **The calendar subscription feed** (#154 — `CalendarFeed.token`, `GET /api/ics/feed/[token]`) | Whether the recipient description still matches what the feed carries. It is the one recipient that is **not** a processor — the reader picks the calendar app and there is no contract with it — so it reads differently from Anthropic's or Resend's row on purpose. Widening what `buildFeedIcs` selects is a new disclosure, not a feature tweak | `src/lib/calendar-feed.ts` → `buildFeedIcs`; Privacy → *What I collect, and why*, *Who else is involved*, *How long I keep it* |
-| **Where the feed token travels, and how long the logs keep it** (#154 — the token is in the request PATH, so both front ends log it: `docker/Caddyfile`'s `log` block, and `charts/dlectroflow/templates/ingress.yaml`, which sets no `log-format` override and so inherits ingress-nginx's default containing `$request`) | The claim that the app writes no fetch log **and** the caveat that the web server does, plus the **30 days** stated in three places on the page. The first draft of this feature said there was "no log of when it was fetched", which was false on both deploy targets — so this row exists because the page has already been wrong here once. Moving the token to a header or an `Authorization` scheme, adding a log-format override or a path exclusion, or changing `LOG_RETENTION_DAYS`, each make the current wording wrong; a **shorter** window makes it wrong in the reassuring direction, which is the one nobody reports | `docker/Caddyfile`, `charts/dlectroflow/templates/ingress.yaml`, `scripts/check-log-retention.sh` → `LOG_RETENTION_DAYS`, `docs/deploy-runbook.md` §15–§16; Privacy → *What I collect, and why*, *How it is protected*, *How long I keep it* |
+| **Where the feed token travels, and how long the logs keep it** (#154 — the token is in the request PATH, so both front ends log it: `docker/Caddyfile`'s `log` block, and `charts/dlectroflow/templates/ingress.yaml`, which sets no `log-format` override and so inherits ingress-nginx's default containing `$request`) | The claim that the app writes no fetch log **and** the caveat that the web server does, plus the **30 days** stated in three places on the page. The first draft of this feature said there was "no log of when it was fetched", which was false on both deploy targets — so this row exists because the page has already been wrong here once. Moving the token to a header or an `Authorization` scheme, adding a log-format override or a path exclusion, or changing `LOG_RETENTION_DAYS`, each make the current wording wrong; a **shorter** window makes it wrong in the reassuring direction, which is the one nobody reports. **The three places on the page are** *What is not collected*, *Optional connections* (the feed-token caveat) and *How long I keep it* — the number is published three times, so a change is three edits, not one. This row is the ONLY place that fact is recorded: it used to be duplicated as a "still to confirm" bullet, which was wrong twice over — the period is code-enforced rather than awaiting anybody's confirmation, and a fact kept in two places drifts | `docker/Caddyfile`, `charts/dlectroflow/templates/ingress.yaml`, `scripts/check-log-retention.sh` → `LOG_RETENTION_DAYS` (enforced by the `log-retention` hygiene test), `docs/deploy-runbook.md` §15–§16; Privacy → *What I collect, and why*, *How it is protected*, *How long I keep it* |
 | **The People panel selecting anything new** | "counts, never content", and "does not even disclose whether you have one" for Google | `src/lib/people.ts` (`select` blocks); Privacy → *Connecting Google Tasks*, *How it is protected* |
 | **Cookies** (six, all strictly necessary) | The cookie list AND the "no cookie banner" conclusion. **Adding any non-essential cookie means a consent mechanism, not a wording tweak** | `src/lib/auth/session.ts`, the OAuth `start` routes; Privacy → *Cookies* |
 | **Adding an analytics/telemetry dependency** | Invalidates "there is no analytics package in the codebase at all" — which the policy invites readers to verify | Privacy → *What is not collected* |
@@ -170,7 +171,9 @@ thing in the left column, the pages are wrong until you fix them.
 | **Resend / round-up email** | Whether Resend is a live recipient and a US transfer | `src/lib/email.ts`; Privacy → *Who else is involved*, *Data that leaves the UK* |
 | **Sign-in providers** (GitLab only, `read_user`) | "GitLab is the only sign-in method", and what is stored from the provider | `src/lib/auth/providers.ts`; Privacy → *If you have an account* |
 | **What switching shopping-list mode off does** (#199 — `updateShoppingList` writes only `Settings.shoppingList`, so the `ShoppingItem` rows survive the switch) | The sentence saying the toggle "hides the list without deleting it". Making the switch destructive would make it wrong in the **un**reassuring direction — a reader told their list survives would lose it — which is the direction nobody discovers until it has happened to them. `src/app/actions/settings.shopping.test.ts` asserts the action writes nothing but that one column, so this row has a build failure behind it rather than only a reminder | `src/app/actions/settings.ts` → `updateShoppingList`; Privacy → *What I collect, and why* |
-| **New Prisma model holding personal data** | The *What I collect* list. An incomplete notice is the failure mode here | `prisma/schema.prisma`; Privacy → *What I collect, and why* |
+| **New Prisma model _or field_ holding personal data** | The *What I collect* list. An incomplete notice is the failure mode here. **A new FIELD counts, and this row said "model" until #252's `User.displayName` walked straight through it** — a column added to an existing model is exactly as much of an Art. 13(1)(c) disclosure as a new table, and it is the easier of the two to add without noticing. `FocusPlaylist.name` and `BreakdownTurn.message` went undisclosed the same way | `prisma/schema.prisma`; Privacy → *What I collect, and why* |
+| **A free-text column reaching the LLM prompt** | *What is sent* / *What is not sent* under Privacy → *Sending your text to an AI provider*. `src/lib/breakdown-context.ts` is an egress boundary whose `select` is otherwise numbers and flags, so the page has twice been able to say "no free text" while one column was being quoted verbatim into the prompt. **Widening that `select` to any text column is a new disclosure, not a prompt-quality tweak** — and the sentence to check is the negative one, because it is the one that reads as a guarantee | `src/lib/breakdown-context.ts` (the `select`), `src/lib/breakdown.ts` → `buildNoteBlock` / `MAX_NOTE_CONTEXT_CHARS`; Privacy → *Sending your text to an AI provider* |
+| **A free-text column reaching a scheduled Google Task or an `.ics` download** | Privacy → *Connecting Google Tasks* → *What it is used for*, which describes what the `notes` field carries. `buildScheduleNote` composes the task note, the step note, a prompt line and a focus URL, and `encodeReclaim` writes the result into the Google Task's `notes` — so a note typed here is **copied into the reader's Google Tasks list**. The subscription **feed** is deliberately different and carries titles and times only (`buildFeedIcs`); keep the two apart, because the page makes a promise about the feed that would become false if the note were ever added to it | `src/lib/scheduling/note.ts` → `buildScheduleNote`, `src/lib/scheduling/encode-reclaim.ts`, `src/app/actions/ics-schedule.ts`, `src/lib/calendar-feed.ts` → `buildFeedIcs`; Privacy → *Connecting Google Tasks*, *Who else is involved* |
 | **Controller identity** | `CONTROLLER_NAME` **and** the Google consent screen, which must match | `legal.ts`; both pages |
 | **The project ever charging for anything** (a paid tier, donations tied to features, any trade) | The non-commercial framing on both pages, the "not a sale / not a customer" clause, the liability rationale, CRA/UCTA trader status, and the ICO fee answer. See *Who the controller is* above — this reopens all of it | both pages; `docs/legal.md` |
 
@@ -180,7 +183,12 @@ Easy to miss when auditing "what leaves the box", because only the first is
 obvious:
 
 1. `src/app/api/breakdown/route.ts` — the breakdown itself (task title, current
-   proposed steps, your free-text guidance).
+   proposed steps, your free-text guidance, **and the note on the task being
+   broken down** — `Task.notes`, selected by `src/lib/breakdown-context.ts` and
+   rendered verbatim into the prompt by `buildNoteBlock`, clamped to
+   `MAX_NOTE_CONTEXT_CHARS` = 600 characters. Landed with #179; it is the one
+   free-text column this module selects, and it is easy to miss because the
+   `select` around it is otherwise all numbers and flags).
 2. `src/lib/rollup.ts` — the end-of-day narrative (up to 5 completed step texts,
    up to 3 carry-over texts). Signed-in accounts only.
 3. `src/app/actions/focus.ts` → `proposeNewEstimate` — one step's text plus its
@@ -239,11 +247,41 @@ asserts each honest wording is still present.
 > *Delete my account*, `deleteOwnAccount` in `src/app/actions/account.ts`) and #129
 > made access and portability one (`GET /api/export`). /privacy names both.
 >
-> The export's caveat is what it withholds: the Google OAuth tokens and any stored
-> LLM API key. Both are credentials, both are named on /privacy AND in the
-> archive's own `README.md` (`src/lib/export/readme.ts`), and those two wordings
-> move together — `readme.test.ts` asserts the archive states the Google omission,
-> and `page.test.tsx` asserts /privacy does.
+> The export's caveat is what it withholds, and as of the legal-accuracy sweep it
+> is **three keys and nothing else**: the Google OAuth tokens, any stored LLM API
+> key, and the calendar feed's capability token. All three are named on /privacy,
+> in the archive's own `README.md` (`src/lib/export/readme.ts`) and on the in-app
+> Help page — **three wordings that move together**, and `readme.test.ts` plus
+> `page.test.tsx` assert two of them per surface: that the keys are named, and that
+> the account records are described as INCLUDED.
+>
+> **The list used to be longer, and the correction is the instructive part.** Until
+> that sweep the pages named the two credentials *and* four kinds of "account
+> bookkeeping" held but not exported — the `Allowlist` invitation row including the
+> private note whoever invited you wrote on it, the `UserAiUsage` count, the
+> `CalendarFeed` timestamps, and four columns of `User`. The pages were accurate.
+> The export was the thing that was wrong, and the decision was to fix the export
+> rather than keep disclosing the gap, because an invitation note is somebody
+> else's words about the reader and offering it "on request" is a worse answer than
+> putting it in the file.
+>
+> **`CalendarFeed` is the one to read before editing any of this.** Its ROW is
+> exported and its `token` COLUMN is not, so the credential rule is applied at two
+> different grains and the three wordings have to keep that straight: a reader who
+> finds feed timestamps in their archive and no address must be told why, or the
+> hole reads as an oversight. It is also the only one of the three keys stored in
+> plain text (see the note on the model in `prisma/schema.prisma`), so it is the
+> one where "a copy in a file you forward" is immediately usable.
+>
+> **Why the export could omit three whole tables with a guard in place.**
+> `src/lib/export/__tests__/model-coverage.test.ts` exists to fail when the export
+> forgets a model, and it could not see any of them: its predicate was `declares
+> workspaceId`, and all three hang off `User`. It now has a second arm for models
+> with a relation to `User`. Two consequences worth knowing before touching it —
+> the arm is a RELATION and not a `userId` column, because `Allowlist` links
+> through `claimedById`; and `CalendarFeed`/`UserAiUsage` are read through the
+> modules `scoping.harness.test.ts` pins rather than by `collect.ts`, because those
+> two guards otherwise give contradictory orders about the same string.
 >
 > What it does **not** do is destroy anything. It goes through the same
 > `freezeAccount` the owner's Revoke goes through, so the automatic-purge row
@@ -404,8 +442,25 @@ reason is architectural rather than procedural:
 `GET /users/@me/lists`, which returns task-**list** names so the right list can
 be found to write into. No task is ever read back. There is therefore no
 Workspace user data held in the app that *could* be forwarded to a model.
-`src/lib/breakdown-context.ts` independently pins a `select` of numeric, enum,
-boolean and date columns and never selects `Step.text` or `BrainDumpItem.text`.
+`src/lib/breakdown-context.ts` independently pins a `select` that is otherwise
+numeric, enum, boolean and date, and never selects `Step.text` or
+`BrainDumpItem.text`. It does select one free-text column — `Task.notes`, for the
+single task being broken down (#179) — which is text the person typed **here**,
+not anything read from Google.
+
+⚠️ **Do not read that column list as a list of what is SENT.** They are different
+sets and conflating them has already produced one review finding. The `select`
+reads several **date** columns (`createdAt`, `freshenedAt`, `snoozedUntil`,
+`completedAt`, `breakdownRequestedAt`, `Streak.lastActiveWorkday`); none of them
+reaches the prompt. `BreakdownContext` is the egress contract, and it carries
+counts, one enum, one boolean and the note — the dates are reduced to
+`activeToday` and to bucket counts inside the gather, and `buildContextBlock`
+renders no date at all. That is why /privacy can say **"no dates"** under *What is
+not sent* while this paragraph lists date columns: the page describes egress, this
+paragraph describes the query. If you widen `BreakdownContext`, the page's claim
+is what moves — the `select` is the wrong thing to check it against. The Limited Use conclusion above is unaffected: it
+rests on there being no Google data held in the app to forward, and one read of
+task-**list** names is still the only read the integration makes.
 
 Two consequences that save work if this comes round again:
 
@@ -466,7 +521,10 @@ behind them:
   safeguards (standard contractual clauses + the UK International Data Transfer
   Addendum) for Anthropic and Resend. Confirm the DPA is accepted on each account
   and keep a copy — a reader is entitled to ask to see the safeguards.
-- **Access-log retention.** The pages describe web-server access logs using the
-  "criteria" formulation rather than a fixed period, because the platform's log
-  retention is not set in this repo. If you pin it (GKE/Cloud Logging retention),
-  state the number instead — it is the stronger disclosure.
+
+Access-log retention **used to be a bullet here** and is deliberately no longer
+one: the pages state a fixed **30 days**, `scripts/check-log-retention.sh` defaults
+it and the `log-retention` hygiene test enforces it, so it is a settled fact with a
+build failure behind it rather than an assertion awaiting somebody's confirmation.
+It lives in the feed-token row of *Facts the pages assert about the running system*
+above, and only there.
