@@ -146,7 +146,17 @@ export const AUTOMERGE_FAILURE_LOG_MESSAGES = [
  */
 export const PROBLEM_LOG_LEVELS = ["warn", "error", "fatal"] as const;
 
-/** Renovate's `newLogLevel` enum, in ascending order of severity. */
+/**
+ * Renovate's `newLogLevel` enum, in ascending order of severity.
+ *
+ * Checked here rather than left to tooling because tooling does not check it.
+ * Measured against `renovate-config-validator --no-global --strict` at 43.288.0:
+ * a `newLogLevel` of `"loud"` **validates clean, exit 0**, while the same
+ * validator rejects a typo'd option name and a cron minute that is not `*`. So
+ * this is the same trap as the `vulnerabilityAlerts` limit above — an entry that
+ * every tool in the chain calls valid and Renovate then ignores, leaving the
+ * failure it was meant to surface exactly as silent as before.
+ */
 const LOG_LEVELS = [
   "trace",
   "debug",

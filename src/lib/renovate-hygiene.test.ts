@@ -140,10 +140,16 @@ describe("branchCreationWindows", () => {
 describe("cronWindowsWithoutWildcardMinute", () => {
   // Renovate's `schedule` docs carry this as a hard note: "For Cron schedules,
   // you _must_ use the `*` wildcard for the minutes value, as Renovate doesn't
-  // support minute granularity." Nothing in this repo's CI runs
-  // renovate-config-validator, so a `0 7 * * 1` written here — the same string
-  // the GitLab pipeline schedule uses, which is exactly how the mistake would be
-  // made — would be found by the next Monday's run and nothing sooner.
+  // support minute granularity." A `0 7 * * 1` written here — the same string the
+  // GitLab pipeline schedule uses, which is exactly how the mistake would be made
+  // — would otherwise be found by the next Monday's run and nothing sooner.
+  //
+  // This one is NOT a check Renovate lacks, and saying otherwise would overstate
+  // it: `renovate-config-validator --no-global --strict` rejects it outright with
+  // "has cron syntax, but doesn't have * as minutes". It is the same check moved
+  // into a suite that actually runs, because nothing in this repo's CI invokes
+  // that validator. The remap assertion further down is the one the validator
+  // genuinely cannot make.
   it("accepts a wildcard minute", () => {
     expect(cronWindowsWithoutWildcardMinute(["* 7-8 * * 1"])).toEqual([]);
   });
