@@ -1,14 +1,23 @@
 # dlectroflow — What it costs to self-host
 
-_Last checked: 2026-07-29._
+_Provider prices last checked: 2026-07-29. The container-registry figures further
+down were re-measured 2026-08-04 and are dated in place — every number here is a
+snapshot, and the registry section gives the command rather than asking you to
+trust the figure._
 
 This guide exists because "self-hostable" is a claim, not an answer. Below are
 eight concrete ways to run dlectroflow, cheapest first, with every tool named and
 explained, and honest line-item costs.
 
-> **None of these setups except the last one has been tested by the maintainers.**
-> Option 8 is what [dlectroflow.dev](https://dlectroflow.dev) actually runs on and
-> is verified in production. Options 1–7 are worked examples, built from each
+> **Only option 8 has been tested in production, and only option 2 has been
+> tested at all beyond that.** Option 8 is what
+> [dlectroflow.dev](https://dlectroflow.dev) actually runs on and is verified in
+> production. **Option 2 has been stood up end to end on a developer machine** —
+> migrations, owner seeding, the app serving through Caddy, both scheduled jobs,
+> and a full backup-and-restore rehearsal — and has its own walkthrough at
+> [self-host-vps.md](self-host-vps.md); the one part not exercised there is
+> Let's Encrypt issuing against a real public domain. Options 1 and 3–7 are worked
+> examples, built from each
 > provider's published prices and this project's real resource footprint, offered
 > because self-hosters arrive with wildly different budgets, skills and hardware.
 > They are a starting point to adapt, not a tested recipe to follow blindly.
@@ -227,9 +236,13 @@ without rewriting it, and you don't mind learning some Kubernetes.
 - **Helm** — free, open-source package manager for Kubernetes; a "chart" is a
   package. This repo ships one at [charts/dlectroflow/](../charts/dlectroflow/),
   so `helm install` gets you the app Deployment, the Postgres StatefulSet with
-  its 8 Gi volume, the Ingress, a PodDisruptionBudget, the daily
-  database-backup CronJob and the nightly guest-purge CronJob — all pre-written.
-  [helm.sh](https://helm.sh)
+  its 8 Gi volume, the Ingress, a PodDisruptionBudget and the nightly
+  guest-purge CronJob — all pre-written.
+  **The database-backup CronJob is written but off by default** (`backup.enabled`
+  defaults to `false`, and the template also requires `env=production`). Turning
+  it on is `--set backup.enabled=true` plus `backup.gcsBucket` and
+  `backup.gcpServiceAccount`. Do not assume an install has backups because the
+  chart contains a backup template. [helm.sh](https://helm.sh)
 - **ingress-nginx** — free, open source, maintained by the Kubernetes project.
   It accepts incoming HTTP traffic and routes it to the right service. This
   chart's Ingress is written for it, including its rate-limiting and
@@ -242,8 +255,14 @@ without rewriting it, and you don't mind learning some Kubernetes.
 - **Traefik** — free, open-source reverse proxy that k3s installs **by default**.
   You can use it instead of ingress-nginx, but the chart's ingress class then
   needs overriding. [traefik.io](https://traefik.io)
-- **Backblaze B2 or Google Cloud Storage** — where the chart's backup CronJob
-  uploads its nightly dump. B2 gives 10 GB free.
+- **Google Cloud Storage, optionally plus Backblaze B2** — where the chart's
+  backup CronJob uploads its nightly dump. The two are **not** interchangeable in
+  the chart as written: the GCS upload is the primary and authenticates
+  **keylessly via Workload Identity**, which is a GKE facility and does not exist
+  on a k3s VPS. B2 is an additional destination, enabled with
+  `backup.b2.enabled` plus `secrets.b2KeyId` / `secrets.b2AppKey`. On this option
+  you would run B2 (or any S3-compatible store) as the *only* destination, which
+  means adjusting the chart rather than just setting values. B2 gives 10 GB free.
   [backblaze.com/cloud-storage](https://www.backblaze.com/cloud-storage)
 
 **The bill:** VPS ~$8–12 + object storage ~$0.10 + domain ~$12/year.
@@ -367,8 +386,11 @@ genuine redundancy, without Google-scale pricing.
 - **Helm** — free, open-source Kubernetes package manager. This repo's chart at
   [charts/dlectroflow/](../charts/dlectroflow/) installs the app with 2 replicas,
   a **PodDisruptionBudget** (stops both copies being taken down at once during
-  maintenance), **topology spread** (places the two copies on different nodes),
-  the Postgres StatefulSet with its 8 Gi volume, and both CronJobs.
+  maintenance), **topology spread** (*biases* the two copies onto different nodes
+  — the constraint is `whenUnsatisfiable: ScheduleAnyway`, so it is a preference,
+  not a guarantee, and on a two-node cluster under pressure both copies can land
+  together), the Postgres StatefulSet with its 8 Gi volume, and the guest-purge
+  CronJob. The backup CronJob needs `backup.enabled=true` — see option 4.
   [helm.sh](https://helm.sh)
 - **ingress-nginx** — free, open source, from the Kubernetes project. Accepts
   incoming HTTP and routes it to your services. You install it once into the
@@ -531,9 +553,13 @@ capacity to absorb them the way there is when you rent whole machines.
   repo ships one at
   [scripts/prune-registry.sh](../scripts/prune-registry.sh).
 - **Sign-in is not optional.** The production start-up guard refuses to boot
-  without a **GitLab OAuth application** (free to create) plus three generated
-  secrets: `AUTH_SESSION_SECRET`, `GUEST_IP_HASH_SALT` and `TOKEN_ENC_KEY`.
-  Cheapest is never zero-setup.
+  without a **GitLab OAuth application** (free to create — that is
+  `GITLAB_OAUTH_CLIENT_ID` and `GITLAB_OAUTH_CLIENT_SECRET`), three generated
+  secrets — `AUTH_SESSION_SECRET`, `GUEST_IP_HASH_SALT` and `TOKEN_ENC_KEY` — and
+  a **non-empty `OWNER_ALLOWLIST`**, which is the one people miss: generate all
+  three secrets, create the OAuth app, leave the allowlist blank, and the app
+  still will not start. The guard names what is missing
+  (`src/lib/auth/config.ts`). Cheapest is never zero-setup.
 
 ### What the model actually costs per breakdown
 
