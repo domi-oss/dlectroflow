@@ -984,6 +984,20 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     // server flips s1 alone. At that render the only pending id under the old
     // single-slot version was s2, whose row is still done, so nothing was focused
     // and s1's correction ended on <body>.
+    //
+    // #237 re-decided ONE line of this spec, and it is worth saying which and why
+    // rather than leaving it to a blame trawl. It used to leave focus on s2's undo
+    // across both releases and still assert that s1's Start Focus took focus — so
+    // it pinned a hand-off firing onto a row the user was NOT standing on, which is
+    // the defect #237 is about. What round 15 actually needs to observe is that the
+    // two ARMS do not clobber each other, and arming is what the `.focus()` calls
+    // below preserve: both writes are still in flight together, and each resolves
+    // while its own row's undo holds focus.
+    //
+    // Reachable, not a contrivance: both undos are `aria-disabled` rather than
+    // `disabled` (round 15, so a busy control can still hold focus), so a keyboard
+    // user who presses s1's undo, presses s2's, then Shift+Tabs back to s1 while
+    // both are still out is exactly this.
     const user = userEvent.setup();
     // `…Once`, twice: `vi.clearAllMocks()` does not reset implementations, so a
     // plain `mockImplementation` here would leak an un-resolving undo into every
@@ -1005,15 +1019,30 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
       <TaskSteps taskId="t1" steps={[done1, done2]} />,
     );
 
-    await user.click(
-      screen.getByRole("button", { name: /mark not done: first/i }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: /mark not done: second/i }),
-    );
+    const undo1 = screen.getByRole("button", {
+      name: /mark not done: first/i,
+    });
+    const undo2 = screen.getByRole("button", {
+      name: /mark not done: second/i,
+    });
+    await user.click(undo1);
+    await user.click(undo2);
     expect(uncompleteStep).toHaveBeenCalledTimes(2);
 
+    // Both are out before either resolves, which is what makes the two arms
+    // simultaneous and reproduces the single-slot clobber. Focus rides with the row
+    // whose write is landing, so each arm is legitimately entitled to its hand-off
+    // under #237's gate — the property under test is that the second arming does
+    // not erase the first.
+    // Awaited between the two releases, not fired back to back: the gate reads
+    // `document.activeElement` in the continuation after the write's `await`, so
+    // both continuations would otherwise run as microtasks AFTER both `.focus()`
+    // calls and both would read s2's undo. That is a property of this spec's
+    // instrumentation, not of the component.
+    undo1.focus();
     releases[0]();
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    undo2.focus();
     releases[1]();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
 
@@ -1140,6 +1169,52 @@ describe("TaskSteps — a hand-off only fires when the press held focus (#237)",
     expect(
       screen.getByRole("button", { name: /mark not done: second/i }),
     ).not.toHaveFocus();
+  });
+
+  it("leaves focus in another row's editor when the undo's press never held it", async () => {
+    // The same defect on the OTHER hand-off — the successful-undo one — reached
+    // the same way, and this is the arm whose window is widest: it opens when the
+    // write resolves and closes only when `router.refresh()` comes back. So it
+    // does not need WebKit to fire on the wrong element; a user who opened another
+    // row's inline editor while the undo was in flight is enough, on any engine.
+    // Both arms sit in `uncomplete`'s two routes in, so guarding one and not the
+    // other would leave the file inconsistent with itself — which is what #237 is
+    // about.
+    const user = userEvent.setup();
+    let release!: () => void;
+    vi.mocked(uncompleteStep).mockImplementationOnce(
+      () =>
+        new Promise<void>((res) => {
+          release = res;
+        }),
+    );
+    const rows = mixedRows();
+    const { rerender } = render(<TaskSteps taskId="t1" steps={rows} />);
+
+    const pencil = screen.getByRole("button", { name: "Edit First" });
+    pencil.focus();
+    fireEvent.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+
+    // Mid-flight, the user opens the other row's title editor — an ordinary thing
+    // to do while a write is out, and it is where focus is when the refresh lands.
+    await user.click(pencil);
+    const field = screen.getByLabelText("Edit step title");
+    expect(field).toHaveFocus();
+
+    release();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    // What the refresh does in production: the server re-renders row 2 as
+    // not-done, unmounting the undo that was pressed.
+    rerender(
+      <TaskSteps taskId="t1" steps={[rows[0], { ...rows[1], done: false }]} />,
+    );
+
+    const links = screen.getAllByRole("link", { name: /focus/i });
+    expect(links).toHaveLength(2);
+    expect(links[1]).not.toHaveFocus();
+    expect(field).toHaveFocus();
   });
 
   it("still hands off when the press DID hold focus, on both arms", async () => {

@@ -202,7 +202,7 @@ export function TaskSteps({
   //
   // #237 — and ARMED only when the press held focus, which is the question that
   // has to be settled before "where does focus go": see the gate at the Retry's
-  // own `onClick`.
+  // own `onClick`, and `justUndidRef`'s matching one in `uncomplete`.
   const retryHandoffRef = useRef<Set<string>>(new Set());
   const undoRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
@@ -258,7 +258,30 @@ export function TaskSteps({
         // the re-render that unmounts this button arrives. Added to the set rather
         // than assigned over it, so a second row undone while this one is still
         // waiting for its refresh cannot erase this row's hand-off.
-        justUndidRef.current.add(stepId);
+        //
+        // #237 — and only if this row's undo is the control the user is standing
+        // on, the same question the Retry's arm asks. Read HERE rather than at the
+        // press, for the reason `breakdown-chat.tsx` reads its own after the
+        // await: this control is destroyed by the refresh, not by the press, so
+        // whether it is still the one holding focus can only be answered at the
+        // last moment before the state change that takes it away.
+        //
+        // Of the two arms this is the WIDER window — it opens when the write
+        // resolves and closes only when `router.refresh()` comes back — so it does
+        // not need WebKit's never-focus-a-button behaviour to fire on the wrong
+        // element. A user who opened another row's inline editor while the undo was
+        // in flight is enough, on any engine, and waiting on a server round-trip is
+        // exactly when someone starts doing something else.
+        //
+        // The row's undo is the right thing to compare against for BOTH routes in:
+        // its own press lands on it directly, and a Retry press that was honoured
+        // has already been handed to it by the effect on `undoFailedIds`. A Retry
+        // press that was NOT honoured leaves focus where the user put it, so both
+        // arms decline together rather than the second undoing the first's
+        // restraint.
+        const pressed = undoRefs.current.get(stepId);
+        if (pressed && pressed === document.activeElement)
+          justUndidRef.current.add(stepId);
         router.refresh();
       } catch {
         // Deliberately not rethrown. The server action is atomic, so a rejection
