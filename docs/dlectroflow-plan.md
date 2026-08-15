@@ -5,7 +5,7 @@ An ADHD helper web app. Dual purpose: a learning project and a polished live-dem
 The core loop: **Capture → Clarify → Schedule → Focus → Reward → (come back tomorrow)**.
 
 ```
-Brain Dump  →  Break down (Claude, conversational)  →  Schedule in Reclaim
+Brain Dump  →  Break down (Claude, conversational)  →  Schedule in Google Tasks
      ↑                                                        │
  Rewards / streaks  ←  Focus timer on a step  ←───────────────┘
 ```
@@ -17,7 +17,7 @@ Brain Dump  →  Break down (Claude, conversational)  →  Schedule in Reclaim
 | Concern | Choice |
 |---|---|
 | Framework | Next.js (App Router) + TypeScript |
-| UI | Tailwind CSS + shadcn/ui + Framer Motion |
+| UI | Tailwind CSS + shadcn/ui + `motion` (the package is `motion`, not `framer-motion`) |
 | Data | Prisma + **PostgreSQL everywhere** (local dev via Docker Compose; production on GKE) |
 | AI | Claude API (`@anthropic-ai/sdk`); breakdown model is role-based — `claude-sonnet-4-6` (owner default, owner-selectable) / `claude-haiku-4-5` (guests); adaptive thinking + streaming on Sonnet/Opus |
 | Scheduling | **Google Tasks** (OAuth) is the primary route — steps land in a Google Tasks list that a Reclaim-synced list auto-schedules. Direct Reclaim MCP task-creation (`https://mcp.reclaim.ai`, OAuth via the Claude remote-MCP connector) exists only as a fallback and is **account-gated / largely unused** |
@@ -26,13 +26,18 @@ Brain Dump  →  Break down (Claude, conversational)  →  Schedule in Reclaim
 | Deploy | Dockerfile + `.gitlab-ci.yml` |
 
 ### Verified Claude API integration details
-- Breakdown model is role-based: **`claude-sonnet-4-6`** (owner default; owner can pick haiku/sonnet/opus) and **`claude-haiku-4-5`** (guests, a cost lever). `claude-opus-4-8` is only used by the "kinder re-estimate" helper, not the breakdown default. `thinking: {type: "adaptive"}` + `output_config.effort: "low"` on Sonnet/Opus (Haiku takes neither); stream via `.stream()` → `.finalMessage()`.
+- Breakdown model is role-based: **`claude-sonnet-4-6`** (owner default; owner can pick haiku/sonnet/opus) and **`claude-haiku-4-5`** (guests, a cost lever). `claude-opus-4-8` is the *utility* model (`resolveUtilityModel`), used by three helpers — the "kinder re-estimate", the day-rollup narrative and the daily spark — and it is also selectable for breakdown by the owner via `OWNER_BREAKDOWN_ALLOWLIST`, so it is not the breakdown *default* rather than being unavailable for it. `thinking: {type: "adaptive"}` + `output_config.effort: "low"` on Sonnet/Opus (Haiku takes neither); stream via `.stream()` → `.finalMessage()`.
 - **Scheduling actually ships via Google Tasks**, not the Reclaim MCP connector. Confirmed steps are written to a Google Tasks list (with duration syntax) that a Reclaim-synced list ingests + auto-schedules.
-- **Remote MCP connector (fallback only, account-gated / largely unused):** `client.beta.messages.create` with beta `mcp-client-2025-11-20`, and **both**:
-  - `mcp_servers: [{ type: "url", url: "https://mcp.reclaim.ai", name: "reclaim", authorization_token: <reclaim bearer token> }]`
-  - `tools: [{ type: "mcp_toolset", mcp_server_name: "reclaim" }]`
-  - Reclaim gates task-*creation* via MCP per account; where it's not granted the connector can't write, so this path is a fallback and steps save locally instead. Reclaim MCP is OAuth → authorize once, store the bearer token, pass it as `authorization_token`.
-- Never log secrets. Keep `ANTHROPIC_API_KEY` and the Reclaim/Google tokens server-side only.
+- ~~**Remote MCP connector (fallback only, account-gated / largely unused).**~~
+  **Never built, and now removed.** This described a `client.beta.messages.create` call
+  with an `mcp_servers` / `mcp_toolset` pair pointed at a Reclaim MCP endpoint. No such
+  code ever landed — the beta header, the server URL and the toolset type have zero
+  occurrences in `src/`, and the `ReclaimAuth` table that would have held the bearer
+  token was dropped by `20260719172453_drop_reclaim`. Scheduling ships through Google
+  Tasks (the bullet above), which a Reclaim-synced list ingests downstream. Kept as a
+  struck-through record because this section is headed "Verified … integration details"
+  and read as present tense.
+- Never log secrets. Keep `ANTHROPIC_API_KEY` and the Google tokens server-side only.
 
 ---
 
@@ -70,9 +75,9 @@ Turn a vague/big task into tiny steps through a short conversation, then auto-sc
   - `subtaskEmoji`: Claude picks one matching each step's action.
   - `{n} of {total}`: progress visible at a glance.
 - **UI:** per-chunk Reclaim status (scheduled time / "scheduling…") + link out.
-- **Graceful fallback:** if Reclaim auth is missing/expired, chunks save locally and the app prompts to reconnect — demo never hard-fails.
+- **Graceful fallback:** if Google auth is missing/expired, chunks save locally and the app prompts to reconnect — it never hard-fails. (Written as "Reclaim auth" when this plan was drafted; there is no Reclaim credential in the app.)
 
-Data: `Task { id, title, source, createdAt, status, parentEmoji? }` · `Step { id, taskId, text, order, total, estMinutes, subtaskEmoji?, reclaimTaskId?, scheduledAt?, done }` · `BreakdownTurn { id, taskId, role, message, proposedSteps?, createdAt }`.
+Data: `Task { id, title, source, createdAt, status, parentEmoji? }` · `Step { id, taskId, text, order, total, estMinutes, subtaskEmoji?, googleTaskId?, done }` (planned as `reclaimTaskId?` / `scheduledAt?`; both were dropped by `20260719172453_drop_reclaim` and the Google id took over — read `prisma/schema.prisma` for the current shape) · `BreakdownTurn { id, taskId, role, message, proposedSteps?, createdAt }`.
 
 ---
 
@@ -88,7 +93,7 @@ Beat starting/sustaining attention; fight time blindness.
 - **Stats (live):** focus minutes today · sessions · time per task.
 - **🌇 End-of-day round-up:** user-set workday-end time (default ~5pm) fires a browser notification → in-app summary; plus a "trigger now" demo override. Claude writes a warm, personalized recap (wins first, guilt-free): steps done, focus minutes/sessions, points, streak, gentle carry-over. Delivery settings: in-app (always) · browser notification (default on) · **email opt-in** (Resend; **client-triggered — it sends when the owner opens the dashboard / taps "Trigger now", there is no scheduled server job**; only when enabled). Optional "plan tomorrow" one-tap.
 
-Data: `FocusSession { id, stepId?, taskId?, plannedMin, addedMin, startedAt, endedAt, durationMin, outcome: completed|requeued|gaveup, reclaimSynced? }` · `Step.estimateHistory?` · `TimerSettings { defaultFromEstimate, addTimeIncrementMin }` · `DayRollup { id, date, focusMin, sessions, stepsDone, pointsEarned, streakDay, narrative, emailedAt? }` · `Settings { workdayEndTime, roundupDemoOverride?, roundupEmailEnabled, roundupEmail }`.
+Data: `FocusSession { id, stepId?, taskId?, plannedMin, addedMin, startedAt, endedAt, durationMin, outcome: completed|requeued|gaveup }` (planned with a `reclaimSynced?` column; dropped by `20260719172453_drop_reclaim`) · `Step.estimateHistory?` · `TimerSettings { defaultFromEstimate, addTimeIncrementMin }` · `DayRollup { id, date, focusMin, sessions, stepsDone, pointsEarned, streakDay, narrative, emailedAt? }` · `Settings { workdayEndTime, roundupDemoOverride?, roundupEmailEnabled, roundupEmail }`.
 
 ---
 
@@ -102,7 +107,12 @@ Immediate dopamine + a reason to return.
 - **Streaks — working days only:** consecutive working days with ≥1 completion; non-working days skipped (weekend keeps it intact). Working days = user setting (default Mon–Fri). Missing a working day resets to 0.
 - **🏆 Best-streaks leaderboard:** ended streaks save final length to a personal Top 3 (🥇🥈🥉 with counts + dates); a new streak surpassing an entry bumps in live.
 - **🌱 Fresh-start encouragement:** starting a new streak after a reset → Claude offers warm, varied encouragement reframing the restart; guilt-free.
-- **Badges (light) — 6 shipped** (`BadgeKey` in `src/lib/constants.ts`): first breakdown (`first_breakdown`), first schedule (`first_schedule`), 5-day streak (`streak_5`), 10 steps in a day (`ten_steps_day`), beat your best streak (`beat_best_streak`), task complete (`task_complete`).
+- **Badges (light) — 9 shipped** (`BadgeKey` in `src/lib/constants.ts`, which is the
+  authoritative list — count it there rather than trusting this line): first breakdown
+  (`first_breakdown`), first schedule (`first_schedule`), first focus (`first_focus`),
+  5-day streak (`streak_5`), 10 steps in a day (`ten_steps_day`), beat your best streak
+  (`beat_best_streak`), task complete (`task_complete`), inbox zero (`inbox_zero`),
+  comeback (`comeback`).
 - **Dashboard:** ✨ daily spark · today's points · current streak · Top 3 best streaks · focus minutes · steps done.
 
 Data: `RewardEvent { id, type, points, createdAt }` · `Streak { current, lastActiveWorkday }` · `StreakRecord { id, length, startedAt, endedAt }` (Top 3 by length) · `Badge { id, key, earnedAt }` · `DailySpark { id, date, quote, source: ai|fallback }` · `Settings { workingDays: [Mon..Fri] }`.
