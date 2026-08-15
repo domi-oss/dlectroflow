@@ -104,6 +104,7 @@ vi.mock("@/lib/db", () => ({
   getStreak: getStreakMock,
 }));
 
+import { EngagementKind } from "@/lib/constants";
 import {
   touchStreakOnEngagement,
   rewardStepDone,
@@ -176,6 +177,95 @@ describe("touchStreakOnEngagement — once per working day", () => {
     const res = await touchStreakOnEngagement("ws");
     expect(res).toBeNull();
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #233 via `!352` review — the non-working-day arm STILL writes its ledger row.
+   *
+   * The early return above skips the streak, and the ledger write sits before it
+   * precisely so that skipping one does not skip the other: the ledger is a log of
+   * what happened, not a view of what counted, and `recomputeRun` is what applies
+   * the working-day rule. A Saturday capture that went unrecorded would become a
+   * hole in the ledger the moment somebody changed their working week to include
+   * Saturdays — the day would read as a gap, shortening a run and revoking a badge
+   * that was genuinely earned.
+   *
+   * Asserted here rather than in `engagement-ledger.integration.test.ts`, which
+   * sets a seven-day working week on purpose so no assertion in it moves with the
+   * calendar — meaning the non-working-day arm never executes there. Measured while
+   * writing this: deleting the write left all 6705 tests green.
+   */
+  it("still records the ledger row on a NON-working day", async () => {
+    const todayWd = (() => {
+      const wd = new Date().getDay();
+      return wd === 0 ? 7 : wd;
+    })();
+    getSettingsMock.mockResolvedValue({
+      workingDays: [1, 2, 3, 4, 5, 6, 7].filter((d) => d !== todayWd).join(","),
+    });
+
+    const res = await touchStreakOnEngagement("ws", {
+      kind: EngagementKind.Capture,
+      itemId: "item-1",
+    });
+
+    // The streak did not move — the behaviour the test above pins…
+    expect(res).toBeNull();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    // …and the credit was logged anyway, on the client that is NOT the
+    // transaction, because there is no streak change for it to be atomic with.
+    expect(prismaMock.engagementDay.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: "ws",
+        day: ymd(new Date()),
+        kind: EngagementKind.Capture,
+        itemId: "item-1",
+      },
+    });
+    expect(txMock.engagementDay.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #233 via `!352` review — the ledger row is written FIRST inside the streak
+   * transaction, and both halves of that are load-bearing.
+   *
+   * **Inside**, so the row and the counter cannot disagree. **First**, so the lock
+   * order is `EngagementDay`-then-`Streak`, which is the order
+   * `deleteBrainDumpItem` takes when its cascade removes rows and it then
+   * recomputes. Inverting it in one writer is how a deadlock gets built: the insert
+   * takes a `FOR KEY SHARE` on the `BrainDumpItem` its `itemId` points at, so a
+   * version that took the `Streak` lock first would hold `Streak` while reaching
+   * for a row a concurrent delete holds and is itself waiting on `Streak` for.
+   *
+   * The mock's own docblock claimed this was "asserted below" and nothing asserted
+   * it — the assertion is here now. Ordering is read off
+   * `invocationCallOrder` rather than inferred from a call count, because a count
+   * cannot tell first from last.
+   */
+  it("writes the ledger row FIRST inside the transaction, before the row lock", async () => {
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 3,
+      lastActiveWorkday: daysAgo(1),
+    });
+
+    await touchStreakOnEngagement("ws", {
+      kind: EngagementKind.StepDone,
+      itemId: "item-1",
+    });
+
+    // On the transaction client, not the singleton — that is the "inside" half.
+    expect(txMock.engagementDay.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.engagementDay.create).not.toHaveBeenCalled();
+    // …and before both the `SELECT … FOR UPDATE` and the counter write, which is
+    // the "first" half. Non-zero controls: all three really were called, so an
+    // ordering that held because a call never happened cannot pass this.
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(txMock.streak.update).toHaveBeenCalledTimes(1);
+    const [ledger] = txMock.engagementDay.create.mock.invocationCallOrder;
+    const [rowLock] = txMock.$queryRaw.mock.invocationCallOrder;
+    const [counter] = txMock.streak.update.mock.invocationCallOrder;
+    expect(ledger).toBeLessThan(rowLock);
+    expect(rowLock).toBeLessThan(counter);
   });
 
   it("awards Full work week (streak_5) when the streak reaches 5", async () => {
