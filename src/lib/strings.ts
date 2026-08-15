@@ -1369,6 +1369,23 @@ export const STRINGS = {
     playful:
       "This browser can't store anything more right now, so this one isn't safe to hold. Your words are still in the box — copy them somewhere safe.",
   },
+  // ⚠️ The one refusal in this group where the words are NOT still in the box, so
+  // the sentence every neighbour ends on would be a lie here. Another tab clobbered
+  // a capture out of the queue and the recovery re-enqueue was refused, so words
+  // this tab had already confirmed as safe are gone: the field was cleared at
+  // submit and the strip has stopped listing them.
+  //
+  // No cap is quoted and no wait is offered — the recovery retries on its own, and
+  // the user cannot act on which bound was hit. What they can act on is knowing
+  // they need to type it again, so that is what it says, and it says "one" because
+  // the loop announces per capture. `role="alert"` is the right region and it is
+  // already the one this notice renders into.
+  "captureQueue.refused.recoveryFailed": {
+    plain:
+      "One capture that was waiting to save has been lost — this browser couldn't hold on to it. Nothing already saved is affected, but you'll need to type that one again.",
+    playful:
+      "One capture that was waiting to save has been lost — this browser couldn't hold on to it. Nothing already saved is affected, but you'll need to type that one again.",
+  },
   // The origin check refused the request (400, CSRF). No sign-in offered and no
   // account mentioned: the user did nothing wrong, nothing about their account is
   // implicated, and the 400 is classified retryable so the words are still held.

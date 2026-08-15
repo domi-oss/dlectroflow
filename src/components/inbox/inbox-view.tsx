@@ -111,8 +111,7 @@ import {
 } from "@/lib/notifications";
 import { formatAgo } from "@/lib/format";
 import { useCaptureQueue } from "@/lib/use-capture-queue";
-import type { DiscardOutcome } from "@/lib/use-capture-queue";
-import type { EnqueueRefusal } from "@/lib/capture-queue";
+import type { CaptureAnnouncement } from "@/lib/use-capture-queue";
 import { CaptureQueueStrip } from "@/components/inbox/capture-queue-strip";
 
 /**
@@ -490,8 +489,9 @@ function answersFailure(
  * #175 — which sentence the assertive region says, per refusal.
  *
  * A `Record` over the whole union rather than a chain of `if`s, so adding a
- * refusal to `EnqueueRefusal` or `DiscardOutcome` is a type error here instead of
- * a state that announces nothing. That is the failure mode #246 was filed for on
+ * refusal to any of the three unions behind `CaptureAnnouncement` is a type error
+ * here instead of a state that announces nothing. That is the failure mode #246
+ * was filed for on
  * the shopping list: the key simply was not there, the helper fell through to the
  * wrong copy, and the surface read as fixed to anyone auditing by grep.
  *
@@ -505,15 +505,19 @@ function answersFailure(
  *    listed so that the day it *does* announce, this map is where the decision has
  *    to be made.
  *
- * `storage-unavailable` is shared by both unions on purpose: whether the store
- * refused an enqueue or a discard, the user's situation and their remedy are
+ * `storage-unavailable` is shared by two of the unions on purpose: whether the
+ * store refused an enqueue or a discard, the user's situation and their remedy are
  * identical, and the sentence names no cap and offers no wait because nothing
  * queued here would free the space.
+ *
+ * ⚠️ **`recovery-failed` does NOT share a sentence with the refusal that caused
+ * it, and that is the point of it having its own member.** Every sentence above
+ * ends by telling the reader their words are still in the box; on the recovery arm
+ * they are not — the field was cleared at submit and the strip has stopped listing
+ * the entry. Reusing `max-items` there would have printed a remedy for an action
+ * the user did not take, about words that no longer exist.
  */
-const CAPTURE_REFUSAL_COPY: Record<
-  EnqueueRefusal | DiscardOutcome,
-  StringKey | null
-> = {
+const CAPTURE_REFUSAL_COPY: Record<CaptureAnnouncement, StringKey | null> = {
   empty: null,
   discarded: null,
   "max-items": "captureQueue.refused.maxItems",
@@ -522,11 +526,10 @@ const CAPTURE_REFUSAL_COPY: Record<
   "storage-unavailable": "captureQueue.refused.storage",
   "refused-in-flight": "captureQueue.discardInFlight",
   "already-saved": "captureQueue.discardSaved",
+  "recovery-failed": "captureQueue.refused.recoveryFailed",
 };
 
-function captureRefusalKey(
-  reason: EnqueueRefusal | DiscardOutcome,
-): StringKey | null {
+function captureRefusalKey(reason: CaptureAnnouncement): StringKey | null {
   return CAPTURE_REFUSAL_COPY[reason];
 }
 

@@ -184,7 +184,7 @@ export type CaptureQueueApi = {
   discard: (clientKeys: readonly string[]) => Promise<DiscardOutcome>;
   /** The last refusal to ANNOUNCE, with a token that changes on every occurrence. */
   announcement: {
-    reason: EnqueueRefusal | DiscardOutcome;
+    reason: CaptureAnnouncement;
     token: number;
   } | null;
   /** Drop the announcement, so an identical next one is a genuine change. */
@@ -240,6 +240,34 @@ export type CaptureFlushResult = { saved: readonly string[] };
 export type DiscardOutcome =
   "discarded" | "refused-in-flight" | "already-saved" | "storage-unavailable";
 
+/**
+ * The `storage`-event recovery was refused by the store, so a capture this tab
+ * had already promised was safe is gone.
+ *
+ * ⚠️ **Its own member rather than a re-use of the `EnqueueRefusal` that caused
+ * it, because every one of those sentences ends *"your words are still in the
+ * box"* — and here they are not.** The field was cleared at submit, the strip has
+ * stopped listing the entry, and there is nothing left to shorten or retry. A
+ * refusal reason the user cannot act on, attached to an action they did not take,
+ * is worse than no sentence at all; this one names the loss.
+ *
+ * It carries no reason for the same argument. `max-items`, `no-room` and
+ * `storage-unavailable` are all reachable here and the remedy is identical for
+ * all three, because the words are not held anywhere the user could recover them
+ * from. See `CAPTURE_REFUSAL_COPY` in `inbox-view.tsx` for the sentence.
+ */
+export type CaptureRecoveryFailure = "recovery-failed";
+
+/**
+ * Everything the strip may be asked to announce, in one alias.
+ *
+ * The three unions have different owners on purpose — the first is the pure
+ * module's, the second is this hook's, the third is this hook's recovery path —
+ * and the strip needs a single exhaustive list to map to copy.
+ */
+export type CaptureAnnouncement =
+  EnqueueRefusal | DiscardOutcome | CaptureRecoveryFailure;
+
 function currentStore(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
@@ -269,6 +297,23 @@ let cachedQueue: QueuedCapture[] = [];
  */
 function getServerSnapshot(): QueuedCapture[] {
   return EMPTY;
+}
+
+/**
+ * The stored string, or `null` where it cannot be read.
+ *
+ * The only version marker `localStorage` offers, and the cheapest way to ask
+ * whether a write that reports success actually changed anything — which is what
+ * the mount sweep needs, since `ApplyFlushResult` answers `ok` for a deliberate
+ * no-op as well as for a commit. `getSnapshot` keeps its own inline read because
+ * it has to distinguish "unreadable" from "absent" and this cannot.
+ */
+function rawQueue(store: Storage): string | null {
+  try {
+    return store.getItem(CAPTURE_QUEUE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function getSnapshot(): QueuedCapture[] {
@@ -342,7 +387,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
   const [flightCount, setFlightCount] = useState(0);
   const [savedTicket, setSavedTicket] = useState(0);
   const [announcement, setAnnouncement] = useState<{
-    reason: EnqueueRefusal | DiscardOutcome;
+    reason: CaptureAnnouncement;
     token: number;
   } | null>(null);
 
@@ -355,7 +400,7 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
   /** Bumped on every announcement so an identical sentence is a real change. */
   const token = useRef(0);
 
-  const announce = useCallback((reason: EnqueueRefusal | DiscardOutcome) => {
+  const announce = useCallback((reason: CaptureAnnouncement) => {
     token.current += 1;
     setAnnouncement({ reason, token: token.current });
   }, []);
@@ -366,55 +411,80 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
   // `use-hyper-focus.ts` gives: the value lives outside React, more than one
   // reader can be mounted in a session, and they must never disagree about
   // whether somebody's words are saved.
-  const subscribe = useCallback((onChange: () => void) => {
-    if (typeof window === "undefined") return () => {};
-    const onStorage = (event: StorageEvent) => {
-      // `null` key means the whole store was cleared, which is also our business.
-      if (event.key !== null && event.key !== CAPTURE_QUEUE_STORAGE_KEY) return;
-      const store = currentStore();
-      const present = new Set(readQueue(store).map((c) => c.clientKey));
-      // ⚠️ The losing tab of a clobber finds its own pending capture gone from a
-      // queue it never removed it from. Re-enqueueing is the ONLY recovery: this
-      // tab has already told its user the words are safe.
-      //
-      // ⚠️ **It infers "clobbered" from ABSENCE, and absence has three causes.**
-      // The two guards below are how the other two are told apart, and each one
-      // reads as redundant while the other stands — see the residual note in this
-      // module's docblock before removing either.
-      for (const [key, capture] of awaiting.current) {
-        if (present.has(key)) continue;
-        // A capture whose flush is outstanding may legitimately have been removed
-        // by ANOTHER tab's successful flush of the same key, so re-adding it would
-        // resurrect something already saved. The idempotency key makes the
-        // opposite mistake cheap — a duplicate POST answered 200 — so the entry is
-        // only put back while nothing is in flight for it.
-        if (inFlightKeys.current.has(key)) continue;
-        // The third cause: the user asked for these words to be thrown away, and
-        // `discard` holds the claim across its mirror delete. Putting them back is
-        // the "silent save after an explicit refusal" that `discard`'s mirror-first
-        // ordering exists to prevent, arriving by a different door — and it is
-        // strictly worse than the flush case above, because a never-saved capture
-        // has no `200` duplicate to absorb the re-POST. It is created.
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (typeof window === "undefined") return () => {};
+      const onStorage = (event: StorageEvent) => {
+        // `null` key means the whole store was cleared, which is also our business.
+        if (event.key !== null && event.key !== CAPTURE_QUEUE_STORAGE_KEY)
+          return;
+        const store = currentStore();
+        const present = new Set(readQueue(store).map((c) => c.clientKey));
+        // ⚠️ The losing tab of a clobber finds its own pending capture gone from a
+        // queue it never removed it from. Re-enqueueing is the ONLY recovery: this
+        // tab has already told its user the words are safe.
         //
-        // Duo review round 2 on `!348` asked for exactly this guard. Honest note
-        // on its status: the window is **not reachable today**, because
-        // `discardCapture`, `broadcast()` and the `awaiting` purge all run in one
-        // synchronous block after that await, so anything re-added is removed
-        // again before control returns. One extra `await` between them — an
-        // ordinary future edit — makes it durable with nothing going red, which is
-        // why the guard is here rather than an argument in a comment.
-        if (claimed.current.has(key)) continue;
-        enqueue(store, capture);
-      }
-      onChange();
-    };
-    window.addEventListener(CAPTURE_QUEUE_EVENT, onChange);
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.removeEventListener(CAPTURE_QUEUE_EVENT, onChange);
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
+        // ⚠️ **It infers "clobbered" from ABSENCE, and absence has three causes.**
+        // The two guards below are how the other two are told apart, and each one
+        // reads as redundant while the other stands — see the residual note in this
+        // module's docblock before removing either.
+        for (const [key, capture] of awaiting.current) {
+          if (present.has(key)) continue;
+          // A capture whose flush is outstanding may legitimately have been removed
+          // by ANOTHER tab's successful flush of the same key, so re-adding it would
+          // resurrect something already saved. The idempotency key makes the
+          // opposite mistake cheap — a duplicate POST answered 200 — so the entry is
+          // only put back while nothing is in flight for it.
+          if (inFlightKeys.current.has(key)) continue;
+          // The third cause: the user asked for these words to be thrown away, and
+          // `discard` holds the claim across its mirror delete. Putting them back is
+          // the "silent save after an explicit refusal" that `discard`'s mirror-first
+          // ordering exists to prevent, arriving by a different door — and it is
+          // strictly worse than the flush case above, because a never-saved capture
+          // has no `200` duplicate to absorb the re-POST. It is created.
+          //
+          // Duo review round 2 on `!348` asked for exactly this guard. Honest note
+          // on its status: the window is **not reachable today**, because
+          // `discardCapture`, `broadcast()` and the `awaiting` purge all run in one
+          // synchronous block after that await, so anything re-added is removed
+          // again before control returns. One extra `await` between them — an
+          // ordinary future edit — makes it durable with nothing going red, which is
+          // why the guard is here rather than an argument in a comment.
+          if (claimed.current.has(key)) continue;
+          // ⚠️ **The RESULT is read, and this is the one arm of this module where
+          // "the words are gone" is literally true.** `enqueue` refuses for entirely
+          // ordinary reasons — the write that clobbered ours can be the same write
+          // that took the queue to `CAPTURE_QUEUE_MAX_ITEMS`, or to the byte bound —
+          // and there is nothing to fall back on: this tab already told its user the
+          // capture was safe, the field was cleared at submit, and the strip has
+          // stopped listing the entry. Dropping it silently is exactly what this
+          // module's governing rule forbids, that a wasted retry is recoverable and
+          // a dropped capture is not.
+          //
+          // The entry deliberately STAYS in `awaiting`, so the next `storage` event
+          // retries it: a queue that is full now may not be full in a minute, and a
+          // repeated `clientKey` is idempotent by `enqueue`'s own contract. The
+          // announcement is not a substitute for that retry, it is the honest
+          // report that this attempt lost words — and it is the only report there
+          // is, since nothing on screen changed.
+          //
+          // Reported by Duo on `!360`, verified against this line before acting.
+          const recovered = enqueue(store, capture);
+          if (!recovered.ok) announce("recovery-failed");
+        }
+        onChange();
+      };
+      window.addEventListener(CAPTURE_QUEUE_EVENT, onChange);
+      window.addEventListener("storage", onStorage);
+      return () => {
+        window.removeEventListener(CAPTURE_QUEUE_EVENT, onChange);
+        window.removeEventListener("storage", onStorage);
+      };
+      // `announce` is stable, so the subscription is not torn down and re-added —
+      // which `useSyncExternalStore` would do on every identity change of this.
+    },
+    [announce],
+  );
 
   const queue = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -514,7 +584,32 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
     const store = currentStore();
     // The expiry sweep needs the live workspace, so it runs here and not in the
     // pure module's own mount-less world. It writes nothing when nothing changed.
-    if (store) sweepUnresolvable(store, workspaceId, Date.now());
+    if (store) {
+      const before = rawQueue(store);
+      sweepUnresolvable(store, workspaceId, Date.now());
+      // ⚠️ **A writer announces, and the sweep is the writer that REMOVES
+      // entries.** Without this, a reader already mounted goes on counting words
+      // that have left storage — and offering a Discard for them — because
+      // `storage` never fires in the tab that wrote (see `broadcast`). The sibling
+      // write 20 lines below does exactly this for `plan.marks`; the two are the
+      // same kind of event and had different treatment.
+      //
+      // Honest note, because it decides how this is tested: the SOLE reader is
+      // covered incidentally today, by `flush` running next and either bumping
+      // `flightCount` or falling through to its own trailing `broadcast()`.
+      // Neither is about the sweep, both are one ordinary edit from moving, and
+      // neither reaches a SECOND mounted reader — `flightCount` is per-hook state
+      // — which is the case the docblock's "they must never disagree" covers and
+      // the case the test pins. React's own `useSyncExternalStore` consistency
+      // check cannot stand in either: it is queued ahead of this effect, so it
+      // reads the pre-sweep value.
+      //
+      // Conditional on the raw string moving, not unconditional, for the reason
+      // `sweepUnresolvable` gives for writing nothing when nothing changed: this
+      // runs on the load path of every page view, and an event per view would
+      // wake every reader for nothing.
+      if (rawQueue(store) !== before) broadcast();
+    }
 
     void (async () => {
       const db = await openMirror(

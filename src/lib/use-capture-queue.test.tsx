@@ -9,6 +9,7 @@ import {
   type CaptureQueueApi,
 } from "@/lib/use-capture-queue";
 import {
+  CAPTURE_QUEUE_MAX_ITEMS,
   CAPTURE_QUEUE_STORAGE_KEY,
   readQueue,
   type QueuedCapture,
@@ -482,6 +483,88 @@ describe("useCaptureQueue — the storage-event re-enqueue (#175)", () => {
       await flushing;
     });
   });
+
+  /**
+   * ⚠️ **A recovery that FAILS has to say so, and silence here is the exact loss
+   * this module calls unrecoverable.**
+   *
+   * The re-enqueue is the safety net for a clobber the tab has ALREADY told its
+   * user is safe, so its refusal arm is the one place where "the words are gone"
+   * is true and nothing on screen holds a copy: the capture field was cleared at
+   * submit, the strip has stopped listing the entry, and no later trigger can
+   * recover it. `enqueue` can refuse for the ordinary reason that another tab
+   * filled the queue to {@link CAPTURE_QUEUE_MAX_ITEMS} in the same write that
+   * clobbered ours — nothing exotic — and an ignored result makes that a silent
+   * drop, against this module's governing rule that a wasted retry is recoverable
+   * and a dropped capture is not.
+   *
+   * It is an accessibility failure on the same line. The refusal region is the
+   * only report of it, so an unannounced drop is `write-notice-hygiene`'s missing
+   * failure message (#210/#218/#225/#246) with the words already destroyed —
+   * there is nothing on screen for a sighted user to notice either.
+   *
+   * Reported by Duo on `!360`, which presented this module small enough to be
+   * read; the verdict was grounded-but-undeliverable, so the finding arrived in a
+   * note body with no thread. Verified against the code before it was acted on.
+   */
+  it("announces a re-enqueue the store refused rather than dropping the words in silence", async () => {
+    render(<Host />);
+    await userEvent.click(screen.getByRole("button", { name: "add" }));
+    const ours = readQueue(window.localStorage)[0];
+    expect(ours).toBeDefined();
+
+    // One write from another tab doing both things at once: it clobbers our
+    // capture out of the queue AND leaves the queue at the item cap, so the
+    // recovery `enqueue` is refused instead of accepted.
+    await act(async () => {
+      seed(
+        Array.from({ length: CAPTURE_QUEUE_MAX_ITEMS }, (_, i) =>
+          capture({ clientKey: `theirs-${i}`, text: `theirs ${i}` }),
+        ),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: CAPTURE_QUEUE_STORAGE_KEY }),
+      );
+      await Promise.resolve();
+    });
+
+    // The control that keeps the assertion below non-vacuous: the recovery really
+    // did fail, so there really is something to announce. Without it this test
+    // would also pass against a hook that had somehow re-enqueued successfully
+    // and announced for another reason entirely.
+    expect(
+      readQueue(window.localStorage).map((c) => c.clientKey),
+      "the recovery was supposed to be REFUSED here; if the capture is back in " +
+        "the queue this case is no longer testing the refusal arm",
+    ).not.toContain(ours!.clientKey);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("announcement")).toHaveTextContent(
+        "recovery-failed",
+      ),
+    );
+  });
+
+  /**
+   * The other direction, so the announcement cannot be a blanket one. A recovery
+   * that SUCCEEDS is not news — the words are exactly where the user was told
+   * they were — and announcing it would put a destructive-styled `role="alert"`
+   * on screen describing a loss that did not happen.
+   */
+  it("says nothing when the re-enqueue succeeds", async () => {
+    render(<Host />);
+    await userEvent.click(screen.getByRole("button", { name: "add" }));
+
+    await act(async () => {
+      seed([capture({ clientKey: "other-tabs-capture", text: "theirs" })]);
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: CAPTURE_QUEUE_STORAGE_KEY }),
+      );
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("announcement")).toHaveTextContent("");
+  });
 });
 
 describe("useCaptureQueue — Discard re-checks at resolution (#175)", () => {
@@ -867,6 +950,105 @@ describe("useCaptureQueue — scoping and the sweep (#175)", () => {
       expect(readQueue(window.localStorage)[0]?.unresolvableSince).toBeTypeOf(
         "number",
       ),
+    );
+  });
+
+  /**
+   * ⚠️ **The sweep is a WRITER, so it has to announce like every other writer
+   * here — and its third job REMOVES an entry outright.**
+   *
+   * A removal nobody is told about leaves a mounted reader counting words that are
+   * no longer in storage: the strip's *"1 waiting for another account"* describing
+   * nothing at all, and offering a Discard for it. The sibling write 25 lines
+   * below already does this correctly (`if (plan.marks.length > 0) broadcast()`),
+   * and that asymmetry inside one effect is what gave it away.
+   *
+   * ── ⚠️ Honest note on reachability, because it changes what this test is ─────
+   *
+   * **The single mounted reader is covered today, incidentally, by two things
+   * neither of which is about the sweep.** `flush` runs straight after it on the
+   * same mount and either finds work — `setFlightCount` then re-renders the
+   * component, and `getSnapshot` is re-read during that render — or finds none and
+   * falls through to its own trailing `broadcast()`. Both are side effects of an
+   * unrelated call, and `inbox-view.tsx` is the only consumer today, so this is a
+   * latent gap rather than a live defect.
+   *
+   * It is fixed rather than argued about in a comment for the same reason the
+   * `claimed` guard above is: **the thing that hides it is one ordinary edit
+   * away.** React's own `useSyncExternalStore` consistency check cannot stand in
+   * either — it is queued before the mount effect that does the sweeping, so it
+   * reads the pre-sweep value every time.
+   *
+   * And the contract is already written down: this module's own docblock says
+   * *"more than one reader can be mounted in a session, and they must never
+   * disagree about whether somebody's words are saved."* A second reader gets none
+   * of the incidental cover above, because `flightCount` is per-hook state — so
+   * that is the level this pins, and it is the claim the docblock makes.
+   *
+   * Reported by Duo on `!360`. Its stated mechanism — *"until an unrelated event
+   * fires"* — is not what was measured, and neither was a first guess here that
+   * the window lasted a flush pass; what is true is written above.
+   */
+  it("tells an ALREADY-MOUNTED reader what the sweep removed", async () => {
+    /** One reader, labelled, so two of them can be told apart in one document. */
+    function Reader({ id }: { id: string }) {
+      const api = useCaptureQueue(LIVE);
+      return <span data-testid={`stranded-${id}`}>{api.stranded.length}</span>;
+    }
+    /** The second reader mounts on demand, so the first is settled before it does. */
+    function Readers() {
+      const [second, setSecond] = useState(false);
+      return (
+        <>
+          <Reader id="first" />
+          {second ? <Reader id="second" /> : null}
+          <button onClick={() => setSecond(true)}>mount second</button>
+        </>
+      );
+    }
+
+    // Never resolves — a pod rolling mid-request, or a connection that never
+    // closes: the third failure mode this module names, and the reason
+    // CAPTURE_FLUSH_TIMEOUT_MS exists. It parks both readers' flush passes so
+    // neither trailing `broadcast()` can arrive and stand in for the sweep's own.
+    fetchMock.mockReturnValue(new Promise<Response>(() => {}));
+    seed([capture({ clientKey: "ours" })]);
+    render(<Readers />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    // Another tab adds an entry for an account this browser can no longer reach,
+    // already stamped past CAPTURE_ORPHAN_WINDOW_MS.
+    await act(async () => {
+      seed([
+        capture({ clientKey: "ours" }),
+        capture({
+          clientKey: "orphan",
+          workspaceId: "ws-someone-else",
+          unresolvableSince: 1,
+        }),
+      ]);
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: CAPTURE_QUEUE_STORAGE_KEY }),
+      );
+      await Promise.resolve();
+    });
+    // The first reader is counting it. This is the control: without it the
+    // assertion at the foot would pass against a reader that never saw the entry.
+    expect(screen.getByTestId("stranded-first")).toHaveTextContent("1");
+
+    // A second reader mounts. ITS sweep is the write the first one has to hear
+    // about, and it gets no help from the first reader's own render cycle.
+    await userEvent.click(screen.getByRole("button", { name: "mount second" }));
+
+    // Second control: the sweep really did remove it, so there is genuinely
+    // something to announce and the assertion below is about the announcement.
+    await waitFor(() =>
+      expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+        "ours",
+      ]),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("stranded-first")).toHaveTextContent("0"),
     );
   });
 
