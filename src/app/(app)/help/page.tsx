@@ -28,13 +28,20 @@ export default async function HelpPage({
 
   return (
     <div className="space-y-8">
-      <header className="space-y-1">
+      {/* A `<div>`, not a `<header>`. `<header>` maps to the `banner` landmark
+          unless it is inside `article`/`aside`/`main`/`nav`/`section`, and
+          `(app)/layout.tsx:151` wraps `{children}` in a plain `<div>` — so there
+          is no sectioning ancestor above this point and a `<header>` here
+          resolved to a SECOND banner, beside the shell's own at `layout.tsx:83`.
+          /help was the only `(app)` page with this shape. The `h1` is what names
+          the page either way, so the element buys nothing back. */}
+      <div className="space-y-1">
         <h1 className="text-2xl font-semibold">Help &amp; getting started</h1>
         <p className="text-muted-foreground text-sm">
           A quick tour of how dlectroflow works — capture, review, break down,
           focus, done.
         </p>
-      </header>
+      </div>
 
       {/* #72 — the page map. Sticky so it stays reachable on a long scroll.
           #131 — and the way OUT rides with it. It is the page's only back

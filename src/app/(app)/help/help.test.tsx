@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { HELP_SECTIONS } from "@/lib/section-nav";
 import HelpPage from "./page";
 
 // The rest of the props are spread through rather than dropped, so the
@@ -379,6 +380,52 @@ describe("HelpPage", () => {
       "href",
       "/",
     );
+  });
+
+  // The page's title block used to be a `<header>`, which made it a SECOND
+  // `banner` landmark on every visit.
+  //
+  // `<header>` only stops mapping to `banner` when it is a descendant of
+  // `article`, `aside`, `main`, `nav` or `section`. This one sat in the page's
+  // outer `<div>`, and `(app)/layout.tsx:151` wraps `{children}` in a plain
+  // `<div>` rather than a `<main>` — so there was no sectioning ancestor anywhere
+  // above it and it resolved to `banner`, alongside the shell's own header at
+  // `layout.tsx:83`. Two banners is a duplicate-landmark failure, and it makes
+  // "go to the banner" ambiguous for a screen-reader user on this page only.
+  //
+  // /help was the ONLY `(app)` page doing this, so it is fixed here rather than
+  // swept: `legal-page.tsx` has a `<header>` too and is already correct, because
+  // its own `<main>` (:110) encloses it. A `<div>` loses nothing — the `h1` is
+  // what carries the page's name either way.
+  //
+  // The missing `<main>` in the shell is a separate, wider gap (no `(app)` route
+  // has one, while `/login`, `/privacy` and `/terms` all do) and is reported
+  // rather than changed here, since it is one sweep across ten routes.
+  it("contributes no second banner landmark (the app shell owns the banner)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.queryAllByRole("banner")).toHaveLength(0);
+    // The title itself is untouched — this is about the wrapper, not the heading.
+    expect(
+      screen.getByRole("heading", {
+        name: /Help & getting started/i,
+        level: 1,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  // A content page's headings have to descend without gaps: h1, then h2 per
+  // section, nothing below. The nine h2s come from HELP_SECTIONS via
+  // <SectionHeading>, so this also pins that none of them has quietly become an
+  // h3 — and that the page has exactly one h1 to be the document's name.
+  it("keeps heading levels contiguous: one h1, then only h2s", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(
+      HELP_SECTIONS.length,
+    );
+    for (const level of [3, 4, 5, 6]) {
+      expect(screen.queryAllByRole("heading", { level })).toHaveLength(0);
+    }
   });
 
   it("renders exactly one back control", async () => {
