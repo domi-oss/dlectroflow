@@ -7,6 +7,7 @@ import {
   TurnRole,
   FocusOutcome,
   RewardType,
+  EngagementKind,
   SparkSource,
   BadgeKey,
   WorkspaceKind,
@@ -114,6 +115,19 @@ const REGISTRY: ReadonlyArray<{
     table: "RewardEvent",
     column: "type",
     values: RewardType,
+    nullable: false,
+  },
+  // #233 — the per-day engagement ledger. A SEPARATE value set from
+  // `RewardType` above, and the two are deliberately not derived from each
+  // other: `capture` earns a streak day and no points so it has no reward type,
+  // while `inbox_zero`, `scheduled` and `session_finished` are rewards that
+  // never advance the streak. `EngagementKind`'s docblock in constants.ts has
+  // the argument; this entry is what makes it enforceable.
+  {
+    constraint: "EngagementDay_kind_check",
+    table: "EngagementDay",
+    column: "kind",
+    values: EngagementKind,
     nullable: false,
   },
   {

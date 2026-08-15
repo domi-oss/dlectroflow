@@ -375,6 +375,11 @@ export function makeSnapshot(
         id: "streak-1",
         current: 3,
         lastActiveWorkday: "2026-07-02",
+        // #233 — before the run below, so this fixture's streak reads as one the
+        // ledger covers in full. That is the interesting shape to serialise: the
+        // other one (a run that predates coverage) differs only in a boolean the
+        // export does not carry.
+        ledgerFrom: new Date(Date.UTC(2026, 5, 1, 0, 0, 0)),
         workspaceId: WORKSPACE_ID,
       },
       streakRecords: [
@@ -399,6 +404,28 @@ export function makeSnapshot(
           id: "reward-1",
           type: "step_done",
           points: 10,
+          createdAt: new Date(Date.UTC(2026, 6, 2, 9, 20, 0)),
+          workspaceId: WORKSPACE_ID,
+        },
+      ],
+      // #233 — one attributed credit and one unattributed one, because the NULL
+      // `itemId` is the load-bearing case: it is what the backfill writes and
+      // what makes a credit permanent. A fixture carrying only attributed rows
+      // would serialise the easy half.
+      engagementDays: [
+        {
+          id: "engagement-1",
+          day: "2026-07-01",
+          kind: "capture",
+          itemId: null,
+          createdAt: new Date(Date.UTC(2026, 6, 1, 8, 5, 0)),
+          workspaceId: WORKSPACE_ID,
+        },
+        {
+          id: "engagement-2",
+          day: "2026-07-02",
+          kind: "step_done",
+          itemId: "item-1",
           createdAt: new Date(Date.UTC(2026, 6, 2, 9, 20, 0)),
           workspaceId: WORKSPACE_ID,
         },
@@ -452,6 +479,7 @@ export function makeEmptySnapshot(): ExportSnapshot {
       streakRecords: [],
       badges: [],
       rewardEvents: [],
+      engagementDays: [],
       dayRollups: [],
       dailySparks: [],
     },
