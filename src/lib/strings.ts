@@ -93,12 +93,43 @@ export const STRINGS = {
   // literal-string-only, so a key reached by a COMPUTED lookup reads as orphaned
   // while being live. `freshness.recent` is the one such key today — it is
   // built from a template literal by `status-pill.tsx:49`, whose key is the tier
-  // interpolated after "freshness.", and a
-  // naive sweep would have deleted a label the inbox paints on every row. That
-  // template literal is the only non-literal `t()` call in the tree, and every
-  // `Record<_, StringKey>` map (`BUCKET_LABEL`, `THEME_LABEL`, `TYPEFACE_LABEL`,
-  // `BADGE_STRING_KEY`, `EJECT_MESSAGE`) spells its keys literally, so the recipe
-  // is sound everywhere else. Check for a new computed caller before trusting it.
+  // interpolated after "freshness.".
+  //
+  // ⚠️ Substitute review of record, !356 — this paragraph used to end "that
+  // template literal is the only non-literal `t()` call in the tree", and that is
+  // false by 34. Production `t()` has **35** call sites whose first argument is not
+  // a literal, across five mechanisms: 18 ternaries of two literals, 6 map indexes,
+  // 5 `StringKey`-returning functions (`focus-timer.tsx:1262`,
+  // `inbox-view.tsx:2496,2646`, `library-done-delete.tsx:378`,
+  // `shopping-list.tsx:996`), 3 member accesses (`library/page.tsx:189,227`,
+  // `section-nav.ts:29`), 2 bare variables (`app-menu.tsx:133`,
+  // `quick-access.tsx:66`) — and the 1 template literal. Sending the next reader
+  // to check one file when there are thirty-five is the dangerous half of a
+  // delete-recipe, so state the property the recipe actually rests on:
+  //
+  //   the template literal is the only `t()` call whose key TEXT never appears
+  //   literally anywhere in `src`.
+  //
+  // Every other computed caller resolves to a key that is spelled literally at its
+  // source, which is why the grep still finds it: the four key-returning functions
+  // `return "<literal>"` in every arm, and the key tables spell theirs out —
+  // `BUCKET_LABEL`, `THEME_LABEL`, `TYPEFACE_LABEL`, `BADGE_STRING_KEY`,
+  // `EJECT_MESSAGE`, plus `DESTINATIONS` (`app-menu.tsx:9-20`), `TABS`
+  // (`library/page.tsx:54-59`), `SETTINGS_SECTIONS` (`section-nav.ts:49`) and
+  // `quick-access.tsx:102,110`. Verify THAT before trusting the sweep, not the map
+  // list, which was never the complete set.
+  //
+  // Two things narrow the residual risk, and one widens it:
+  //  * `tsc` refuses the `freshness.recent` deletion outright. `FreshnessTier`
+  //    (`aging.ts:39`) is a literal union, so the template literal is contextually
+  //    typed against `StringKey` and removing a key is a compile error, not a
+  //    silent breakage. The type system covers this whole class wherever the
+  //    interpolated type is a literal union.
+  //  * ⚠️ It does not cover an UNTYPED carrier. `scheduling/types.ts:75` declares
+  //    `readonly labelKey: string` — not `StringKey` — and holds
+  //    "action.addToCalendar" and "action.schedule" (`providers.ts:24,51`).
+  //    Nothing type-checks those against this table. Dormant (not yet passed to
+  //    `t()`), and the reason to widen the type rather than to trust the grep.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
@@ -1432,11 +1463,21 @@ export const STRINGS = {
     playful:
       "Single action items you committed without breaking into steps. Do them whole, or snack-size one later.",
   },
+  // Substitute review of record, !356 — this used to say "the freshness clock is
+  // paused until each one wakes", and nothing pauses it. Age is
+  // `now − max(createdAt, freshenedAt)` (`aging.ts:44-53`); `snoozeBrainDumpItem`
+  // (`braindump.ts:157-175`) writes `snoozedUntil` and never stamps `freshenedAt`.
+  // Parking only drops the row out of `needsReview` (`bucket.ts:180-182`), which
+  // is what hides the pill and stops the nudge — the clock runs on underneath, so
+  // an item parked at 3h30 returns after its 60-minute snooze reading `Aging`
+  // against the default 4-hour threshold. The hint now claims the behaviour that
+  // exists rather than the one the wording implied; whether parking SHOULD reset
+  // the clock is a behaviour change and is reported separately.
   "lib.pantry.hint": {
     plain:
-      "Stored for later — the freshness clock is paused until each one wakes.",
+      "Stored for later — these are out of the queue until each one wakes.",
     playful:
-      "Stored for later — the freshness clock is paused until each one wakes.",
+      "Stored for later — these are out of the queue until each one wakes.",
   },
   "lib.sorted.hint": {
     plain:

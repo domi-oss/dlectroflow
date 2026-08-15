@@ -78,6 +78,21 @@ describe("HelpPage", () => {
     expect(text).toMatch(/without dragging|keyboard|same/i);
   });
 
+  // Substitute review of record, !356 — this section sends the reader to Settings
+  // for the freshness thresholds without naming the section that holds them, which
+  // is the same "the NAME is the search term" standard this MR states twice and
+  // then applies only to the typefaces. The section is `Aging & reminder`
+  // (`section-nav.ts:54`), and it is one of eleven collapsed titles: a reader told
+  // only "on the Settings page" has to scan all eleven for a word that is on none
+  // of them, because "freshness" is this page's word and "Aging" is the app's.
+  it("names the Settings section that owns the freshness thresholds", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The inbox & freshness/i, level: 2 })
+      .closest("section");
+    expect(section!.textContent ?? "").toMatch(/Aging & reminder/);
+  });
+
   // The focus session gained real depth in v0.4.0 (#27 pause/resume, #43 + #68
   // music, #66 setup screen) while this page still described none of it. These
   // assertions are deliberately about the CONTROLS a user looks for, so the page
@@ -154,8 +169,10 @@ describe("HelpPage", () => {
     expect(text).not.toMatch(/there is nothing to switch on/i);
   });
 
-  // The app menu carries seven destinations; this page documented three of them
-  // (Inbox, Focus, Settings) and never named Library or Activity — even though its
+  // The app menu carries SIX destinations by default (`app-menu.test.tsx:53-63`
+  // asserts the list; the seventh entry is gated on `shoppingList`, which is
+  // `@default(false)`). This page documented four of them — Inbox, Focus Timer,
+  // Settings and Help itself — and never named Library or Activity, even though its
   // own getting-started list promises the reader they will "earn points toward
   // your streak", which is a payoff with no stated address.
   //
@@ -192,6 +209,23 @@ describe("HelpPage", () => {
     );
     expect(hrefs).toContain("/library");
     expect(hrefs).toContain("/dashboard");
+    // Substitute review of record, !356 — two claims this MR added that the tree
+    // does not support.
+    //
+    // 1. The freshness clock is NOT paused by parking an item. Age is
+    //    `now − max(createdAt, freshenedAt)` (`aging.ts:44-53`) and
+    //    `snoozeBrainDumpItem` (`braindump.ts:157-175`) writes `snoozedUntil`
+    //    without ever stamping `freshenedAt`. Parking only removes the row from
+    //    `needsReview` (`bucket.ts:180-182`), which hides the pill and stops the
+    //    nudge — the clock keeps running underneath. Save for later snoozes for
+    //    60 minutes at every call site, and the default `agingHours` is 4, so an
+    //    item parked at 3h30 comes back reading `Aging`.
+    // 2. The inbox's completed strip is the last TEN completions of all time
+    //    (`bucket.ts:201-208`, `slice(0, 10)`, no date filter). "What you
+    //    completed today" is a separate COUNT rendered beside it, so describing
+    //    the list itself that way contradicts the badge above it.
+    expect(text).not.toMatch(/clock is paused/i);
+    expect(text).not.toMatch(/preview of what you completed today/i);
   });
 
   // #199 — shopping-list mode is `Settings.shoppingList`, `@default(false)`, and
@@ -264,6 +298,14 @@ describe("HelpPage", () => {
     // never learn the typeface options are in here. That is the same
     // "section does not say what it covers" gap this MR exists to close, so it is
     // asserted on the first sentence specifically rather than on the section text.
+    //
+    // Substitute review of record, !356 — the fix for that finding recursed and
+    // stopped one short, and this loop is where it was pinned at five. The section
+    // carries SIX topics: the sixth is `Account → Your name` (#252), the field that
+    // stops the header greeting you by your provider username. Its reader is
+    // exactly the skimmer this assertion exists for — someone whose header shows a
+    // username scans the lead for "name" or "account", finds neither, and leaves.
+    // Guarding five while documenting six would have passed forever.
     const lead = section!.querySelector("p")!.textContent ?? "";
     for (const covered of [
       /voice/i,
@@ -271,6 +313,7 @@ describe("HelpPage", () => {
       /notifications/i,
       /appearance/i,
       /integrations/i,
+      /name/i,
     ]) {
       expect(lead).toMatch(covered);
     }
@@ -466,7 +509,9 @@ describe("HelpPage", () => {
   //
   // The missing `<main>` in the shell is a separate, wider gap (no `(app)` route
   // has one, while `/login`, `/privacy` and `/terms` all do) and is reported
-  // rather than changed here, since it is one sweep across ten routes.
+  // rather than changed here. It is one sweep across the NINE `(app)` routes
+  // (`find "src/app/(app)" -name page.tsx | wc -l` → 9) — this said ten until the
+  // substitute review of record counted them.
   it("contributes no second banner landmark (the app shell owns the banner)", async () => {
     render(await HelpPage({ searchParams: Promise.resolve({}) }));
     expect(screen.queryAllByRole("banner")).toHaveLength(0);

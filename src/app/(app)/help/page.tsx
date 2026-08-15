@@ -93,8 +93,9 @@ export default async function HelpPage({
           an item asks &ldquo;still needed?&rdquo; — choose{" "}
           <strong>Still need it</strong> to reset its clock or{" "}
           <strong>Dismiss</strong> to stop the nudge. Use{" "}
-          <strong>Save for later</strong> to pause freshness on something you
-          are not ready for. You can tune the tier thresholds on the{" "}
+          <strong>Save for later</strong> to take something you are not ready
+          for out of the queue, so it stops asking. You can tune the tier
+          thresholds under <strong>Aging &amp; reminder</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
@@ -275,8 +276,9 @@ export default async function HelpPage({
 
       {/* The getting-started list above ends by promising the reader they will
           "earn points toward your streak" — a payoff whose address this page never
-          gave. Library and Activity are two of the app menu's seven destinations
-          and neither was named anywhere here.
+          gave. Library and Activity are two of the app menu's six default
+          destinations (`app-menu.test.tsx:53-63` pins that list) and neither was
+          named anywhere here.
 
           Both are linked by their MENU labels rather than their routes, because
           those are the words on screen: `/dashboard` renders `nav.dashboard` →
@@ -290,12 +292,13 @@ export default async function HelpPage({
           </Link>
           , under four tabs: <strong>Single-task</strong> and{" "}
           <strong>Multi-step</strong> for work in progress,{" "}
-          <strong>Saved for later</strong> for anything parked (its freshness
-          clock is paused until it wakes), and <strong>Done</strong> for
-          finished work. The inbox keeps a short preview of what you completed
-          today; <strong>Done</strong> is the full list. Opening a multi-step
-          row expands its steps in place, so you can carry on without leaving
-          the page.
+          <strong>Saved for later</strong> for anything parked (which also stays
+          on the inbox page, in its own list), and <strong>Done</strong> for
+          finished work. The inbox keeps a short preview of your most recent
+          completions, with a count of how many you finished today;{" "}
+          <strong>Done</strong> is the full list. Opening a multi-step row
+          expands its steps in place, so you can carry on without leaving the
+          page.
         </p>
         <p className="text-sm">
           <Link href="/dashboard" className="underline">
@@ -372,9 +375,10 @@ export default async function HelpPage({
             Library
           </Link>{" "}
           tab and has <strong>nothing to do with it</strong> — the two are
-          separate, and a shopping item never becomes a task or shows up in your
-          inbox. Nothing comes back off that shelf on its own; you pull an item
-          up when you want it again.
+          separate, and a shopping item never becomes a task or appears as an
+          inbox row. (The reminder above is a count of the list, not the items
+          themselves.) Nothing comes back off that shelf on its own; you pull an
+          item up when you want it again.
         </p>
       </section>
 
@@ -384,7 +388,8 @@ export default async function HelpPage({
           Switch between the calm <strong>Plain</strong> voice and the playful
           snack-themed voice, set your freshness thresholds, choose your{" "}
           <strong>notifications</strong>, adjust the <strong>appearance</strong>
-          , and connect your <strong>integrations</strong> on the{" "}
+          , connect your <strong>integrations</strong>, and set{" "}
+          <strong>the name the app calls you</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
