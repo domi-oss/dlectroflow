@@ -34,6 +34,11 @@ The generic feature the owner also asked for, because a tracker built for exactl
 hard-coded string: settings that enable or disable the feature entirely, set the regimen, and
 eventually choose between views; and eventually notifications.
 
+**Two surfaces answer the question, settled 2026-08-15**: a **today-strip on the home page**, which is
+the full picture and is always present when the feature is on, and a **control in the nav bar** that
+travels with you, in one of two modes the user picks in Settings. The strip being unconditional is what
+lets the nav modes be specialised; both are argued in their own sections.
+
 ## Non-goals — settled with the owner, not deferred by omission
 
 - **Adherence scoring of any kind.** No streaks, no badges, no points, no percentage. This is the
@@ -862,9 +867,14 @@ The two modes fail differently, so a single checklist would be wrong for both. W
 be "improved" by a well-meaning implementation: no `matchMedia` probe, no focus-behaviour heuristic, no
 `aria-*` sniffing. The recommendation lives in Settings copy.
 
-### ⚠️ The legal copy — a v1 blocker, not a follow-up
+### ⚠️ The legal copy — a v1 blocker that ships BEFORE the feature (confirmed 2026-08-15)
 
-**`/privacy` currently says this app has no health field:**
+**Settled 2026-08-15: the amendment is not a companion change to the feature, it lands first.** This
+section already argued the blocker and the argument is unchanged; what follows adds what has happened
+since, because two of the four things it rests on have moved.
+
+**`/privacy` still says this app has no health field — verified live on `main` at `47e015d`**,
+`src/app/privacy/page.tsx:1096–1097`, two days and ten merges after the first pass:
 
 > There is no health field, no diagnosis field, no questionnaire, and nothing infers anything about
 > your health, your mind, or how you are doing. It is a to-do app with a kind tone.
@@ -874,6 +884,58 @@ Article 9 UK GDPR. **Shipping the feature without amending that sentence publish
 is no longer true**, which is a worse defect than any bug in this document, and it is invisible to
 every test in the repo.
 
+#### What has changed since 2026-08-13 — and it does not make the amendment smaller
+
+⚠️ **A legal-accuracy sweep of `/privacy` is in flight**: `!357 — Draft: fix(legal): correct ten
+measured drifts between the legal pages and the code`, milestone v0.7.0. It is tempting to conclude
+that part of this checklist is being done anyway. **Read against `!357`'s actual scope, that conclusion
+does not hold in the direction that matters, and the honest reading is: the surgery on one sentence is
+being done for us, and the amendment gains three surfaces and loses its stated legal basis.**
+
+- ✅ **The sentence's second half is already being narrowed, for a reason that has nothing to do with
+  meds.** `!357` found *"nothing infers anything about … how you are doing"* was **already overstated
+  before any medication work**, because `DayRollup.narrative` is an LLM-written, stored, second-person
+  text about the reader's day, written automatically at `workdayEndTime` rather than opt-in. So the
+  clause is being *narrowed, not deleted* — which means the meds amendment edits a sentence that is
+  already in motion, and must be written against `!357`'s text rather than against what is on `main`
+  today.
+- ⚠️ **The Article 9(2)(a) basis this section leaned on has been withdrawn.** `!357`'s F5 removes the
+  explicit-consent claim outright — its own summary: *"There is no gate, no acknowledgement and no
+  warning anywhere in `src/`; the only hits were the page's own prose."* **So the checklist item that
+  said "confirm the Art. 9(2)(a) basis is stated for the structured case" is now wrong as written**,
+  because there is no such basis on the page to extend. `!357` is Draft precisely on that open
+  question, and it is the owner's to answer.
+- ⚠️ **This actually strengthens the blocker rather than weakening it.** A structured, deliberate
+  health field is a much better fit for consent than incidental free text ever was — the toggle is a
+  real affirmative act — but a basis that has just been withdrawn as unsupported cannot be re-asserted
+  for a new field without the mechanism `!357` says does not exist.
+- ⚠️ **Three surfaces this section never named now move together.** `!357` records that `/privacy`,
+  `src/lib/export/readme.ts` and `src/app/(app)/help/page.tsx` are one disclosure read in three places,
+  with `docs/legal.md` recording that they move together. The `/help` page's *"two things are
+  deliberately left out"* was *"true when written, an undercount the moment this shipped"* — the exact
+  failure mode this amendment must not repeat.
+- ⚠️ **`/terms` is untouched by `!357`** — its recorded fingerprint *"comes back byte-identical"* — so
+  the `/terms` checklist item below is unaffected and stands as written.
+- ⚠️ **`!357` deliberately says nothing about medication:** *"Nothing about medication tracking reaches
+  these pages. It is designed and unbuilt, and disclosing it early would be its own inaccuracy."*
+  **So none of this checklist is done by `!357`.** It changes the text to amend, not the work.
+
+#### ⚠️ The amendment is one commit, because a publication event cannot be split
+
+`src/lib/legal.ts` holds a single `LEGAL_EFFECTIVE_DATE` — *"ONE date [covering] both documents"* — and
+a fingerprint gate whose purpose is that *"the text cannot move without someone deciding about this
+date"*. `!357`'s description states the consequence of ignoring that: split across MRs, *"each merge
+would invalidate the other's recorded hash and the date would move N times for one publication"*.
+
+Two things follow, and they are sequencing constraints rather than preferences:
+
+1. **The meds amendment is its own single commit**, moving the date once and re-recording the
+   fingerprints in the same commit.
+2. **It cannot ride alongside `!357`.** One of the two lands first and the other rebases onto it. Since
+   `!357` is open on an owner decision and this feature is unbuilt, `!357` going first is the natural
+   order — and it is the cheaper one, because writing the meds clause against `!357`'s narrowed health
+   paragraph is one edit, whereas writing it against today's text means writing it twice.
+
 The existing notice handles health data **only** in its free-text form, and the difference is exactly
 what makes this new: it says *"What I cannot control is what you type into a free-text box […] Where
 you choose to include details like that, you are sharing them knowingly and explicitly, and it is
@@ -881,27 +943,46 @@ that explicit consent — Article 9(2)(a) UK GDPR — that permits me to hold th
 about **unstructured, incidental** disclosure. A medication tracker is a **dedicated structured
 field**, which is the specific thing the paragraph above it says does not exist.
 
+⚠️ **That quotation is `main`'s text and `!357` deletes its second half.** It is left in place because
+the *contrast* it draws — incidental free text versus a dedicated field — is the argument, and that
+argument survives the deletion intact. What does not survive is the legal basis; see below.
+
 **The feature gate is what makes this tractable, and it is worth seeing why.** With
 `medsTracker` defaulting to `false`, **a workspace that has not opted in genuinely has no health
 field** — no row can exist. So the amendment is conditional rather than a retraction: the notice can
 say the app has no health field *unless you turn one on*, and describe what happens when you do. The
 default-off switch is doing legal work as well as product work.
 
-**v1 checklist items, and the wording itself is the owner's call rather than this document's:**
+**v1 checklist items, revised 2026-08-15 against `!357`'s scope. The wording itself is the owner's call
+rather than this document's, and the Article 9 item is now a decision rather than a check:**
 
 - [ ] Amend `/privacy`'s *Sensitive information, and a word about ADHD* section: an opt-in medication
-      log exists, what it stores, that enabling it is the explicit consent, and that turning it off
-      hides rather than deletes
-- [ ] Confirm the Article 9(2)(a) basis is stated for the **structured** case, not only the free-text
-      one
-- [ ] Check the *retention* section still reads true for these tables
+      log exists, what it stores, and that turning it off hides rather than deletes. **Write it against
+      `!357`'s narrowed health paragraph, not against `main`'s** — see above
+- [ ] ⚠️ **Decide the Article 9 position for the structured case.** This replaces the earlier item,
+      which asked to confirm an Art. 9(2)(a) basis that `!357` has since withdrawn as unsupported.
+      A deliberate opt-in toggle is a far better candidate for explicit consent than incidental free
+      text was — but **asserting it requires the acknowledgement mechanism `!357` found does not
+      exist**, so the choice is *build the mechanism and claim consent*, or *state a position that needs
+      none*. Owner's call, and it is the same open question `!357` is Draft on
+- [ ] Check the *retention* section still reads true for these tables. ⚠️ **`!357`'s F2 rewrites it** —
+      it now says the final deletion is a hand operation — so this item reads against the new text
 - [ ] Re-read `/privacy`'s "no data protection officer" paragraph. It rests on this being neither
       large-scale monitoring nor large-scale special-category processing. **A single opt-in user's
       medication log is plainly not large-scale, so the conclusion stands** — but the sentence should
       be re-read by someone rather than assumed, since the feature moves the app into the category the
       threshold is *about*
 - [ ] `/terms`' "medication or dosing" sentence is scoped to **AI suggestions** and needs no change,
-      **provided no-AI stays true.** It is a non-goal above for this reason
+      **provided no-AI stays true.** It is a non-goal above for this reason. Unaffected by `!357`, which
+      leaves `/terms` byte-identical
+- [ ] ⚠️ **Amend the other two surfaces in the same commit** — `src/lib/export/readme.ts` and
+      `src/app/(app)/help/page.tsx`. `docs/legal.md` records that all three move together, and `/help`'s
+      undercount is the precedent for what happens when one is forgotten
+- [ ] ⚠️ **Add the meds tables to `docs/legal.md`'s *The four places text is sent to the LLM* section as
+      a stated absence** — a medication row never reaches a prompt. That is what turns the *any AI
+      involvement, ever* non-goal into a documented property rather than an intention, and it is the
+      section `!357`'s F10 had to correct for omitting `Task.notes` in two places
+- [ ] Move `LEGAL_EFFECTIVE_DATE` **once**, and re-record both page fingerprints in the same commit
 - [ ] State somewhere the user will see it that the tracker is a **record of what they told it** — not
       a reminder they can rely on, not dosing advice, and not a medical device
 
@@ -913,9 +994,17 @@ default-off switch is doing legal work as well as product work.
 words, *"A user exercising UK GDPR Art. 15/20 would have received an archive silently missing a
 table."*
 
-So: **`collect.ts` must read both, and `json.ts` must serialise both**, or CI reds before review — a
-good outcome, and the reason it is listed here is so it is planned rather than discovered. For
+So: **three files, not two** — ⚠️ corrected 2026-08-15, having been written as two. At `47e015d` the
+guard asserts `read("collect.ts")` contains `prisma.<model>.`, that the model is **mentioned in
+`types.ts`**, and that `json.ts` serialises it. Miss any one and CI reds before review — a good
+outcome, and the reason it is listed here is so it is planned rather than discovered. For
 special-category data the omission would be considerably worse than for a playlist.
+
+⚠️ **And that guard is being widened while this spec sits open.** `!357` extends its predicate from
+"declares `workspaceId`" to "has a relation to `User`", adds a `VIA_PINNED_MODULE` registry for models
+the scoping harness confines to one module, and adds a **column-grain** check on `User`. None of that
+changes the obligation for these two tables — both are workspace-scoped and read directly — but an
+implementer should read the guard rather than this paragraph if `!357` has landed by then.
 
 `MedicationDose` carries no `workspaceId` and is reached via `include`, exactly as `Step` is, so it
 falls outside the guard's predicate and is exported as part of its parent.
@@ -927,13 +1016,30 @@ falls outside the guard's predicate and is exported as part of its parent.
 ### v1 — the slice this spec is for
 
 The feature gate; a today-strip on the home page, working days only; one tap per dose to record
-`taken` or `skipped`; the dismissable banner; the regimen editor in Settings; **full per-dose history
-recorded**; the presentational reward; the privacy amendment; export coverage.
+`taken` or `skipped`; **the nav-bar control in both modes, with the mode picker in Settings**; the
+dismissable banner; the regimen editor in Settings; **full per-dose history recorded**; the
+presentational reward; export coverage.
 
-**One implementable slice.** Checked against splitting: the strip cannot ship without the schema, the
-schema is not worth shipping without a way to write to it, and the regimen editor is what makes the
-schema reachable at all. The privacy amendment is not separable — it is what makes the rest
-publishable.
+⚠️ **The privacy amendment is in v1 but lands FIRST**, as its own commit and its own publication event —
+revised 2026-08-15. It was previously listed as one more item in this slice, which read as "ships
+alongside". It does not: it ships before, because until it has, the feature's release makes a published
+statement untrue. Everything else in this list can be ordered freely.
+
+**Still one implementable slice.** Checked against splitting: the strip cannot ship without the schema,
+the schema is not worth shipping without a way to write to it, and the regimen editor is what makes the
+schema reachable at all.
+
+**The nav control is in v1 rather than deferred**, and the reason is that deferring it would cost more
+than including it: it shares the logging call, the derived state and the announcement conventions with
+the strip, so building it later means re-opening all three. ⚠️ **Its honest cost, stated rather than
+buried: two modes are two code paths**, each needing its own tests and its own a11y assertions. The
+shared part is the logging call and the state model, which is most of the volume but not most of the
+risk — the risk is in the two accessible-name and live-region implementations, which do not share code.
+
+⚠️ **If the slice has to shrink, the mode picker is the first thing to cut, not the control.** Ship
+`B★` alone against the default and add `next` with the column's second value later; the migration is
+additive and the CHECK constraint is the only thing to widen. Cutting the *control* instead would be
+the wrong economy, because the header is the surface the owner asked for.
 
 ### v2 — its own issue: the `/meds` page
 
@@ -1011,17 +1117,50 @@ TDD, failing test first. The ones that pin decisions rather than mechanics:
 7. **A dose id from another workspace cannot be logged**, even when the caller supplies a valid one.
 8. **Turning `medsTracker` off hides everything and deletes nothing** — the history survives the
    round trip. This is the doctrine `shoppingList` states, asserted rather than trusted.
-9. **The reward copy sets are equal in size across `taken` and `skipped`, in both voices.** The
-   mechanical half of the honesty rule; the tonal half is a review item and cannot be automated.
-10. **`plain` reward copy contains no emoji.** `strings.ts` states the contract; this stops the
-    rotating set from quietly breaking it.
+9. **The `taken` and `skipped` reward sets are equal in size.** The mechanical half of the honesty
+   rule; the tonal half is a review item and cannot be automated. ⚠️ Revised 2026-08-15 — this used to
+   read "in both voices", which the voice deletion makes meaningless. **Also assert the set size is in
+   the 6–8 band**, so nothing grows it to twenty by accretion; a bare equality assertion is satisfied
+   by two sets of forty.
+10. **The reward copy contains no decorative emoji.** `strings.ts`'s contract, which #86 keeps for the
+    surviving voice; this stops the rotating set from quietly breaking it.
 11. **Rotation is deterministic for a given (date, dose) pair** — the same input gives the same line
     on two calls. Pins the anti-hydration-bug property and the no-`Math.random` decision together.
-12. **Dose chips meet the 44×44 floor**, with a control that the assertion can fail.
+12. **Dose chips and the nav control meet the 44×44 floor**, with a control that the assertion can
+    fail. ⚠️ `min-h-11` is only a class name in jsdom — `quick-access.test.tsx` says so at its own
+    assertion — so this checks the composition, not a computed pixel value, and the real measurement
+    belongs in an e2e assertion if one is wanted.
+13. **`MedsNavMode` ↔ `Settings_medsNavMode_check`**, a second `REGISTRY` entry with
+    `nullable: false`, plus the raw-SQL rejection of an out-of-set value. Same shape as test 5, and it
+    is the entry nothing mechanical will remind anyone about.
+14. **`B★`'s accessible name states the NEXT action, and changes when the target dose advances.**
+    Assert on the name string, not on a class: the failure this pins is a name that reports only the
+    current state, which looks correct in a snapshot.
+15. **`B★`'s Undo is focusable, persists past the announcement, and reverts exactly one commit.** The
+    negative half is the one worth writing — a `role="status"` toast that disappears must **fail** this
+    test, otherwise it is not testing anything.
+16. **No number of `B★` presses erases a record** — cycling stops at `skipped` rather than wrapping to
+    *not recorded*.
+17. **`E` advances to the next unrecorded dose and announces the new target**, and when none is left it
+    removes both buttons rather than leaving them inert.
+18. **`E`'s two buttons each carry a complete accessible name on their own**, not one that depends on
+    the group label being read.
+19. **Every commit announces through a polite live region, in both modes** — never assertive.
+20. **The home strip renders whatever `medsNavMode` says.** The property that makes every per-mode
+    compromise legitimate, so it is asserted rather than assumed: iterate both modes and assert the
+    strip is present in each.
+21. ⚠️ **Nothing in the meds code branches on assistive technology.** A source-level assertion that no
+    `matchMedia`, no AT-probe and no equivalent heuristic appears in these components. It reads like a
+    style rule and is not one: it is the only thing that stops a future well-meaning commit from adding
+    detection that cannot work.
 
 ⚠️ **One thing is not automatable: whether the skip copy feels as good as the taken copy.** It is a
 review item on the MR, it is the rule most likely to erode, and no assertion substitutes for reading
 both lists side by side.
+
+⚠️ **A second thing is not automatable, and it is new with the nav control:** whether `B★`'s accessible
+name is *comprehensible*, not merely present. Test 14 can prove a name states the next action; only a
+person can tell whether hearing it on every press is tolerable. That is what the mode picker exists for.
 
 ## Reproducing these numbers
 
@@ -1079,6 +1218,37 @@ console.log("registered one missing:", run(["Workspace_kind_check"]));
 
 Prints `true` then `false` — the stray passes, the omission fails.
 
+**`format:check` cannot gate this file — the measurement, with its control.** ⚠️ Added 2026-08-15
+because this MR's description had claimed the check passes, which was a zero from a run that matched no
+files. The first command exits `0` on deliberately broken Markdown; the second reports it:
+
+```sh
+f=docs/design/specs/2026-08-13-medication-tracker-design.md
+cp "$f" /tmp/spec-probe.md
+printf '\n\n*   badly    formatted   list\n' >> "$f"
+npx prettier --check "$f"; echo "with .prettierignore: exit $?"
+npx prettier --check --ignore-path /dev/null "$f"; echo "control: exit $?"
+cp /tmp/spec-probe.md "$f"
+```
+
+Prints *"All matched files use Prettier code style!"* and `exit 0`, then `[warn]` and a non-zero exit
+on the same bytes. `.prettierignore` lists both `*.md` and `docs/`, so **this file is proofread by hand
+or not at all.**
+
+**The WCAG citation guard reads `docs/`, so it polices this file** — and it is runnable here without
+Postgres, which makes it the one mechanical check this spec does have:
+
+```sh
+git show origin/main:src/lib/a11y-class-hygiene.test.ts | grep -n 'for (const root of'
+npx vitest run --config config/vitest.config.ts src/lib/a11y-class-hygiene.test.ts
+```
+
+The grep prints `["src", "e2e", "docs"]`. ⚠️ **Run it from a branch synced with `main`**: on this branch
+before `main` was merged in, it failed on `docs/design/specs/2026-08-11-offline-capture-queue-design.md`
+— an older version of that file **quotes** the weld it documents, and the guard cannot distinguish a
+quoted bad citation from a real one. `main` has since rephrased it. A red from a file you did not touch
+is that, not your own citation.
+
 ## Considered and declined
 
 | Option | Why not |
@@ -1090,6 +1260,8 @@ Prints `true` then `false` — the stray passes, the omission fails.
 | A far-future `markedAt` or a year-9999 sentinel for any state | #260's explicit warning: indistinguishable from a real timestamp, and something will eventually read it as one |
 | Streaks, badges or points on doses | Creates a motive to lie to the tracker, which destroys its only value; `0 day streak` on medication reads as a verdict about health; and points would make a productivity score partly measure a pill. It would also add the post-commit write this feature is otherwise structurally free of |
 | A softer, gentler copy set for `skipped` | **The honesty incentive delivered as tone.** If skipping feels worse than taking, the user learns to press *Taken*. Same warmth, different words |
+| One fixed reward word rather than a rotating set | Considered and **declined 2026-08-15**. It was defensible while there were two registers and the plainer one could stay bare; with the playful voice deleted (#86) a fixed word is the *only* thing the user ever sees, and habituation to a predictable string is the exact ADHD-relevant failure the reward exists to avoid |
+| A twenty-line reward set | The other direction, declined for the same section's reason: the repo's own sets are 8 and 6, and past that a set is not more varied, only harder to review as a pair — and reviewing it as a pair is the one enforcement §1's honesty rule has |
 | `pickOne` (CSPRNG) for the reward line | Correct and available, but it buys **randomness**, which reads as a slot machine and is not server/client-stable. Rotation is deterministic, needs no RNG, and avoids the weak-PRNG SAST class outright |
 | `Math.random` for the reward line | Mints a MEDIUM SAST finding whose fingerprint moves with the line number — the cost `src/lib/pick-one.ts` exists to record, having been dismissed five times for one statement |
 | A dismissal column for the banner | `roundup-card.tsx`'s per-day `localStorage` key is the right cost for "not now, today, on this device". A schema column would make a transient UI state durable and workspace-wide |
@@ -1101,6 +1273,14 @@ Prints `true` then `false` — the stray passes, the omission fails.
 | Shipping before the privacy amendment | Publishes a statement — "there is no health field" — that the release makes untrue. No test can catch it |
 | Notifications in v1 | Client-delivered only, so they fire only while the app is open and announce something already on screen |
 | Putting the reminder job's mail code in `prisma/` | Satisfies the self-containment guard by creating two send paths that must not diverge. The route-based shape keeps one |
+| **The nav control as the only logging route** | Declined on 2026-08-15 before either mode was chosen, and it is what makes both modes acceptable: the home strip is always present, so the *function* is reachable regardless of mode. A shortcut may be specialised; a sole route may not |
+| **Auto-selecting `E` for screen-reader users** | **Not declined on taste — it is not possible.** No browser API and no media query reveals assistive technology, and probing for one is an anti-pattern. So it is a recommendation in the Settings copy, and nothing in the code may branch on a guess about it |
+| `B★` with a timed commit — taps move a *pending* state and a 3-second ring commits | The mockup's `B+`, and the reason `B★` exists instead. The debounce makes overshoot free, which is genuinely clever, but it puts a **time limit** on the interaction and produces a **delayed second announcement** — disorienting when you cannot see the ring, and a time limit is a worse a11y cost than the asymmetry it was buying off. Immediate commit plus a persistent, focusable Undo gets the same forgiveness with no clock |
+| A count pill that opens the strip (mockup `A`) | One number to read and the fewest new parts, but **two taps to log**. The whole premise is one glance and one tap, and the mode picker already covers the "I want it explicit" case with `E`, which is one tap and symmetric |
+| One dot per dose in the bar (mockup `C`) | Most explicit, and **hard-codes the regimen into the header layout** — three or four dots crowd a cluster that already holds up to three controls. The regimen is configurable by design, so a control whose width tracks it is the wrong shape |
+| A pill that expands in place (mockup `D`) | The widest of the four and two taps, and it **duplicates the home strip** rather than reusing it — two implementations of one thing, which is what the shared logging call exists to avoid |
+| A separate Boolean to hide the nav control | Not declined on merit — **declined for want of a decision.** `medsTracker` already governs availability, which is why the trolley icon has no column of its own; #252's criterion for adding one is that the owner asked, and no such ask exists. One Boolean beside `medsNavMode` if it is ever wanted |
+| A configurable `B★` cycle order (skipped first) | Real, and v2 at the earliest. A third column and a third code path for a preference nobody has stated; `E`'s symmetry already serves the user for whom *taken*-first is wrong |
 
 ## Related
 
@@ -1108,7 +1288,25 @@ Prints `true` then `false` — the stray passes, the omission fails.
   derive-don't-schedule doctrine this design follows, **and** the record of where that doctrine runs
   out of expressiveness. Its sentinel warning is adopted here
 - **#257 — A failed streak touch reports the whole write failed, over work that is saved** — the
-  defect class a presentational reward keeps this feature clear of. Its helper is in flight on `!339`
+  defect class a presentational reward keeps this feature clear of. **Closed 2026-08-15**; `!339`
+  merged, so `src/lib/best-effort.ts` is on `main` and may be cited as a file
+- **#86 — Make the plain/playful voice convention enforceable** — carries the owner's decision of
+  2026-08-14 to **delete the playful voice**, which is what makes this document's reward section a
+  single register carrying a rotating set. Unscheduled, in Backlog, and this feature is not blocked on
+  it in either order — see *§6a*. It cites this MR for `Settings.voice` being the schema's one CHECK-less
+  pseudo-enum
+- **`!357` — Draft: fix(legal): correct ten measured drifts between the legal pages and the code** —
+  rewrites the health paragraph this feature has to amend, withdraws the Article 9(2)(a) basis this
+  document had planned to extend, and names `/help` and `src/lib/export/readme.ts` as two more surfaces
+  carrying the same disclosure. **It deliberately says nothing about medication**, so none of the
+  privacy checklist is done by it. Whichever lands first, the other rebases — a single
+  `LEGAL_EFFECTIVE_DATE` cannot move twice for one publication
+- **#268 — Three WCAG target-size citations are inverted, and the guard built to catch them cannot see
+  any** — why the citation to copy for the nav control's 44×44 floor is `controlSurface`'s docblock and
+  not `touchTarget`'s, which sits directly above the constant and is one of the inverted sites
+- **#252** — the header quick-access cluster this feature's nav control joins: the `controlSurface` +
+  `touchTarget` composition, the one-column-per-*availability*-gate reasoning, and the `t(labelKey,
+  voice)` label pattern
 - **#159 — `User.purgeAfter` is never honoured — nothing purges a revoked account** — the same
   no-`src/`-in-the-image constraint on a different surface, and it already lists the authenticated-
   endpoint option. Cross-referenced deliberately rather than restated; whichever lands first should
@@ -1116,4 +1314,7 @@ Prints `true` then `false` — the stray passes, the omission fails.
 - **#199** — the shopping-list feature whose gate, hide-not-delete doctrine, optional-page shape and
   export guard this design follows throughout
 - **`docs/design/specs/2026-08-11-offline-capture-queue-design.md`** — the live-region and
-  announcement conventions the reward and banner follow
+  announcement conventions the reward, banner and both nav modes follow
+- **`_reports/2026-08-15-meds-pill-mockups.html`** — live mockups of every nav shape considered, on the
+  real tokens and the real 44×44 control surface, each panel carrying its own trade-offs. Source of
+  truth for what `B★` and `E` *are*; this document is the source of truth for the decision between them
