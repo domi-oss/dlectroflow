@@ -21,6 +21,41 @@ function pageText(): string {
   return container.textContent!.replace(/\s+/g, " ");
 }
 
+/**
+ * ONE paragraph of the page, found by a lead-in only that paragraph carries, and
+ * normalised the same way as {@link pageText}.
+ *
+ * **The scoping is itself the assertion.** The export disclosure's per-item
+ * checks used to run against `pageText()`, and every phrase in them also appears
+ * in "3. If you have an account" — the section that discloses what is HELD, a
+ * thousand lines up. Measured on this branch: deleting SIX of the export
+ * paragraph's eight claims (the invitation record, the private note, the AI usage
+ * count, the feed timestamps, active-or-revoked and last-seen) left all 51 cases
+ * in this file green, because the other section satisfied them one by one. Only
+ * the two phrases that appear nowhere else — `access was withdrawn` and
+ * `account id GitLab issued` — were doing any work.
+ *
+ * "Two sections of one page agreeing" is the same false evidence as three
+ * surfaces agreeing when one hand wrote all three, which is the defect this
+ * sweep exists to correct. `legal-fingerprint.test.tsx` does catch the text
+ * change, but it says "the text moved, re-record the hash" — not "you deleted a
+ * disclosure", so it cannot be the guard for whether a claim is still made.
+ */
+function paragraphWith(marker: string): string {
+  const { container } = render(<PrivacyPage />);
+  const found = Array.from(container.querySelectorAll("p")).filter((el) =>
+    (el.textContent ?? "").includes(marker),
+  );
+  // A helper matching nothing would make every assertion below vacuous, and one
+  // matching two paragraphs would let either satisfy them — the exact failure
+  // this scoping removes, so it is asserted rather than assumed.
+  expect(
+    found,
+    `no single paragraph of /privacy contains "${marker}"`,
+  ).toHaveLength(1);
+  return found[0].textContent!.replace(/\s+/g, " ");
+}
+
 describe("Privacy Policy page: structure", () => {
   it("has one h1 naming the document", () => {
     render(<PrivacyPage />);
@@ -495,16 +530,23 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     // wrong in this direction: a page claiming three of four columns are included
     // reads as if all of them are.
     const text = pageText();
+    // Scoped to the two paragraphs that actually carry these claims rather than
+    // to the whole page. What running them against `pageText()` concealed, and
+    // the measurement, are in `paragraphWith`'s docblock.
+    const heldBack = paragraphWith("held back, and all three are keys");
+    const included = paragraphWith("records kept");
 
     // The exclusion is credentials, and there are THREE — the calendar feed's
     // token joins the two already named, because exporting the row's timestamps
     // is what made its token an explicit decision rather than an absence.
-    expect(text).toMatch(/OAuth tokens/i); // GoogleAuth
-    expect(text).toMatch(/API key/i); // User.llmKeyEnc
+    // Both of these matched elsewhere on the page unscoped: "OAuth tokens" in the
+    // encryption-at-rest paragraph, and "API key" in six other places.
+    expect(heldBack).toMatch(/OAuth tokens/i); // GoogleAuth
+    expect(heldBack).toMatch(/API key/i); // User.llmKeyEnc
     // CalendarFeed.token. The row IS exported, so its one withheld column has to
     // be accounted for on the page rather than left as an unexplained absence —
     // and it is the only one of the three stored in plain text.
-    expect(text).toMatch(/secret address of your calendar feed/i);
+    expect(heldBack).toMatch(/secret address of your calendar feed/i);
     // Where to get it, since the page tells the reader they lose nothing by its
     // absence. That claim is only true because the live URL is one click away —
     // `calendar-feed.tsx` renders it in a readOnly input with a copy button, so
@@ -520,7 +562,7 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
       sectionById("settings-integrations"),
       "plain",
     );
-    expect(text).toContain(
+    expect(heldBack).toContain(
       `Settings → ${integrations} → Calendar subscription`,
     );
     // The label is voice-independent (`{ text: "Integrations" }`, not a `{ key }`),
@@ -530,26 +572,34 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
       integrations,
     );
     expect(
-      text,
+      heldBack,
       "the page must say the three keys are the WHOLE exclusion, not some of it",
     ).toMatch(/Nothing else is held back/i);
 
-    // Each of the four, positively described as included. Same axis as before.
-    expect(text).toMatch(/invitation record/i); // Allowlist
-    expect(text).toMatch(/AI usage count/i); // UserAiUsage
-    expect(text).toMatch(/calendar feed/i); // CalendarFeed
-    expect(text).toMatch(/active or revoked/i); // User.status
-    expect(text).toMatch(/last seen/i); // User.lastSeenAt
-    expect(text).toMatch(/access was withdrawn/i); // User.revokedAt
-    expect(text).toMatch(/account id GitLab issued/i); // User.providerSub
+    // Each of the four, positively described as included, and read from the
+    // inclusion paragraph ALONE. Five of these seven phrases also occur in "3. If
+    // you have an account", which discloses what is HELD — so against the whole
+    // page they were reporting that section's coverage, not this one's. The feed
+    // one is pinned to the timestamps claim rather than to the bare words, which
+    // the exclusion sentence carries too.
+    expect(included).toMatch(/invitation record/i); // Allowlist
+    expect(included).toMatch(/AI usage count/i); // UserAiUsage
+    expect(included).toMatch(/when your calendar feed was created/i); // CalendarFeed
+    expect(included).toMatch(/active or revoked/i); // User.status
+    expect(included).toMatch(/last seen/i); // User.lastSeenAt
+    expect(included).toMatch(/access was withdrawn/i); // User.revokedAt
+    expect(included).toMatch(/account id GitLab issued/i); // User.providerSub
 
     // The note specifically, because it is the one field that is data ABOUT the
     // reader written by somebody else, and the reason the set was worth including
     // rather than continuing to offer by hand.
+    // Was `/note/i` against the whole page — a page that says "your note on the
+    // task" and "notes on other tasks" elsewhere, so it could not fail. Deleting
+    // the invitation-note claim outright left this file green.
     expect(
-      text,
+      included,
       "the page must say the invitation note itself is in the download",
-    ).toMatch(/note/i);
+    ).toMatch(/private note whoever invited you wrote/i);
 
     // The stale claims. Each was true when written and is false the moment the
     // code ships, so their absence is asserted rather than left to review.

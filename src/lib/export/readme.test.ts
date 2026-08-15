@@ -79,7 +79,14 @@ describe("README.md — the file that explains the archive", () => {
     // failure this whole change exists to remove, one layer up.
     expect(readme.toLowerCase()).toContain("invitation"); // Allowlist
     expect(readme.toLowerCase()).toMatch(/usage count|ai usage/); // UserAiUsage
-    expect(readme.toLowerCase()).toContain("calendar subscription"); // CalendarFeed
+    // Pinned to the inclusion bullet's own sentence, not to the words "calendar
+    // subscription": the EXCLUSION bullet above carries those words twice, in
+    // "address of your calendar subscription feed" and in the Settings path, so
+    // the short form was satisfied by the paragraph that says the opposite.
+    // Measured — deleting the inclusion bullet outright left this file green.
+    expect(readme.toLowerCase()).toContain(
+      "when your calendar subscription feed was created",
+    ); // CalendarFeed
     expect(readme.toLowerCase()).toMatch(/active or revoked/); // User.status
     expect(readme.toLowerCase()).toMatch(/last seen/); // User.lastSeenAt
     // `revokedAt`. Restored after the rewrite of this block dropped it while the
