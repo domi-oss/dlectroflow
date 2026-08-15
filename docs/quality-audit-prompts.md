@@ -37,7 +37,7 @@ run on a schedule. The table below is what a **human** runs *on top* of that flo
 | Bucket | Run |
 |---|---|
 | **Per-MR (automate in CI/Duo)** | The CI + Duo floor above, **plus** an axe a11y check, an `.env.example` drift check, and `prettier --check` (see Automation gaps). Scope the **Layer 2** review to diffs touching auth / token / LLM / Prisma paths. Don't manually repeat Duo's per-MR code smells or the scanners. |
-| **Weekly (~30 min)** | Triage the weekly base-image rescan + Renovate MRs; #16 ops glance — site + `/api/health`, error-log scan, Anthropic + GKE spend, guest AI-cap sanity. |
+| **Weekly (~30 min)** | Triage the weekly base-image rescan; run the dependency pass in `docs/SECURITY.md` § *Dependency update triage* — the Dependency Dashboard, not a queue of Renovate MRs, since patch/minor/digest/pin automerge and rarely wait for anyone. #16 ops glance — site + `/api/health`, error-log scan, Anthropic + GKE spend, guest AI-cap sanity. |
 | **Monthly** | Duo `security-assessment.md` full run (owns the generic security posture — see the Layer 2 scope note). One rotating **Layer 0** cognitive-load pass on the roughest-feeling flow. One **Layer 1** whole-repo smell + dependency-redundancy pass. |
 | **Quarterly** | Full **Layer 0** WCAG-AA sweep across all flows. Threat-model refresh + **Layer 2** app-specific deep dive. Refresh these prompt files and `security-assessment.md`. |
 | **Pre-release / on-demand** | **Layer 3** before onboarding more users or when the data/scale shape changes (also unlocks the #16 weekly health/spend checks). **Layer 4** when the `docker/` stack / CI / Prisma flow changes. Full **Layer 2** before anything touching user data hits the live domain. |
