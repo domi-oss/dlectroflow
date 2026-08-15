@@ -278,12 +278,20 @@ This is the failure that actually occurred, and it is the one the dashboard
 cannot report: **every section is written by the last Renovate run, so a page
 five days old looks exactly like a page written a minute ago.**
 
-Measured 2026-08-15: `#17` carried an `updated_at` of **2026-08-10T06:14Z**, and
-its **Open** section still listed `!312`–`!316` as awaiting action — all five had
-merged on 2026-08-11. Nothing on the page said so. The cause was not a failed
-run: before the recovery schedule existed, the Monday run was the only thing that
-rewrote the page, so between Mondays a merged MR stayed on the list **by
-construction**.
+**The recorded instance, with its resolution, because the two dates are the
+point.** Read on the morning of 2026-08-15, `#17` carried an `updated_at` of
+`2026-08-10T06:14Z` — the finish time of the previous Monday's Renovate run — and
+its **Open** section still listed `!312`–`!316` as awaiting action, all five of
+which had merged on 2026-08-11. Nothing on the page said so. The cause was not a
+failed run: before the recovery schedule existed, the Monday run was the only
+thing that rewrote the page, so between Mondays a merged MR stayed on the list
+**by construction**. That schedule was created at `2026-08-15T00:28Z`, and its
+first run rewrote the page at `2026-08-15T12:11Z` — which is why the same page
+read current a few hours later, and why the numbers in the check below agree.
+
+So the failure is fixed at the mechanism, and the check below stays worth running
+anyway: it is what distinguishes "Renovate has not run" from "Renovate ran and
+found nothing", and no section of the page distinguishes those on its own.
 
 The check is to compare the issue's `updated_at` against the last successful
 `renovate` job, because Renovate rewrites the issue at the end of its run:
@@ -309,8 +317,9 @@ glab api "projects/84020916/merge_requests?state=opened&per_page=100" \
   | jq -r '.[]|select(.source_branch|startswith("renovate/"))|"!\(.iid) \(.title)"'
 ```
 
-Empty output means no Renovate MR is open — which is also what it printed on
-2026-08-15 while the stale page still named five.
+Empty output means no Renovate MR is open. That is what it printed on 2026-08-15
+after the page had been rewritten — and it is the answer the stale page had been
+contradicting for four days.
 
 ### The deferred caps, and when each one expires
 
