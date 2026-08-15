@@ -74,7 +74,9 @@ describe("README.md — the file that explains the archive", () => {
     expect(
       readme,
       "the README still tells the reader to ask for the invitation note by hand",
-    ).not.toMatch(/the Privacy Policy at `\/privacy` says how to ask, and the invitation note is included in that/i);
+    ).not.toMatch(
+      /the Privacy Policy at `\/privacy` says how to ask, and the invitation note is included in that/i,
+    );
     // The overclaim in the other direction. Fixing the omission must not bring
     // back "everything", because credentials are still withheld.
     expect(

@@ -256,6 +256,43 @@ export async function peekUserAiUsage(
 }
 
 /**
+ * The stored row, for the data export — or `null` for an account that has never
+ * requested a breakdown.
+ *
+ * ## Why this is not `peekUserAiUsage`
+ *
+ * That function returns a computed VIEW, and one of its deliberate behaviours is
+ * wrong for an export: it reports a lapsed window as `used: 0`, because telling
+ * the owner somebody is at their cap when their allowance has already renewed
+ * would be misleading in the People panel. An export is not a view of the
+ * present — it hands over what is in the database, and `count` is a real stored
+ * value. A reader whose window lapsed yesterday should see the counter and its
+ * `windowStartedAt` and be able to work out the rest, not receive a zero the
+ * database does not contain.
+ *
+ * ## Why it lives here rather than in the export module
+ *
+ * `src/lib/__tests__/scoping.harness.test.ts` pins the ENTIRE
+ * `prisma.userAiUsage` surface to this file — a substring rule, so
+ * `prisma.userAiUsage.` in `src/lib/export/collect.ts` reds the suite. That rule
+ * is a compensating control against an IDOR on a user-keyed row and is worth more
+ * than the convenience of querying from the caller, so the export takes the same
+ * route `collect.ts` already takes to `GoogleAuth` through `getGoogleStatus`.
+ * `src/lib/export/__tests__/model-coverage.test.ts` records the indirection and
+ * asserts this function's existence is what satisfies its coverage requirement.
+ */
+export async function getOwnAiUsageRow(
+  userId: string,
+): Promise<{ count: number; windowStartedAt: Date; updatedAt: Date } | null> {
+  return prisma.userAiUsage.findUnique({
+    where: { userId },
+    // Explicit, so `userId` itself stays out: it repeats `account.id`, which is
+    // in the same file. The rest of the row IS the answer.
+    select: { count: true, windowStartedAt: true, updatedAt: true },
+  });
+}
+
+/**
  * The pure half of `peekUserAiUsage`, so a caller that has already loaded the
  * relation (the People panel loads every user's usage in one query) reports the
  * SAME numbers without a second round trip per person.

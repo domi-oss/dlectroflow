@@ -150,6 +150,41 @@ export async function getOwnFeed(userId: string): Promise<OwnFeed | null> {
 }
 
 /**
+ * The feed's audit timestamps for the data export, or `null` if there is no feed.
+ *
+ * ## The token is not selected, and that is the whole design of this function
+ *
+ * It would have been shorter to widen `getOwnFeed` and let the export drop the
+ * field. Two reasons not to. First, the token is a **credential**: possession of
+ * the URL is the entire authorization for reading somebody's scheduled work (see
+ * the note on the model in `prisma/schema.prisma`), so a copy of it in a file the
+ * reader may forward to somebody is the same mistake as exporting `llmKeyEnc` —
+ * and unlike the OAuth tokens it is stored in plaintext, so there is not even a
+ * cipher between the archive and a working capability. Second, an omission a
+ * serialiser has to remember is an omission a refactor can drop; selecting only
+ * the two timestamps means the token is absent from the export by CONSTRUCTION,
+ * and nothing downstream has to be careful.
+ *
+ * Withholding it costs the reader nothing they cannot get: Settings renders the
+ * live URL and can re-copy it, and this archive is not the route by which anybody
+ * restores a feed. `/privacy` and the archive's own README both say so, and name
+ * it as the third credential rather than leaving it as an unexplained absence.
+ *
+ * Lives in this module because `src/lib/__tests__/scoping.harness.test.ts` pins
+ * the entire `prisma.calendarFeed` surface here — same reasoning as
+ * `getOwnAiUsageRow` in `src/lib/user-quota.ts`, and recorded in
+ * `src/lib/export/__tests__/model-coverage.test.ts`.
+ */
+export async function getOwnFeedTimestamps(
+  userId: string,
+): Promise<{ createdAt: Date; rotatedAt: Date | null } | null> {
+  return prisma.calendarFeed.findUnique({
+    where: { userId },
+    select: { createdAt: true, rotatedAt: true },
+  });
+}
+
+/**
  * Turn the feed on. **Idempotent** — an account that already has a feed gets the
  * one it has back, unchanged.
  *

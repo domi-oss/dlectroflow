@@ -500,11 +500,15 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     // is what made its token an explicit decision rather than an absence.
     expect(text).toMatch(/OAuth tokens/i); // GoogleAuth
     expect(text).toMatch(/API key/i); // User.llmKeyEnc
-    expect(text).toMatch(/calendar feed'?s? (own )?(secret )?(address|url|token)/i); // CalendarFeed.token
+    expect(text).toMatch(
+      /calendar feed'?s? (own )?(secret )?(address|url|token)/i,
+    ); // CalendarFeed.token
     expect(
       text,
       "the page must say credentials are the exclusion, not one of several",
-    ).toMatch(/only things|only exclusion|nothing else is held back|that is the whole list/i);
+    ).toMatch(
+      /only things|only exclusion|nothing else is held back|that is the whole list/i,
+    );
 
     // Each of the four, positively described as included. Same axis as before.
     expect(text).toMatch(/invitation record/i); // Allowlist

@@ -97,6 +97,16 @@ export function exportJson(snapshot: ExportSnapshot): string {
     exportedAt: snapshot.exportedAt,
     workspace: snapshot.workspace,
     account: snapshot.account,
+    /**
+     * The invitation (`note` included), the AI meter and the calendar feed's
+     * timestamps. Next to `account` because that is what they are about, and
+     * all three are `null` for a guest sandbox.
+     *
+     * The feed's `token` is NOT here and cannot be: `getOwnFeedTimestamps` never
+     * selects the column, so the credential is absent by construction rather
+     * than by this serialiser dropping a field.
+     */
+    accountRecords: snapshot.accountRecords,
     /** Metadata only — the credential table is excluded entirely (README.md). */
     integrations: snapshot.integrations,
     settings: snapshot.settings,

@@ -220,7 +220,9 @@ const readsDirectly = (models: string[]) =>
 
 /** Required to be in the archive, however it is read. */
 const mustBeExported = (models: string[]) =>
-  models.filter((m) => !(m in DELIBERATELY_EXCLUDED) && !(m in CREDENTIAL_TABLES));
+  models.filter(
+    (m) => !(m in DELIBERATELY_EXCLUDED) && !(m in CREDENTIAL_TABLES),
+  );
 
 describe("the data export covers every model holding personal data (#199)", () => {
   const models = coveredModels();
@@ -317,13 +319,10 @@ describe("the data export covers every model holding personal data (#199)", () =
       // been dropped from the export while the module carried on serving other
       // callers — which is the original defect wearing a different hat.
       const collect = read("collect.ts");
-      const specifier = modulePath
-        .replace(/^src\//, "@/")
-        .replace(/\.ts$/, "");
-      expect(
-        collect,
-        `collect.ts does not import from ${specifier}`,
-      ).toContain(specifier);
+      const specifier = modulePath.replace(/^src\//, "@/").replace(/\.ts$/, "");
+      expect(collect, `collect.ts does not import from ${specifier}`).toContain(
+        specifier,
+      );
 
       // And the pinned module must be the one the scoping harness pins, not a
       // path invented here. If that registry moves, this fails rather than
