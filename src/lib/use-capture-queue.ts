@@ -638,7 +638,25 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
         // recoverable — the words are on screen and it is re-mirrored on next
         // mount — while queued-gone-but-mirrored is a silent save after an
         // explicit refusal.
-        await deleteMirrored(mirror.current, stillQueued);
+        const mirrored = mirror.current;
+        const clearedMirror = await deleteMirrored(mirrored, stillQueued);
+        // ⚠️ **And the ordering only delivers that if the RESULT is read.** An
+        // aborted `readwrite` transaction leaves the row mirrored — storage
+        // pressure on a phone, a version change from another tab, an evicted
+        // origin — and removing it from `localStorage` anyway produces exactly the
+        // direction ranked unacceptable above: the strip stops showing the words,
+        // the user believes they are gone, and the worker `POST`s whatever it still
+        // finds. Refusing keeps the other direction, which is the recoverable one.
+        //
+        // ⚠️ Only when there WAS a mirror. `writeMirror` answers `false` for a
+        // `null` db as well as for an abort, and the two must not be treated alike:
+        // with no mirror there is nothing for the worker to find, so refusing would
+        // deny a perfectly safe discard on every browser without IndexedDB, in
+        // Firefox private browsing, and in the window before `openMirror` resolves.
+        if (mirrored !== null && !clearedMirror) {
+          announce("storage-unavailable");
+          return "storage-unavailable";
+        }
         const result = discardCapture(store, stillQueued);
         broadcast();
         if (!result.ok) {

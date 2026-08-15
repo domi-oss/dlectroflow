@@ -1302,6 +1302,19 @@ So each expanded entry carries a **Discard** control:
   So the residual after this ordering is *"a discard may not stick if the tab dies mid-press"*, which is
   the same shape as every other exit in this design: **persisted, or refused and still visible.** There is
   no ordering that makes both deletes atomic, and pretending otherwise is what produced the gap.
+
+  ⚠️ **And the ordering only delivers the table if the first delete's RESULT is read.** Added during `!348`
+  (client half), where it was not: the mirror delete's boolean was discarded, so an aborted `readwrite`
+  transaction — storage pressure on a phone, a version change from another tab, an evicted origin — left the
+  row mirrored and the `localStorage` delete went ahead anyway. That is row 2 of the table exactly, reached
+  without any tab dying. **A failed mirror delete must refuse the discard and leave the words visible**,
+  which is row 1, the direction this ordering exists to choose.
+
+  ⚠️ **`false` from the mirror write means two different things and only one of them is a failure.** The
+  helper answers `false` for a **null** database as well as for an aborted transaction, and treating them
+  alike would deny a perfectly safe discard on every browser without IndexedDB, in Firefox private
+  browsing, and in the window before the mirror finishes opening — because with no mirror there is nothing
+  for the worker to find. Refuse only when there **was** a mirror and the delete did not land.
 - ⚠️ **Mirror-first closed the worker path and left the foreground's own flush open, in both directions.**
   Found in review of this spec. The ordering above is about a `sync` event firing between the two deletes;
   this is about the tab the user is looking at already having a `POST` in flight for the very entry they

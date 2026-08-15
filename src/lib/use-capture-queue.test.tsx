@@ -13,6 +13,7 @@ import {
   readQueue,
   type QueuedCapture,
 } from "@/lib/capture-queue";
+import { fakeIdbFactory } from "@/lib/__tests__/fake-idb";
 
 /**
  * #175 — the hook: the four flush triggers, the `storage`-event re-enqueue, and
@@ -749,6 +750,100 @@ describe("useCaptureQueue — a pass acts on live state, not its snapshot (#175)
       ]),
     );
     expect(postedKeys()).not.toContain("b");
+  });
+});
+
+/**
+ * `discard` deletes the mirror entry **before** the `localStorage` one, and the
+ * module calls that ordering *"the whole fix"*: a `sync` event between the two
+ * would otherwise find the entry still mirrored and `POST` a capture the user had
+ * just discarded. It also ranks the two failure directions explicitly —
+ * *"mirror-gone-but-queued is annoying, honest and recoverable"*, while
+ * *"queued-gone-but-mirrored is a silent save after an explicit refusal"*.
+ *
+ * ⚠️ **The ordering alone does not deliver that, because `deleteMirrored`'s
+ * boolean was discarded.** A `readwrite` transaction that aborts leaves the row
+ * mirrored, and the code went on to remove it from `localStorage` regardless — so
+ * the strip stops showing the words, the user believes they are gone, and the
+ * worker `POST`s whatever it still finds. That is the direction the comment names
+ * as the unacceptable one, reached by ignoring a return value.
+ *
+ * Exercised through the real `capture-mirror.ts` against `fakeIdbFactory`, so the
+ * abort and its rollback are the double's, not a stub's.
+ */
+describe("useCaptureQueue — a Discard must not leave the words mirrored (#175)", () => {
+  /** A mirror already holding the queued capture, with writes set to abort or not. */
+  function mirrorHolding(key: string, failWrites: boolean) {
+    const idb = fakeIdbFactory({ failWrites });
+    idb.seed("captures", [
+      { clientKey: key, text: "ring mum about the boiler", workspaceId: LIVE },
+    ]);
+    vi.stubGlobal("indexedDB", idb);
+    return idb;
+  }
+
+  /**
+   * The control, and it runs first because it is what proves the harness reaches
+   * the mirror at all: with writes landing, a discard clears both stores.
+   */
+  it("clears both stores when the mirror delete lands", async () => {
+    const idb = mirrorHolding("k1", false);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    seed([capture()]);
+    render(<Host />);
+    await waitFor(() => expect(latest).not.toBeNull());
+    await waitFor(() => expect(idb.rows("captures")).toHaveLength(1));
+
+    await act(async () => {
+      expect(await latest!.discard(["k1"])).toBe("discarded");
+    });
+
+    expect(readQueue(window.localStorage)).toEqual([]);
+    expect(idb.rows("captures")).toEqual([]);
+  });
+
+  it("refuses and keeps the words when the mirror delete aborts", async () => {
+    const idb = mirrorHolding("k1", true);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    seed([capture()]);
+    render(<Host />);
+    await waitFor(() => expect(latest).not.toBeNull());
+    // The premise, asserted rather than assumed: the row really is mirrored, so
+    // "still mirrored afterwards" is a failure to delete and not a failure to
+    // write in the first place.
+    await waitFor(() => expect(idb.rows("captures")).toHaveLength(1));
+
+    await act(async () => {
+      expect(await latest!.discard(["k1"])).toBe("storage-unavailable");
+    });
+
+    // Refused and still visible: the direction the ordering exists to choose.
+    expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+      "k1",
+    ]);
+    expect(idb.rows("captures")).toHaveLength(1);
+  });
+
+  /**
+   * The other half of the boolean's ambiguity. `writeMirror` answers `false` for a
+   * **null** db as well as for an aborted transaction, and those two must not be
+   * treated alike: with no mirror there is nothing for the worker to find, so
+   * refusing would deny a discard that is perfectly safe — on every browser
+   * without IndexedDB, in Firefox private browsing, and in the window before
+   * `openMirror` resolves.
+   */
+  it("still discards when there is no mirror at all", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    seed([capture()]);
+    render(<Host />);
+    await waitFor(() => expect(latest).not.toBeNull());
+
+    await act(async () => {
+      expect(await latest!.discard(["k1"])).toBe("discarded");
+    });
+
+    expect(readQueue(window.localStorage)).toEqual([]);
   });
 });
 
