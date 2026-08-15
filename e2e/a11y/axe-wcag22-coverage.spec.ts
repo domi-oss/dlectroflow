@@ -52,58 +52,23 @@ import {
  *     turn a good axe-core upgrade into a red pipeline.
  *
  * ── What the widening does NOT deliver ──────────────────────────────────────
- * Stated precisely, because a change about criterion coverage that overclaims
- * its coverage is the same bug one level up.
+ * Deliberately NOT restated here. The `WCAG_TAGS` docblock in `axe-helpers.ts`
+ * carries that catalogue — 2.4.11 and its #258 mislabelling, 1.4.11, 2.4.13,
+ * 2.5.8 versus 2.5.5, and why a 24px rule is worth turning on where the house
+ * bar is 44px. Read it there.
  *
- *   * **2.4.11 Focus Not Obscured (Minimum), Level AA (new in WCAG 2.2)** —
- *     axe-core has NO rule for it, at any tag. Widening the tag list does not
- *     deliver 2.4.11 and this file does not test it. It needs a Playwright
- *     keyboard walk that Tabs a long page and asserts the focused element's rect
- *     is not covered by a sticky ancestor; that is a separate checklist item on
- *     #263 and is out of scope here.
+ * A pointer rather than a second copy, raised in review on !341, and the reason
+ * is this file's own subject. Two independent statements of a criterion's number
+ * and level are exactly how #258 happened: a comment carried 2.4.11's NUMBER
+ * with 2.4.13's TITLE for as long as nobody diffed the places that said it. A
+ * correction applied to one copy and not the other rebuilds that trap, and a
+ * criterion claim drifting out of true is the defect #263 is about — so the one
+ * statement lives next to the tag list it describes, which is what a reader is
+ * checking it against anyway.
  *
- *     ⚠️ Comments across `src/` (and `a11y-class-hygiene.ts` itself) say that
- *     module is "the only check that can see 2.4.11". Verified this session:
- *     that is the #258 mislabelling, not a coverage claim to inherit. Rule D
- *     catches a focus indicator that is only a colour swap — **2.4.13 Focus
- *     Appearance, Level AAA** and **1.4.11 Non-text Contrast, Level AA (WCAG
- *     2.1)** — while carrying 2.4.11's number. Real 2.4.11 is a focused control
- *     resting UNDER a sticky bar, which is geometry no class-string check can
- *     reach. So nothing in this repo detects 2.4.11 today.
- *   * **1.4.11 Non-text Contrast** is Level AA and WCAG **2.1**, not 2.2 — it
- *     was already covered by `wcag21aa` before this change. axe cannot reliably
- *     measure a focus indicator's 3:1 against adjacent colours, so the widening
- *     neither adds nor improves it.
- *   * **2.4.13 Focus Appearance** is Level **AAA** (WCAG 2.2), so it is out of
- *     scope for an AA gate by design, and it is not 2.4.11.
- *   * The rule this turns on is **2.5.8 Target Size (Minimum), Level AA**, whose
- *     normative figure is **24 by 24 CSS pixels**. It is NOT 2.5.5 Target Size
- *     (Enhanced), which is Level **AAA** and asks for **44 by 44**. Both figures
- *     verified against the W3C Recommendation, not recalled: 2.5.8 is Level AA
- *     in <https://www.w3.org/TR/WCAG22/#target-size-minimum>.
- *
- * The 24px consequence matters to this repo specifically. The house style asks
- * **44px** of an interactive control — that is **2.5.5 Target Size (Enhanced)**,
- * Level **AAA**, not 2.5.8 — and it is enforced by COLOCATED COMPONENT UNIT
- * TESTS asserting `min-h-[44px]`/`min-h-11` class strings
- * (`theme-toggle.test.tsx`, `sub-header.test.tsx`, `inbox-view.test.tsx` …).
- * Checked rather than assumed: there is no repo-wide touch-target gate, and
- * `a11y-class-hygiene` has no touch-target rule at all — its exports are
- * contrast and focus-indicator rules.
- *
- * That makes the two checks complementary, not redundant, and it is the real
- * argument for turning a 24px rule on when the house bar is 44px:
- *
- *   * theirs is stricter, but only exists where somebody wrote one, and it reads
- *     CLASS STRINGS — so a 20px control in a file nobody wrote a test for is
- *     invisible to it. Two of those reached `main` in
- *     `src/components/breakdown/breakdown-chat.tsx` and this widening is what
- *     found them (#205's family);
- *   * this one is repo-wide across every gated surface and measures RENDERED
- *     geometry, so it cannot be fooled by a class that does not apply.
- *
- * The corrected fixture below is sized 44px rather than 24px so a test fixture
- * cannot be read as endorsing the weaker figure.
+ * What stays in this file is what concerns THIS FILE's test design rather than
+ * the criteria themselves: the two axe-core mechanics above, the negative and
+ * positive control pair, and the fixture geometry on the constants below.
  */
 
 /**
@@ -189,10 +154,22 @@ const UNDERSIZED_PX = 20;
  *
  * 44 rather than 24 on purpose, and the gap is the whole point: the gate's floor
  * is 24 ({@link WCAG_258_MIN_PX}, **2.5.8 Target Size (Minimum), Level AA**),
- * while 44x44 is the house convention `a11y-class-hygiene` enforces (#205) —
- * which is **2.5.5 Target Size (Enhanced), Level AAA**, NOT the criterion under
- * test. A fixture is a statement about what this repo considers correct, so it is
- * drawn at the house bar rather than at the weaker figure it would also pass.
+ * while 44x44 is the house convention asserted by COLOCATED COMPONENT UNIT TESTS
+ * (#205) — which is **2.5.5 Target Size (Enhanced), Level AAA**, NOT the
+ * criterion under test. A fixture is a statement about what this repo considers
+ * correct, so it is drawn at the house bar rather than at the weaker figure it
+ * would also pass.
+ *
+ * ⚠️ NOT `a11y-class-hygiene`, which an earlier draft of this docblock named.
+ * That module has no touch-target rule at all — measured, its exports are
+ * `findTextContrastRisks`, `findTintedBannerText` and `findWeakFocusIndicators`,
+ * and its own docblock records the 24px floor as "a different gap from this
+ * module's, recorded rather than fixed". The 44px bar lives in 26 colocated
+ * `*.test.tsx` files asserting `min-h-[44px]`/`min-h-11` class strings, so it
+ * exists only where somebody wrote one — which is why two 20px controls in
+ * `breakdown-chat.tsx` reached `main` unseen. Getting this attribution wrong
+ * matters more here than anywhere: it would credit a repo-wide gate that does
+ * not exist, which is #263's own failure shape.
  *
  * Deliberately NOT named for a floor or a minimum: nothing here asserts 44 of
  * anything, and a name like `MIN_TARGET_PX` would read as though the gate
