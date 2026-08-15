@@ -183,6 +183,38 @@ describe("cronWindowsWithoutWildcardMinute", () => {
       "  0   7-8 * * 1 ",
     ]);
   });
+
+  /**
+   * Duo review. The first version required all five fields to be numeric, so a
+   * window written with a NAME — `0 7 * * MON`, which cron and Renovate both
+   * accept — failed the structural check and fell out of the guard silently. That
+   * is the exact class this helper exists for, arriving through the one spelling it
+   * could not see.
+   */
+  it("catches a bad minute in a window written with named day or month fields", () => {
+    expect(cronWindowsWithoutWildcardMinute(["0 7 * * MON"])).toEqual([
+      "0 7 * * MON",
+    ]);
+    expect(cronWindowsWithoutWildcardMinute(["0 7 1 JAN *"])).toEqual([
+      "0 7 1 JAN *",
+    ]);
+  });
+
+  it("still accepts a wildcard minute when the day is named", () => {
+    expect(cronWindowsWithoutWildcardMinute(["* 7-8 * * MON"])).toEqual([]);
+  });
+
+  /**
+   * Why letters are allowed in the month and day-of-week fields only, rather than
+   * in all five: this Later-syntax phrase is exactly five whitespace-separated
+   * tokens, so a single loosened pattern would read it as cron and flag it. Keeping
+   * the minute numeric-only is both what cron says and what tells the two apart.
+   */
+  it("does not mistake a five-token Later phrase for cron", () => {
+    expect(
+      cronWindowsWithoutWildcardMinute(["after 10pm and before 5am"]),
+    ).toEqual([]);
+  });
 });
 
 describe("unevaluatableMatchMessages", () => {

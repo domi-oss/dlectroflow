@@ -200,8 +200,20 @@ export function branchCreationWindows(
     .filter((entry) => entry !== "" && entry !== SCHEDULE_ANY_TIME);
 }
 
-/** A cron field, as far as telling cron from Later-syntax prose requires. */
-const CRON_FIELD = /^[*\d,\-/]+$/;
+/** Minute, hour and day-of-month: cron gives these no names, only numbers. */
+const CRON_NUMERIC_FIELD = /^[*\d,\-/]+$/;
+
+/**
+ * Month and day-of-week, which additionally accept names — `JAN`, `MON`.
+ *
+ * Split from the numeric fields rather than loosening one pattern for all five
+ * (Duo review). Letting letters into every position would make a five-word
+ * Later-syntax phrase parse as cron, and there is a real one: "after 10pm and
+ * before 5am" is exactly five whitespace-separated tokens. Keeping the minute
+ * field numeric-only is what tells the two apart, and it is also just what cron
+ * says — so the narrower rule is the more correct one, not merely the safer one.
+ */
+const CRON_NAMED_FIELD = /^[*\d,\-/A-Za-z]+$/;
 
 /**
  * Which of `windows` are cron expressions whose minute field is not `*`.
@@ -214,8 +226,14 @@ const CRON_FIELD = /^[*\d,\-/]+$/;
  * `renovate-config-validator`, so the next Monday's run would be the first thing
  * to notice.
  *
- * Later-syntax phrases ("before 5:00am") are left alone: they are deprecated but
- * still accepted, and they have no minute field to be wrong about. Detecting cron
+ * Named day and month fields count as cron, so `0 7 * * MON` is caught and not
+ * quietly skipped. That was a real hole: the first version required every field to
+ * be numeric, which meant a window written with a name — valid cron, and just as
+ * invalid on its minute field — fell through the structural check and out of the
+ * guard entirely, in the one helper whose whole job is to catch that class.
+ *
+ * Later-syntax phrases ("before 5:00am") are still left alone: they are deprecated
+ * but accepted, and they have no minute field to be wrong about. Detecting cron
  * structurally rather than by exclusion keeps this from becoming a claim about
  * English.
  */
@@ -225,8 +243,15 @@ export function cronWindowsWithoutWildcardMinute(
   return windows.filter((window) => {
     const fields = window.trim().split(/\s+/);
     if (fields.length !== 5) return false;
-    if (!fields.every((field) => CRON_FIELD.test(field))) return false;
-    return fields[0] !== "*";
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+    const numericOk = [minute, hour, dayOfMonth].every((field) =>
+      CRON_NUMERIC_FIELD.test(field),
+    );
+    const namedOk = [month, dayOfWeek].every((field) =>
+      CRON_NAMED_FIELD.test(field),
+    );
+    if (!numericOk || !namedOk) return false;
+    return minute !== "*";
   });
 }
 
