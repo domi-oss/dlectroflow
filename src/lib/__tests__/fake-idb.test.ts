@@ -19,6 +19,7 @@ type MinimalDb = {
   ): {
     objectStore(name: string): {
       put(value: Record<string, unknown>): { onsuccess: (() => void) | null };
+      delete(key: string): { onsuccess: (() => void) | null };
       getAll(): {
         result: Record<string, unknown>[];
         onsuccess: (() => void) | null;
@@ -102,6 +103,81 @@ describe("fakeIdbFactory", () => {
     });
 
     expect(reached).toBe("error");
+  });
+
+  /**
+   * ⚠️ **"The transaction failed" and "the store is unchanged" must not come
+   * apart**, and in this double they did: `put` and `delete` mutated on the call
+   * while `failWrites` was decided a microtask later, so an aborted transaction
+   * left its writes applied. Real IndexedDB rolls them all back.
+   *
+   * That is not a cosmetic infidelity. `writeMirror` resolves on `oncomplete`
+   * rather than on the request precisely because *"a `put` calls back as soon as
+   * the value is accepted and the transaction can still abort afterwards"* — so
+   * production code here is entitled to assume the rollback, and a test asserting
+   * it would have passed for the wrong reason. Duo review round 4 on `!348`; the
+   * two existing `failWrites` cases assert only the boolean outcome, which is why
+   * the gap was real and unexercised rather than merely theoretical.
+   */
+  it("rolls a failed transaction's writes back, as a real engine does", async () => {
+    const factory = fakeIdbFactory({ failWrites: true });
+    const { db } = await open(factory);
+    factory.seed("captures", [{ clientKey: "a", text: "first" }]);
+
+    const tx = db!.transaction("captures", "readwrite");
+    const store = tx.objectStore("captures");
+    store.put({ clientKey: "b", text: "second" });
+    store.delete("a");
+    await new Promise<void>((resolve) => {
+      tx.onerror = () => resolve();
+    });
+
+    expect(factory.rows("captures")).toEqual([
+      { clientKey: "a", text: "first" },
+    ]);
+  });
+
+  /**
+   * The non-vacuous control. "The store is unchanged" above would also be
+   * satisfied by a double that had stopped writing at all — which would make
+   * every mirror test green over a store that never holds anything.
+   */
+  it("commits those same writes when the transaction completes", async () => {
+    const factory = fakeIdbFactory();
+    const { db } = await open(factory);
+    factory.seed("captures", [{ clientKey: "a", text: "first" }]);
+
+    const tx = db!.transaction("captures", "readwrite");
+    const store = tx.objectStore("captures");
+    store.put({ clientKey: "b", text: "second" });
+    store.delete("a");
+    await new Promise<void>((resolve) => {
+      tx.oncomplete = () => resolve();
+    });
+
+    expect(factory.rows("captures")).toEqual([
+      { clientKey: "b", text: "second" },
+    ]);
+  });
+
+  /**
+   * `failWrites` is named for write transactions and documented as *"every WRITE
+   * transaction aborts"*, but `_mode` was accepted and ignored, so it aborted
+   * reads too. That makes `readMirrored`'s own contract untestable under a write
+   * failure — the state a `sync` handler is most likely to meet.
+   */
+  it("completes a readonly transaction even when WRITES are set to fail", async () => {
+    const factory = fakeIdbFactory({ failWrites: true });
+    const { db } = await open(factory);
+    factory.seed("captures", [{ clientKey: "a", text: "first" }]);
+
+    const tx = db!.transaction("captures", "readonly");
+    const reached = await new Promise<string>((resolve) => {
+      tx.oncomplete = () => resolve("complete");
+      tx.onerror = () => resolve("error");
+    });
+
+    expect(reached).toBe("complete");
   });
 
   it("reaches onerror on open when opening is set to fail", async () => {

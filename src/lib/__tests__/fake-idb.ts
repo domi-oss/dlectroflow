@@ -36,7 +36,14 @@ type Row = Record<string, unknown>;
 type FakeOptions = {
   /** `open` reaches `onerror` — Firefox private browsing, a corrupt profile. */
   failOpen?: boolean;
-  /** Every write transaction aborts, so a caller must not report success. */
+  /**
+   * Every `readwrite` transaction aborts, so a caller must not report success —
+   * and, as in a real engine, **its staged writes are rolled back**.
+   *
+   * `readonly` transactions still complete. Aborting them too would make
+   * `readMirrored`'s contract untestable under a write failure, which is the
+   * state a `sync` handler is most likely to meet.
+   */
   failWrites?: boolean;
 };
 
@@ -68,27 +75,57 @@ export function fakeIdbFactory(
   const stores = new Map<string, { keyPath: string; rows: Map<string, Row> }>();
   const state = { transactions: 0 };
 
-  function makeStore(name: string, keyPath: string) {
+  type Store = { keyPath: string; rows: Map<string, Row> };
+
+  function ensureStore(name: string, keyPath: string): Store {
     if (!stores.has(name)) stores.set(name, { keyPath, rows: new Map() });
-    const store = stores.get(name)!;
+    return stores.get(name)!;
+  }
+
+  /**
+   * Where a handle's writes go until the transaction decides their fate.
+   *
+   * An array for a real transaction — applied on `oncomplete`, discarded on
+   * `onabort` — or an immediate applier for the upgrade handle, which has no
+   * commit to wait for.
+   */
+  type Staging = { push(apply: () => void): void };
+
+  /**
+   * ⚠️ **Writes are STAGED, not applied on the call**, so an aborted transaction
+   * leaves the store exactly as it was — which is what a real engine does and what
+   * production code here is entitled to assume. This double used to mutate
+   * immediately while `failWrites` was decided a microtask later, so *"the
+   * transaction failed"* and *"the store is unchanged"* came apart, and a test
+   * asserting the rollback would have passed for the wrong reason (Duo review
+   * round 4 on `!348`).
+   *
+   * The request still settles its own `onsuccess` on its own microtask, because
+   * that IS the real behaviour and the whole reason `writeMirror` resolves on the
+   * transaction rather than on the request.
+   */
+  function storeHandle(store: Store, staging: Staging) {
     return {
       put(value: Row) {
         const key = String(value[store.keyPath]);
         // A `keyPath` store upserts. `add` would throw on a duplicate; the
         // mirror deliberately uses `put`, because re-mirroring the same capture
         // is the ordinary case on every mount.
-        store.rows.set(key, value);
+        staging.push(() => store.rows.set(key, value));
         const request = { result: key } as Record<string, unknown>;
         settle(() => (request.onsuccess as (() => void) | undefined)?.());
         return request;
       },
       delete(key: string) {
-        store.rows.delete(String(key));
+        staging.push(() => store.rows.delete(String(key)));
         const request = {} as Record<string, unknown>;
         settle(() => (request.onsuccess as (() => void) | undefined)?.());
         return request;
       },
       getAll() {
+        // Committed rows. The mirror never reads and writes in one transaction,
+        // so reading through an uncommitted overlay would be untested machinery
+        // standing in for a case that does not arise.
         const request = { result: [...store.rows.values()] } as Record<
           string,
           unknown
@@ -104,22 +141,36 @@ export function fakeIdbFactory(
       contains: (name: string) => stores.has(name),
     },
     createObjectStore(name: string, opts?: { keyPath?: string }) {
-      return makeStore(name, opts?.keyPath ?? "id");
+      // The upgrade transaction is deliberately not modelled — nothing in this
+      // repo writes during one — so this handle applies immediately rather than
+      // staging for a commit that has no representation here.
+      return storeHandle(ensureStore(name, opts?.keyPath ?? "id"), {
+        push: (apply: () => void) => apply(),
+      });
     },
-    transaction(name: string | string[], _mode?: string) {
+    transaction(name: string | string[], mode?: string) {
       state.transactions += 1;
       const storeName = Array.isArray(name) ? name[0]! : name;
       const existing = stores.get(storeName);
-      const handle = makeStore(storeName, existing?.keyPath ?? "clientKey");
+      const store = ensureStore(storeName, existing?.keyPath ?? "clientKey");
+      const pending: (() => void)[] = [];
+      const handle = storeHandle(store, pending);
+      // ⚠️ `failWrites` is about WRITE transactions, per its name and its own
+      // comment. `mode` defaults to `"readonly"` in a real engine, and `_mode` was
+      // previously accepted and ignored here, so reads aborted too.
+      const aborting =
+        options.failWrites === true && (mode ?? "readonly") !== "readonly";
       const tx = {
         objectStore: () => handle,
       } as Record<string, unknown>;
       settle(() => {
-        if (options.failWrites) {
+        if (aborting) {
+          // `pending` is dropped unapplied. That is the rollback.
           (tx.onerror as (() => void) | undefined)?.();
           (tx.onabort as (() => void) | undefined)?.();
           return;
         }
+        for (const apply of pending) apply();
         (tx.oncomplete as (() => void) | undefined)?.();
       });
       return tx;
