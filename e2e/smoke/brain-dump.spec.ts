@@ -107,11 +107,14 @@ test("a discarded offline capture is gone from the browser and never saved", asy
   await strip.getByRole("button", { name: /waiting to save/ }).click();
 
   // Two-step, so the confirm is made against words the user can read.
+  //
+  // Exact-string names, deliberately NOT `new RegExp(...)`: the label carries a
+  // timestamp, so interpolating it into a pattern is the unescaped-input shape
+  // `regexp-source-hygiene` stands in for (#234, CWE-185). The accessible names
+  // are exactly these, because the strip builds them as "<action>: <text>".
+  await strip.getByRole("button", { name: `Discard: ${label}` }).click();
   await strip
-    .getByRole("button", { name: new RegExp(`^Discard: ${label}`) })
-    .click();
-  await strip
-    .getByRole("button", { name: new RegExp(`^Discard for good: ${label}`) })
+    .getByRole("button", { name: `Discard for good: ${label}` })
     .click();
 
   await expect(page.getByTestId("capture-queue-strip")).toHaveCount(0);
