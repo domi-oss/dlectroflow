@@ -87,13 +87,15 @@
  *
  *   Binary files src/lib/breakdown.test.ts and src/lib/breakdown.test.ts differ
  *
- * — 76 bytes, no hunks — for each of the two files whose OLD blob carries the
- * NUL, while `git diff` over the very same commit pair renders an ordinary text
- * hunk. The classification follows the old blob, so the commit that REMOVES a
- * raw NUL is unreviewable in the merge request that removes it. Every review
- * round on !347 reported it could not see those two files; that is the defect's
- * own signature, not a reviewer fault, and the two fixture diffs had to be read
- * through `git diff` instead.
+ * — 76 and 92 bytes of payload respectively, no hunks — for the two files whose
+ * OLD blob carries the NUL, while the other three files in the same response
+ * return 1178, 22608 and 27271 bytes of ordinary hunks and `git diff` over the
+ * very same commit pair renders both fixtures as normal text. The
+ * classification follows the old blob, so the commit that REMOVES a raw NUL is
+ * unreviewable in the merge request that removes it. Three review rounds on
+ * !347 said so unprompted — that is the defect's own signature rather than a
+ * reviewer fault, and both fixture diffs had to be read through `git diff`
+ * instead.
  *
  * Which is the strongest argument for a guard over a one-off fix: the analyzer
  * cannot parse the file, the security report cannot show the gap, and review
