@@ -103,7 +103,7 @@ export const STRINGS = {
   // `inbox-view.tsx:2496,2646`, `library-done-delete.tsx:378`,
   // `shopping-list.tsx:996`), 3 member accesses (`library/page.tsx:189,227`,
   // `section-nav.ts:29`), 2 bare variables (`app-menu.tsx:133`,
-  // `quick-access.tsx:66`) — and the 1 template literal. Sending the next reader
+  // `quick-access.tsx:68`) — and the 1 template literal. Sending the next reader
   // to check one file when there are thirty-five is the dangerous half of a
   // delete-recipe, so state the property the recipe actually rests on:
   //

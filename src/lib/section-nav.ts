@@ -84,7 +84,7 @@ export const HELP_SECTIONS = [
   //
   // Six, not seven: `DESTINATIONS` (`app-menu.tsx:9-20`) has seven entries, but
   // `nav.shopping` carries `requires: "shoppingList"` and that column is
-  // `@default(false)` (`schema.prisma:104`), so a default workspace renders six.
+  // `@default(false)` (`schema.prisma:242`), so a default workspace renders six.
   // `app-menu.test.tsx:53-63` asserts exactly that list, and seven appears there
   // only under `<AppMenu shoppingList />`. (Substitute review of record, !356 —
   // this comment said seven and contradicted itself four lines down, where it
