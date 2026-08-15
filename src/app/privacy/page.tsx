@@ -1307,10 +1307,13 @@ export default function PrivacyPage() {
           of protecting your data.{" "}
           <strong>The rest is account bookkeeping</strong> rather than content:
           your invitation record and any note whoever invited you wrote on it,
-          your AI usage count, the timestamps on your calendar feed, and the
-          internal flags saying whether your account is active and when it was
-          last seen. Ask at <ContactLink /> and I will send any of it by hand —
-          the invitation note included, since it is about you.
+          your AI usage count, the timestamps on your calendar feed, the
+          internal flags saying whether your account is active or revoked, when
+          it was last seen and when access was withdrawn if it ever was, and the
+          account id GitLab issued for you — as distinct from your username and
+          the provider&rsquo;s name, both of which the export does include. Ask
+          at <ContactLink /> and I will send any of it by hand — the invitation
+          note included, since it is about you.
         </p>
         {/* #153 — erasure came off that list, so this paragraph had to stop
             saying it was on it. The caveat is not a hedge: the control freezes

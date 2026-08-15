@@ -42,9 +42,27 @@ describe("README.md — the file that explains the archive", () => {
     // "everything dlectroflow holds about your account" is the weaker of two
     // statements of the same fact, and the one a reader gets AFTER they have
     // stopped reading the page.
+    // One assertion per omitted model, because the first version of this test
+    // named only two of the four and its own comment claimed all four — the
+    // same shape of gap the sweep is closing, reproduced in the guard for it.
+    // A future edit dropping any single category must red this.
     expect(readme).toContain("What is not in this archive");
-    expect(readme.toLowerCase()).toContain("invitation");
-    expect(readme.toLowerCase()).toMatch(/usage count|ai usage/);
+    expect(readme.toLowerCase()).toContain("invitation"); // Allowlist
+    expect(readme.toLowerCase()).toMatch(/usage count|ai usage/); // UserAiUsage
+    expect(readme.toLowerCase()).toContain("calendar subscription feed"); // CalendarFeed
+    // User: all four omitted columns, not just the two that were easy to phrase.
+    expect(readme.toLowerCase()).toMatch(/active or revoked/); // status
+    expect(readme.toLowerCase()).toMatch(/last seen/); // lastSeenAt
+    expect(readme.toLowerCase()).toMatch(/access was withdrawn/); // revokedAt
+    expect(readme.toLowerCase()).toMatch(/id your sign-in provider issued/); // providerSub
+    // `provider` and `handle` ARE exported, so the archive must not imply
+    // otherwise while disclosing `providerSub`. This is the distinction Duo's
+    // suggested wording collapsed, and collapsing it would trade one
+    // inaccuracy for another.
+    expect(
+      readme.toLowerCase(),
+      "the archive must not claim the provider's name is withheld — it is exported",
+    ).toContain("provider's *name* and your username are in");
     // The overclaim itself. A reader who opens the zip must not be told the
     // list they just read is exhaustive when the page says it is not.
     expect(

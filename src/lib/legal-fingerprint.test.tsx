@@ -165,7 +165,21 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  privacy: "784c6e5b04ef5a82c34951ad5001a74d592232fc05473168b8d13317cba61ab3",
+  // Moved once more within this same sweep, on review, and the reason is worth
+  // keeping. The export-exclusion paragraph listed the account flags as "whether
+  // your account is active and when it was last seen" — naming `User.status` and
+  // `lastSeenAt` but silently dropping `revokedAt` and `providerSub`, which are
+  // also held and also unexported. That is the SAME defect this sweep exists to
+  // correct, committed inside the correction: a disclosure that lists some of
+  // what it holds and reads as if it listed all of it.
+  //
+  // Nothing was published under the earlier hash — this branch has not merged —
+  // so LEGAL_EFFECTIVE_DATE stays on 2026-08-15 rather than accumulating a
+  // correction notice for a version no reader ever saw. Same handling as #154's
+  // within-branch move, and the same lesson: a completeness claim has to be
+  // checked on the defect's own axis (per omitted COLUMN here), not by counting
+  // the categories that were easy to phrase.
+  privacy: "f5677ddd57343d59c2052d4dd97a006874f9ccb0819d3548614677e6ef0c1ef2",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
