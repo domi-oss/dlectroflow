@@ -1,12 +1,12 @@
 /**
- * #243 — pure helpers for asserting three properties of `.gitlab/renovate.json`.
- * Kept free of `fs` so the parsing is unit-testable on synthetic config (the
+ * Pure helpers for asserting four properties of `.gitlab/renovate.json`. Kept free
+ * of `fs` so the parsing is unit-testable on synthetic config (the
  * manifest-hygiene, lockfile-hygiene and override-hygiene modules follow the same
  * split); the caller reads the file.
  *
- * The three come from the same issue and share one cause — a Renovate setting can
- * be wrong in a way that no tool in the chain reports, and `renovate-config-validator`
- * does not run in this repo's CI at all:
+ * All four share one cause — a Renovate setting can be wrong in a way that no tool
+ * in the chain reports, and `renovate-config-validator` does not run in this repo's
+ * CI at all:
  *
  *   1. No concurrency limit or schedule under `vulnerabilityAlerts`, because
  *      Renovate ignores every one of them on that path. Reasoning below.
@@ -15,9 +15,17 @@
  *      frequent one from opening update MRs of its own.
  *   3. A `logLevelRemap` entry promoting the automerge-arming failure to `warn`,
  *      because Renovate logs it at `debug` and swallows it.
+ *   4. Any per-package `automerge: false` entry sitting BELOW the blanket
+ *      `automerge: true` rule, because `packageRules` is an ordered list and a
+ *      deny entry written above it is inert. Reasoning at the helpers, in the last
+ *      section of this file.
  *
- * 2 and 3 are the fix for the lost automerge; their reasoning is in the second
- * half of this file, at the point where the constants are defined.
+ * 1-3 are #243. 2 and 3 are the fix for the lost automerge; their reasoning is in
+ * the middle of this file, at the point where the constants are defined. 4 is a
+ * later addition, the only one not from that issue, and the only one whose
+ * real-config arm is vacuous as things stand — the config has no deny entry today,
+ * so that arm passes over an empty list on purpose. Its colocated test says so, and
+ * carries a second, non-vacuous arm that does exercise the real file.
  *
  * WHY A LIMIT SET THERE IS NOT A CONTROL
  *   #243 read five stale Renovate MRs sitting at a saturated `prConcurrentLimit`
@@ -55,6 +63,8 @@ export type RenovateConfigShape = {
   schedule?: unknown;
   /** `logLevelRemap` — an array of `{ matchMessage, newLogLevel }`. */
   logLevelRemap?: unknown;
+  /** `packageRules` — an ordered array; later entries override earlier ones. */
+  packageRules?: unknown;
 };
 
 /**
@@ -352,4 +362,272 @@ export function remappedLogLevelFor(
     return (LOG_LEVELS as readonly string[]).includes(level) ? level : null;
   }
   return null;
+}
+
+/* ── The fourth property: an `automerge: false` entry that actually takes ─────
+ *
+ * Not from #243, and — unlike the three above — this one currently guards a shape
+ * the config does not yet use. That is deliberate and it is the whole point, so it
+ * is stated here rather than left for a reader to work out.
+ *
+ * `packageRules` is an ORDERED list: Renovate merges the entries a package matches
+ * in file order, and later entries overwrite earlier ones' keys. This file opens
+ * with a blanket `automerge: true` for minor/patch/digest/pin. So any future entry
+ * that turns automerge OFF for one package is effective only BELOW that blanket
+ * rule. Written above it, the entry is inert — the package keeps automerging — and
+ * the file still reads as though the exception were in force.
+ *
+ * `renovate-config-validator --no-global --strict` cannot tell the two apart.
+ * Measured against the renovate 43 major this repo pins: the correctly-ordered file
+ * and the inverted one both return `Config validated successfully`, exit 0. Nor
+ * would Renovate complain at runtime; it would simply automerge. That is the same
+ * silent-failure shape as the three guards above, which is why this is a test.
+ *
+ * It is written now, while there is no such entry, because the failure is
+ * order-of-writing: whoever adds the first deny entry is the person who cannot see
+ * the trap, and a guard added afterwards is a guard added after the incident. The
+ * colocated test says plainly which of its arms is vacuous today.
+ *
+ * ── `matchPackageNames` IS NOT EXACT-MATCH-ONLY (!359 review) ────────────────
+ *
+ * The first version of this section read `matchPackageNames` with `===`, which is
+ * not what Renovate does. From its shipped code at 43.288.0 — the major this
+ * repo's CI pins — `PackageNameMatcher` (`dist/util/package-rules/package-names.js`)
+ * delegates to `matchRegexOrGlobList` (`dist/util/string-match.js`), which accepts
+ * FOUR pattern families, not one:
+ *
+ *   - a bare `*`, short-circuited to "matches everything";
+ *   - a minimatch glob, compiled with `{ dot: true, nocase: true }`;
+ *   - a `/…/` or `/…/i` regex, via the same `getRegexPredicate` this file already
+ *     reproduces above for `matchMessage`;
+ *   - a leading `!` on any of those, partitioned into a negative set that must ALL
+ *     fail to match, while the positive set needs only one hit.
+ *
+ * Read with `===`, every one of those is invisible. That is a false pass in the
+ * dangerous direction and it defeats the exact guard this section exists to be:
+ * a correctly-ordered literal deny entry, followed BELOW it by an
+ * `{ matchPackageNames: ["@scope/*"], automerge: true }` entry, resolves to
+ * `automerge: true` under Renovate while the old helper reported `false` — so the
+ * ordering invariant passed over a config that automerges the denied package.
+ * Measured before the fix: `expected false to be null`.
+ *
+ * WHAT THIS MODULE NOW DOES, AND THE LIMIT IT KEEPS
+ *   It reads LITERAL names, case-insensitively — which is exactly faithful for
+ *   them, because `matchRegexOrGlobList` over a list of literal positives reduces
+ *   to "does any equal the input", and minimatch's `nocase: true` is why the
+ *   comparison is not case-sensitive. npm names are lowercase by spec; Go, Maven
+ *   and NuGet names are not.
+ *
+ *   It does NOT implement the glob, regex or negation families, and it must not
+ *   pretend to. A hand-rolled glob would be wrong in ways that matter here, all
+ *   measured with `{ dot: true, nocase: true }` — Renovate's own options — rather
+ *   than assumed:
+ *
+ *     match("@base-ui/react", "@base-ui/*")     -> true
+ *     match("@base-ui/react", "@base-ui*")      -> FALSE, `/` is a path separator
+ *     match("eslint-plugin-react", "eslint*")   -> true
+ *     match("react", "#react")                  -> FALSE, `#` opens a comment
+ *     match("react", "!react")                  -> false   (negation)
+ *     match("lodash", "!react")                 -> true
+ *     match("TypeScript", "typescript")         -> true    (this is the nocase case)
+ *
+ *   Getting the second or fourth of those backwards flips the guard's verdict, and
+ *   the numbers above come from the minimatch this repo happens to carry (3.1.5),
+ *   not from the one Renovate pins — which is the deeper reason not to reimplement:
+ *   the semantics belong to a dependency this module does not control and does not
+ *   declare.
+ *
+ *   So a pattern is not guessed at — it is REPORTED. `unreadableAutomergePackageNames`
+ *   names every non-literal entry on a rule that sets `automerge`, and the
+ *   colocated test asserts that list is empty; `effectiveAutomergeFor` returns
+ *   `null` (no definite answer) the moment it meets one, which fails both real-config
+ *   arms rather than answering wrongly. The scope limit is therefore enforced
+ *   mechanically, not merely documented — a documented limit does not fire when
+ *   somebody writes a glob.
+ *
+ *   Scoped to rules that set an `automerge` boolean, deliberately. A grouping or
+ *   `allowedVersions` rule contributes no `automerge` key, so Renovate merging it
+ *   cannot change the resolved value whether it matches or not; reporting its glob
+ *   would red this suite for a config edit that cannot affect the property being
+ *   guarded.
+ */
+
+/**
+ * The characters a literal package name may use, across the datasources Renovate
+ * reads here: npm (`@types/react-dom`), Docker (`registry.example.com/org/image`),
+ * Maven (`org.apache.commons:commons-lang3`), Go (`github.com/Org/repo`) and NuGet
+ * (`Some.NuGet.Package`).
+ *
+ * An ALLOWLIST rather than a blocklist of minimatch metacharacters, because the
+ * failure to avoid is a pattern that slips through and gets compared literally.
+ * Every minimatch special — `* ? [ ] { } ( ) | + \ ! ^ $` and a leading `#`, which
+ * minimatch reads as a comment matching nothing — is outside this set. `@` and `!`
+ * are special to minimatch only as `@(…)` and `!(…)`, and `(` is excluded, so a
+ * scoped npm name stays literal.
+ */
+const LITERAL_PACKAGE_NAME = /^[A-Za-z0-9._:@/-]+$/;
+
+/** Is `pattern` a literal package name this module can compare directly? */
+function isLiteralPackageName(pattern: unknown): pattern is string {
+  return typeof pattern === "string" && LITERAL_PACKAGE_NAME.test(pattern);
+}
+
+/**
+ * Every package name some rule in `packageRules` sets `automerge: false` for.
+ *
+ * The input to the ordering invariant, derived from the file rather than from a
+ * hardcoded list — so the check arms itself the moment somebody adds a deny entry,
+ * instead of depending on them also remembering to register the name here.
+ *
+ * Only a real `false` counts, and only a LITERAL name is reported. A blanket rule
+ * (no `matchPackageNames`) that set `automerge: false` names no package and so
+ * contributes nothing: it is a different config, not a per-package exception, and
+ * reporting `undefined` for it would make the invariant assert something it cannot
+ * check. A glob, a `/…/` regex or a `!` negation is not a package name either —
+ * feeding one to `effectiveAutomergeFor` would test the pattern string rather than
+ * the packages the rule governs, which is a different question with a coincidental
+ * answer. Those are reported by `unreadableAutomergePackageNames` instead.
+ */
+export function packagesDeniedAutomerge(packageRules: unknown): string[] {
+  if (!Array.isArray(packageRules)) return [];
+  const denied: string[] = [];
+  for (const entry of packageRules) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+    const rule = entry as PackageRule;
+    if (rule.automerge !== false) continue;
+    const names = rule.matchPackageNames;
+    if (!Array.isArray(names)) continue;
+    for (const name of names) {
+      if (isLiteralPackageName(name) && !denied.includes(name))
+        denied.push(name);
+    }
+  }
+  return denied;
+}
+
+/**
+ * Every `matchPackageNames` value on an automerge-setting rule that this module
+ * cannot read as a literal package name: a glob, a bare `*`, a `/…/` regex, a `!`
+ * negation, a non-string, an empty string, or a value that is not an array at all.
+ *
+ * The mechanical half of the scope limit documented in the section above. Renovate
+ * accepts all of those forms; this module reads literal names, so an entry written
+ * as a pattern changes which packages the ordering invariant is about and the
+ * invariant stops meaning what it says. The colocated test asserts this list is
+ * empty against the real file, so the limit fails loudly at the moment it is
+ * crossed rather than being a comment nobody reads.
+ *
+ * Same shape and same reasoning as `unevaluatableMatchMessages` above, including
+ * reporting by `String()` so a failure names the offending pattern. A
+ * `matchPackageNames` that is not an array reports as its own `String()` form,
+ * which for a bare string is indistinguishable from a literal name — Renovate
+ * requires an array there, so the fix is the brackets, and the assertion message
+ * says so.
+ */
+export function unreadableAutomergePackageNames(
+  packageRules: unknown,
+): string[] {
+  if (!Array.isArray(packageRules)) return [];
+  const unreadable: string[] = [];
+  const report = (value: string): void => {
+    if (!unreadable.includes(value)) unreadable.push(value);
+  };
+  for (const entry of packageRules) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+    const rule = entry as PackageRule;
+    if (typeof rule.automerge !== "boolean") continue;
+    const names = rule.matchPackageNames;
+    // A blanket rule names no package; that is what makes it blanket, not a gap.
+    if (names === undefined) continue;
+    if (!Array.isArray(names)) {
+      report(String(names));
+      continue;
+    }
+    for (const name of names) {
+      if (!isLiteralPackageName(name)) report(String(name));
+    }
+  }
+  return unreadable;
+}
+
+/** One `packageRules` entry, as far as this module reads one. */
+type PackageRule = {
+  matchPackageNames?: unknown;
+  automerge?: unknown;
+};
+
+/**
+ * Whether a rule applies to `packageName` — `"unreadable"` when its
+ * `matchPackageNames` uses a form this module does not implement, so the caller
+ * can decline to answer instead of guessing.
+ *
+ * No `matchPackageNames` means "every package" — that is what makes the blanket
+ * automerge rule blanket, and it is the entry this guard is really about. An empty
+ * array means "no package", matching `matchRegexOrGlobList`'s own `if
+ * (!patterns.length) return false`.
+ *
+ * Deliberately ignores the other narrowing matchers (`matchUpdateTypes`,
+ * `matchManagers`, `matchDatasources`, `matchCurrentValue`). This is NOT a
+ * reimplementation of Renovate's resolver and must not be read as one: the
+ * question here is ordering — "can a rule that enables automerge win against the
+ * deny entry for this package" — and a rule narrowed to `minor` still answers yes,
+ * because minor is precisely the update type the deny entry exists to catch.
+ * Modelling those matchers would make the guard narrower than the fault.
+ */
+function ruleAppliesTo(
+  rule: PackageRule,
+  packageName: string,
+): "yes" | "no" | "unreadable" {
+  const names = rule.matchPackageNames;
+  if (names === undefined) return "yes";
+  if (!Array.isArray(names)) return "unreadable";
+  if (!names.every(isLiteralPackageName)) return "unreadable";
+  // Case-insensitive because Renovate compiles these with minimatch's
+  // `nocase: true`; see the section docblock.
+  const wanted = packageName.toLowerCase();
+  return names.some((name) => name.toLowerCase() === wanted) ? "yes" : "no";
+}
+
+/**
+ * The `automerge` value `.gitlab/renovate.json` resolves to for `packageName`, or
+ * `null` if no applicable rule expresses one.
+ *
+ * Last match wins, mirroring Renovate: `packageRules` are merged in file order and
+ * a later entry overwrites an earlier one's keys. A helper that returned the
+ * *first* match — or the most specific one — would pass a file Renovate reads the
+ * opposite way round, which is the entire fault being guarded against.
+ *
+ * Only a real boolean counts. A `"false"` string is left as no opinion at that
+ * entry, so a stringly-typed edit reads as the control being absent rather than
+ * as the control being in place. Rules that express no `automerge` boolean are
+ * skipped before their `matchPackageNames` is read at all: Renovate merging such a
+ * rule cannot change the resolved value, so whether it matches is not a question
+ * this helper has to answer.
+ *
+ * `null` is also the answer when an automerge-setting rule uses a
+ * `matchPackageNames` form this module does not implement — a glob, a `/…/` regex,
+ * a `!` negation. It fails closed rather than treating the rule as inapplicable,
+ * because inapplicable is a definite `false` and a wrong definite answer here
+ * passes a config that automerges a denied package. Both real-config arms of the
+ * colocated test require a definite value, so an unreadable form reds them, and
+ * `unreadableAutomergePackageNames` is what names it.
+ */
+export function effectiveAutomergeFor(
+  packageName: string,
+  packageRules: unknown,
+): boolean | null {
+  if (!Array.isArray(packageRules)) return null;
+  let resolved: boolean | null = null;
+  for (const entry of packageRules) {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+    const rule = entry as PackageRule;
+    if (typeof rule.automerge !== "boolean") continue;
+    const applies = ruleAppliesTo(rule, packageName);
+    if (applies === "unreadable") return null;
+    if (applies === "yes") resolved = rule.automerge;
+  }
+  return resolved;
 }
