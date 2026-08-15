@@ -208,6 +208,59 @@ function coveredModels(): string[] {
 
 const read = (file: string) => readFileSync(join(EXPORT_DIR, file), "utf8");
 
+/**
+ * `collect.ts`'s `User` read, narrowed to its own `select` block.
+ *
+ * The column check below used to search the WHOLE file for `<column>: true`, and
+ * column names are NOT unique across that file's reads: `id`, `createdAt` and
+ * `lastSeenAt` are also selected on `Workspace`, and `provider` on `Allowlist`.
+ * So a column dropped from the User select was still reported as covered — by a
+ * different model's string.
+ *
+ * Measured rather than theorised, on this branch: with `provider: true` deleted
+ * from the User select and nothing else touched, **the whole suite passed** —
+ * 341 files, 6817 tests — while `/privacy` went on publishing "Nothing else is
+ * held back". `collect.integration.test.ts` did not cover it either; its
+ * "every User column the schema has" case asserts a hand-written six, not the
+ * `Prisma.dmmf` list, so it caught a dropped `lastSeenAt` and was blind to
+ * `provider`.
+ *
+ * That is this file's own subject one level further down — a guard reporting
+ * coverage it did not have — so the search is scoped to the block that actually
+ * governs what the export selects. The risk is live, not hypothetical: `kind`,
+ * `note`, `expiresAt`, `identity`, `invitedAt`, `claimedAt` and `isOwnerSeed`
+ * are all already present in the file as `<name>: true` from the `Workspace` and
+ * `Allowlist` selects, so a future `User` column called any of them would be
+ * born invisible to the unscoped check.
+ *
+ * Brace-counted rather than pattern-matched: the block carries nested objects and
+ * comments, and `regexp-source-hygiene` (#234) forbids assembling a `RegExp` from
+ * anything but a file-level literal in any case.
+ */
+function userSelectBlock(collect: string): string {
+  const userRead = collect.indexOf("prisma.user.findUnique(");
+  if (userRead === -1) {
+    throw new Error(
+      "collect.ts no longer reads prisma.user, so this guard is pointing at nothing",
+    );
+  }
+  const open = collect.indexOf("select: {", userRead);
+  if (open === -1) {
+    throw new Error(
+      "collect.ts's User read no longer uses an explicit select; the column-grain check assumes one",
+    );
+  }
+  let depth = 0;
+  for (let i = collect.indexOf("{", open); i < collect.length; i += 1) {
+    if (collect[i] === "{") depth += 1;
+    else if (collect[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return collect.slice(open, i + 1);
+    }
+  }
+  throw new Error("collect.ts's User select block never closes");
+}
+
 /** Read directly by `collect.ts`, i.e. everything the guard expects to find a
  *  `prisma.<model>.` call for. */
 const readsDirectly = (models: string[]) =>
@@ -379,8 +432,22 @@ describe("the data export covers every model holding personal data (#199)", () =
     // match inside `providerSub: true`, because the character after the prefix
     // differs, so the two columns are still told apart.
     const collect = read("collect.ts");
+    const userSelect = userSelectBlock(collect);
+    // Controls on the narrowing itself. A slice that silently grabbed the whole
+    // file would restore the collision this scoping exists to remove, and one
+    // that grabbed nothing would red every column at once and read as a broken
+    // guard rather than a passing one, so both directions are pinned.
+    expect(userSelect.length).toBeLessThan(collect.length);
+    expect(userSelect).toContain("providerSub: true");
+    // `expiresAt` is selected on `Workspace` and is not a `User` column, so it
+    // marks the boundary: finding it in here means the slice ran past the read it
+    // is supposed to describe. The assertion above it keeps the marker honest if
+    // the schema ever gives `User` a column by that name.
+    expect(columns).not.toContain("expiresAt");
+    expect(userSelect).not.toContain("expiresAt: true");
+
     const missing = columns.filter(
-      (c) => c !== "llmKeyEnc" && !collect.includes(`${c}: true`),
+      (c) => c !== "llmKeyEnc" && !userSelect.includes(`${c}: true`),
     );
     expect(
       missing,
