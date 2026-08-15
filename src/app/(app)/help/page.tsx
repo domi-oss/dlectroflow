@@ -360,10 +360,17 @@ export default async function HelpPage({
             Someone who cannot comfortably read the app is exactly who opens a help
             page, so the two faces are named: the NAME is the search term. */}
         <p className="text-sm">
-          <strong>Appearance</strong> covers light and dark mode, how completed
+          <strong>Appearance</strong> covers the colour scheme, how completed
           items are struck through and ticked, and the <strong>typeface</strong>{" "}
-          the whole app uses. Two of the four choices are there to make reading
-          easier — <strong>Atkinson Hyperlegible</strong> and{" "}
+          the whole app uses. The scheme has three settings and starts on{" "}
+          <strong>Follow my system</strong>, so by default the app matches your
+          device — including any automatic day/night schedule it already has,
+          which is why there is no separate timer for it here.{" "}
+          <strong>Light</strong> and <strong>Dark</strong> override that.
+        </p>
+        <p className="text-sm">
+          Two of the four typefaces are there to make reading easier —{" "}
+          <strong>Atkinson Hyperlegible</strong> and{" "}
           <strong>OpenDyslexic</strong> — so if the default is hard going, that
           is the setting to try first.
         </p>

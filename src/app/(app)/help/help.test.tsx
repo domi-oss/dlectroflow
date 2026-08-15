@@ -230,6 +230,13 @@ describe("HelpPage", () => {
     // The section that owns the typefaces, and the two aids by name — the names
     // are what someone who needs them is searching for.
     expect(text).toMatch(/Appearance/);
+    // #85 made the theme THREE-state (`system` / `light` / `dark`) defaulting to
+    // `system`, so "light and dark mode" is no longer the whole setting and no
+    // longer describes what a first visit does. Named by its real label, and the
+    // default is stated, because "follows your device" is the behaviour a reader
+    // meets before they ever open Settings.
+    expect(text).toMatch(/Follow my system/);
+    expect(text).toMatch(/by default|to start with|already/i);
     expect(text).toMatch(/Atkinson Hyperlegible/);
     expect(text).toMatch(/OpenDyslexic/);
     // Reminders: the section's real heading, not the word "reminders" alone.
