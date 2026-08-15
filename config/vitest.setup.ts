@@ -26,7 +26,8 @@ process.env.TOKEN_ENC_KEY ??= "0".repeat(64);
 //     a bare checkout, so this never demands infrastructure a test doesn't use;
 //   - it throws rather than skipping, so a suite can never quietly run less than
 //     it claims. The file is reported as FAILED, which is the honest outcome.
-// vitest.config.ts already sources DATABASE_URL from `.env`, so reaching this
+// `config/vitest.config.ts` already forwards DATABASE_URL from `.env` and
+// `.env.local` — the same two files the message below names — so reaching this
 // means no database is configured at all.
 const testPath = expect.getState().testPath ?? "";
 if (/\.integration\.test\.tsx?$/.test(testPath) && !process.env.DATABASE_URL) {
