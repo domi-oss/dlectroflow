@@ -27,8 +27,9 @@ describe("section registries (#72)", () => {
     // section).
     expect(SETTINGS_SECTIONS.length).toBe(11);
     // 9 since the copy audit added "Where things end up" (Library + Activity) and
-    // "Shopping list" — three of the app menu's seven destinations were
-    // undocumented, and shopping-list mode is additionally OFF by default, so its
+    // "Shopping list" — two of the app menu's six default destinations were
+    // undocumented (see `app-menu.test.tsx:53-63` for that six), and shopping-list
+    // mode is a conditional seventh that is additionally OFF by default, so its
     // switch is the only thing that reveals the feature exists at all.
     // (7 after #129/#153 added "Your data" — export and self-deletion are rights a
     // reader arrives looking for, so they are a named section rather than a line

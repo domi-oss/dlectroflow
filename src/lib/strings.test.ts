@@ -399,9 +399,19 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   // The comment is corrected rather than deleted because "used in InboxView row
   // button" is what a reader would otherwise grep for and not find.
   //
-  // `action.editTitle` is the second key in this state, for the same reason and on
-  // this precedent — #253 dropped the ▾ "Edit task title" entry as a mirror of the
+  // `action.editTitle` is in the same state, for the same reason and on this
+  // precedent — #253 dropped the ▾ "Edit task title" entry as a mirror of the
   // row's ✎ pencil. Its cases live in the table above.
+  //
+  // Substitute review of record, !356 — this said "the second key in this state",
+  // which is the four-count era's framing. There are TEN, and the authoritative
+  // list plus the re-derivation recipe are in `strings.ts` above `action.moveTo`;
+  // this file is deliberately not a second copy of that list, because two copies
+  // is how it went stale twice. A reader arrives here by following the recipe's own
+  // allowlist (`strings.ts` AND `strings.test.ts`), so it must not contradict it.
+  // Five of the ten have no case pinned anywhere: `action.confirmSteps`,
+  // `freshness.recent`, `focus.pauseForNow`, `focus.hyper.turnOff` and
+  // `focus.launcher.intro`.
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });

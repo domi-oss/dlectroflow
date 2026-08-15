@@ -78,9 +78,20 @@ export const HELP_SECTIONS = [
   { id: "help-inbox-freshness", heading: { text: "The inbox & freshness" } },
   { id: "help-task-breakdown", heading: { text: "Task breakdown" } },
   { id: "help-focus-session", heading: { text: "The focus session" } },
-  // The app menu carries seven destinations and this page documented three of
-  // them. These two close that gap, as content destinations placed before the
-  // settings-shaped sections.
+  // The app menu carries SIX destinations by default and this page documented
+  // four of them (Inbox, Focus Timer, Settings, and Help itself). These two close
+  // that gap, as content destinations placed before the settings-shaped sections.
+  //
+  // Six, not seven: `DESTINATIONS` (`app-menu.tsx:9-20`) has seven entries, but
+  // `nav.shopping` carries `requires: "shoppingList"` and that column is
+  // `@default(false)` (`schema.prisma:104`), so a default workspace renders six.
+  // `app-menu.test.tsx:53-63` asserts exactly that list, and seven appears there
+  // only under `<AppMenu shoppingList />`. (Substitute review of record, !356 —
+  // this comment said seven and contradicted itself four lines down, where it
+  // calls Shopping list "an optional feature most workspaces have switched off".
+  // Both halves cannot be true, and the corrected arithmetic is the tidier one:
+  // a gap of two closed by `help-where-things-go`, plus the conditional seventh
+  // closed by `help-shopping-list`.)
   //
   // They deliberately do NOT follow the menu's literal order, which interleaves
   // Shopping list BETWEEN Library and Activity. Grouping wins over that here:
