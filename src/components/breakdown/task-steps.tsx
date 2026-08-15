@@ -199,6 +199,10 @@ export function TaskSteps({
   // let the second row's hand-off overwrite the first's, leaving the row that had
   // been waiting longest with nothing. Refs, not state — the hand-off is a
   // one-shot DOM side effect and must not drive a render.
+  //
+  // #237 — and ARMED only when the press held focus, which is the question that
+  // has to be settled before "where does focus go": see the gate at the Retry's
+  // own `onClick`.
   const retryHandoffRef = useRef<Set<string>>(new Set());
   const undoRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
@@ -422,12 +426,36 @@ export function TaskSteps({
                       armed below and consumed by the effect on `undoFailedIds`. */}
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
                       // Armed only when the press is actually honoured. Arming on
                       // a swallowed press would leave an id queued to steal focus
                       // at whatever unrelated render moved `undoFailedIds` next.
                       if (undoing) return;
-                      retryHandoffRef.current.add(s.id);
+                      // #237 — and only when the press came FROM this button.
+                      // 2.4.3 asks where focus goes when the focused control is
+                      // destroyed; it does not license taking focus off something
+                      // else, which is 3.2.2's harm instead. The note above calls
+                      // this "the likeliest thing holding focus" and that is true
+                      // — but likeliest is not always, and the gap is not a rare
+                      // one: WebKit does not focus a `<button>` on click (measured
+                      // against Chromium in the spec's own table), so on Safari
+                      // and everything on iOS a mouse or touch press NEVER holds
+                      // it. Assistive-technology activation is the second route,
+                      // on every engine.
+                      //
+                      // It matters in THIS file and not in `focus-timer.tsx`
+                      // because this notice renders per row, inside the same map
+                      // as the two `autoFocus` inline editors below — so the
+                      // user's caret can be in a sibling row's field, and the
+                      // unguarded arm moved it to another row's busy control.
+                      //
+                      // `currentTarget`, read synchronously: this is the button,
+                      // and the question is only whether the user is standing on
+                      // it. Same shape as `breakdown-chat.tsx`'s dismiss control
+                      // and `inbox-view.tsx`'s `retryCtaRef` comparison — the
+                      // pattern two of these four components already had.
+                      if (e.currentTarget === document.activeElement)
+                        retryHandoffRef.current.add(s.id);
                       uncomplete(s.id);
                     }}
                     aria-disabled={undoing}

@@ -6,6 +6,7 @@ import {
   cleanup,
   waitFor,
   within,
+  fireEvent,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskSteps } from "@/components/breakdown/task-steps";
@@ -1051,5 +1052,129 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
       screen.getByRole("link", { name: /start focus/i }),
     ).not.toHaveFocus();
     expect(document.body).toHaveFocus();
+  });
+});
+
+describe("TaskSteps — a hand-off only fires when the press held focus (#237)", () => {
+  // #237. The two describes above pin WHERE focus goes when a control the user is
+  // standing on is destroyed. Neither pinned the prior question, and both
+  // hand-offs armed without asking it: 2.4.3 is about focus that is destroyed, it
+  // does not license taking focus off something else, and doing that is 3.2.2's
+  // harm instead.
+  //
+  // Why the press cannot be trusted to have held focus — re-measured in Playwright
+  // against both engines rather than inherited:
+  //
+  //   gesture                                    WebKit    Chromium
+  //   click a <button>, nothing focused          BODY      BUTTON
+  //   click a <button> while typing in a field   BODY      BUTTON
+  //   Enter on a focused <button>                BUTTON    BUTTON
+  //
+  // So on WebKit — Safari, and every browser on iOS — a mouse or touch press never
+  // holds focus, which makes the unguarded arm the ORDINARY mouse case there
+  // rather than an edge. Assistive-technology activation is the second route: it
+  // fires a click without moving DOM focus on every engine.
+  //
+  // This list is where that becomes reachable, and it is why `focus-timer.tsx` can
+  // go on without the guard while this file cannot: the failed-undo notice renders
+  // per row, inside the same `steps.map()` as the two `autoFocus` inline editors,
+  // so the control that unmounts and the field the user is typing in are siblings.
+  //
+  // Same guard, same shape and same reason as `breakdown-chat.tsx`'s "leaves focus
+  // where it was when the press did not come from it" and `inbox-view.tsx`'s
+  // `retryCtaRef.current === document.activeElement`. Following the in-tree
+  // pattern is the point — four components had grown this machinery and two had
+  // the guard.
+  //
+  // `fireEvent.click` rather than `user.click` for the press under test:
+  // userEvent focuses the element first, which is the very thing being guarded, so
+  // it would make the unguarded code pass. fireEvent dispatches the press without
+  // moving focus, which is what WebKit does.
+
+  /** Row 1 not done, so it carries the ✎ pencil and its `autoFocus` editor; row 2
+   *  done, so it can carry the failed undo and the Retry inside its notice. The
+   *  two live in one `<ol>`, which is the whole hazard. */
+  const mixedRows = () => [
+    { ...baseStep(), id: "s1", text: "First", done: false },
+    { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+  ];
+
+  it("leaves focus in another row's editor when the Retry press never held it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      // The retry hangs, so the state after the press is observable rather than
+      // racing a resolution — the shape the #215 specs above use.
+      .mockImplementationOnce(() => new Promise<void>(() => {}));
+    render(<TaskSteps taskId="t1" steps={mixedRows()} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+
+    // The user is mid-word in the OTHER row's title editor.
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    const field = screen.getByLabelText("Edit step title");
+    await user.clear(field);
+    await user.type(field, "half a wor");
+    expect(field).toHaveFocus();
+
+    fireEvent.click(retry);
+
+    // The press is still honoured — the retry runs and its notice still
+    // withdraws. Only the focus move is suppressed, so this is not the guard
+    // passing vacuously by refusing the press.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /try again/i }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(uncompleteStep).toHaveBeenCalledTimes(2);
+
+    expect(field).toHaveFocus();
+    // The words survive too. On WebKit the click blurs the field but keeps its
+    // value (measured above), so a hand-off that fires anyway costs the user the
+    // caret in text they are still holding, not the text itself.
+    expect(field).toHaveValue("half a wor");
+    expect(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    ).not.toHaveFocus();
+  });
+
+  it("still hands off when the press DID hold focus, on both arms", async () => {
+    // The control for the two specs above. Without it "focus did not move" could
+    // be true because the guard disabled the feature outright, and #206/#215 both
+    // exist because focus dropping to <body> here is a real defect.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      .mockResolvedValueOnce(undefined);
+    const rows = mixedRows();
+    const { rerender } = render(<TaskSteps taskId="t1" steps={rows} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    await user.keyboard("{Enter}");
+
+    // Arm one: the Retry unmounted under a user who was standing on it, so focus
+    // lands on the row's own undo.
+    const undo = await screen.findByRole("button", {
+      name: /mark not done: second/i,
+    });
+    await waitFor(() => expect(undo).toHaveFocus());
+
+    // Arm two: that undo is where focus now is, so when the refresh unmounts it
+    // the reopened row's Start Focus receives the hand-off.
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    rerender(
+      <TaskSteps taskId="t1" steps={[rows[0], { ...rows[1], done: false }]} />,
+    );
+    const links = screen.getAllByRole("link", { name: /focus/i });
+    expect(links).toHaveLength(2);
+    await waitFor(() => expect(links[1]).toHaveFocus());
   });
 });
