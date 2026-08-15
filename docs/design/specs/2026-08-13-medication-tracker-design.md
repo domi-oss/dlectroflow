@@ -89,7 +89,7 @@ standing on. **Every row where the re-read corrected what the brainstorm asserte
 | A small in-repo copy set is an established shape | **Confirmed twice**: `FALLBACK_SPARKS` (**8** lines, `src/lib/spark.ts`) and `FABLE_LINES` (**6** lines, `src/lib/fable-lines.ts`). ⚠️ Both pick **randomly**, via `pickOne`. That difference matters; see *The reward* |
 | ⚠️ `/privacy` currently states the app has no health field | **It does, in terms this feature contradicts.** "There is no health field, no diagnosis field, no questionnaire, and nothing infers anything about your health, your mind, or how you are doing." A medication log is a health field. **This is a v1 blocker, not a footnote**; see *The legal copy* — where the second half of that sentence turns out to have been overstated for a reason unrelated to meds |
 | ⚠️ `/terms` already names medication | Under *Where being wrong would cost you*: "Do not rely on an AI suggestion for anything with real consequences: **medication or dosing**, legal or tax deadlines, medical appointments…". Scoped to *AI suggestions*, so it is not contradicted — and it is why no-AI is a declared non-goal above rather than an oversight |
-| ⚠️ A new workspace-scoped model is auto-enrolled in two guards | `src/lib/export/__tests__/model-coverage.test.ts` and `src/lib/__tests__/scoping.harness.test.ts` both derive their model list from `Prisma.dmmf` **at runtime**, filtered on carrying a `workspaceId` field. So declaring `workspaceId` enrols the model with **no registry entry to forget** — and the export guard will red until `collect.ts` and `json.ts` both name it |
+| ⚠️ A new workspace-scoped model is auto-enrolled in two guards | `src/lib/export/__tests__/model-coverage.test.ts` and `src/lib/__tests__/scoping.harness.test.ts` both derive their model list from `Prisma.dmmf` **at runtime**, filtered on carrying a `workspaceId` field. So declaring `workspaceId` enrols the model with **no registry entry to forget** — and the export guard will red until `collect.ts` and `types.ts` both name it. ⚠️ It does **not** read `json.ts`, so serialising the model there is a review item and not a thing CI will catch; see *Export coverage* |
 | No medication feature or duplicate issue exists | Zero matches for `medication` in `src/`, `prisma/` or `charts/` other than the `/terms` sentence above. Open-issue search for `medication` returns **0**; `meds` and `pill` return only substring hits (`needs`, `Spotify`, `bulky`) |
 
 ### Second pass — verified 2026-08-15 against `origin/main` at `47e015d`
@@ -109,7 +109,7 @@ decisions of 2026-08-15 rest on facts the first pass never queried, so those are
 | ⚠️ A guard polices WCAG number↔name welds, **and it reads `docs/`** | **Confirmed, and this is the row that binds this file.** `src/lib/a11y-class-hygiene.test.ts` drives a `CRITERION_SPEC` table (`2.5.5` → `Target Size`, qualifier `Enhanced`, `AAA`; `2.5.8` → `Target Size`, qualifier `Minimum`, `AA`) and iterates `for (const root of ["src", "e2e", "docs"])` plus four root Markdown files. **An inverted citation in this spec reds the pipeline.** Bare numbers are legal by design — its own comment: *"only a number wearing the wrong name is a defect"* |
 | ⚠️ `touchTarget`'s **own docblock** is one of the inverted sites | **Yes**, and it is the one an implementer will read. `src/lib/utils.ts:9–13` welds `2.5.5` to the word *minimum*. `#268 — Three WCAG target-size citations are inverted, and the guard built to catch them cannot see any` owns the sweep. `controlSurface`'s docblock two declarations below it (`:35–41`) states the pair correctly and is the citation to follow instead |
 | ⚠️ `format:check` **cannot** gate this file | `.prettierignore` lists `*.md` **and** `docs/`, with the reasoning inline. Measured, not read off the file: appending deliberately mangled Markdown to this spec still gives `npx prettier --check <file>` → *"All matched files use Prettier code style!"*, exit 0, while `--ignore-path /dev/null` on the same bytes reports `[warn]`. **This MR's own description claimed the check passes; that was a zero from a run that matched no files**, and it is corrected there. Recipe below |
-| ⚠️ A legal-accuracy sweep of `/privacy` is in flight | **`!357 — Draft: fix(legal): correct ten measured drifts between the legal pages and the code`**, branch `docs/legal-accuracy-sweep`, milestone **v0.7.0**, still Draft on one open owner decision. ⚠️ **It does not touch `/terms`** — its own description records that `/terms`' fingerprint "comes back byte-identical". It does touch `/privacy`, `docs/legal.md`, `src/lib/export/readme.ts`, `/help` and the export code. See *The legal copy* |
+| ⚠️ A legal-accuracy sweep of `/privacy` is in flight | **`!357 — fix(legal): correct ten measured drifts between the legal pages and the code`**, branch `docs/legal-accuracy-sweep`, milestone **v0.7.0**. ⚠️ **Merged 2026-08-15** — this row was written while it was Draft; see the status note in *The legal copy*. ⚠️ **It does not touch `/terms`** — its own description records that `/terms`' fingerprint "comes back byte-identical". It does touch `/privacy`, `docs/legal.md`, `src/lib/export/readme.ts`, `/help` and the export code. See *The legal copy* |
 | ⚠️ "nothing infers anything about … how you are doing" was **already** overstated | **Confirmed, and by the sweep rather than by this document.** `!357`: *"What was overstated is 'nothing infers anything about how you are doing', because `DayRollup.narrative` is an LLM-written, stored, second-person text about the reader's day. Narrowed, not deleted."* The column is `narrative String?` (`prisma/schema.prisma:669`); `src/lib/rollup.ts`'s `generateTodayRollup` fills it from `getLLM().generate()` for an owner workspace and from a local builder for a guest |
 | ⚠️ Amending `/privacy` is a **publication event**, not a copy edit | `src/lib/legal.ts`: `LEGAL_EFFECTIVE_DATE` is *"ONE date [covering] both documents"*, and a fingerprint gate means *"the text cannot move without someone deciding about this date"*. `!357`'s description states the consequence — split across MRs, *"each merge would invalidate the other's recorded hash and the date would move N times for one publication"*. **So the meds amendment is one commit, and it cannot ride alongside `!357`'s** |
 | ⚠️ `src/lib/best-effort.ts` is now **on `main`** — the first pass's row has expired | **`!339` merged 2026-08-15 and `#257` is closed.** The helper exists at `47e015d`; its docblock states the rule as *"the `try` governs the WRITE; anything after it is a consequence of success and cannot un-write the row"* and names the three sites that had reached it independently. **This does not change the reward decision** — the argument was never "the helper is missing", it was that a presentational reward has no post-commit step for the defect to live in. It changes only what this document may cite: the file, now, rather than the issue |
@@ -719,9 +719,11 @@ which is the thing WCAG asks for. A mode is a **shortcut**, and a shortcut is al
 specialised in a way a sole route is not. Every trade-off below is affordable only because of this
 sentence, so it is stated first rather than as a mitigation at the end.
 
-Mockups for both modes are at `_reports/2026-08-15-meds-pill-mockups.html`, built on the real tokens
-and the real 44×44 control surface, and each panel carries its own trade-offs. That file is the source
-of truth for the two designs; this section is the source of truth for the decision about them.
+**This section is the source of truth for both designs and for the decision between them.** Interactive
+mockups on the real tokens and the real 44×44 control surface were built during design and informed
+every trade-off recorded below, but they are not part of the repository and implementing this does not
+require them: the two subsections that follow give each mode's shape, its costs and its accessible-name
+requirement in full.
 
 #### `B★` — the default: two dots, one tap, immediate commit, persistent Undo
 
@@ -946,11 +948,20 @@ every test in the repo.
 
 #### What has changed since 2026-08-13 — and it does not make the amendment smaller
 
-⚠️ **A legal-accuracy sweep of `/privacy` is in flight**: `!357 — Draft: fix(legal): correct ten
+⚠️ **A legal-accuracy sweep of `/privacy` is in flight**: `!357 — fix(legal): correct ten
 measured drifts between the legal pages and the code`, milestone v0.7.0. It is tempting to conclude
 that part of this checklist is being done anyway. **Read against `!357`'s actual scope, that conclusion
 does not hold in the direction that matters, and the honest reading is: the surgery on one sentence is
 being done for us, and the amendment gains three surfaces and loses its stated legal basis.**
+
+> ⚠️ **Status note added 2026-08-16: `!357` has since MERGED**, so it is no longer Draft and no longer
+> in flight. The rest of this document was written while it was open and still describes it that way —
+> that framing is left as written rather than rewritten passage by passage, because every *finding* it
+> records is unchanged by merging. **What does change is the reading instruction:** wherever this
+> document says to write against `!357`'s text rather than against `main`'s, those are now the same
+> thing, and `main` is the one to read. The sequencing question — which of the two lands first, and the
+> single `LEGAL_EFFECTIVE_DATE` that cannot move twice for one publication — is likewise settled:
+> `!357` went first, so **the meds amendment is the next publication event** and moves that date itself.
 
 - **In flight, not done — the sentence's second half is being narrowed for a reason that has nothing
   to do with meds.** (`!357` is Draft; this is its recorded finding, not a landed change.) `!357` found *"nothing infers anything about … how you are doing"* was **already overstated
@@ -1046,7 +1057,7 @@ rather than this document's, and the Article 9 item is now a decision rather tha
 - [ ] State somewhere the user will see it that the tracker is a **record of what they told it** — not
       a reminder they can rely on, not dosing advice, and not a medical device
 
-### Export coverage — mechanically enforced, and it will red first
+### Export coverage — two legs enforced, and a third one nothing checks
 
 `Medication` and `MedsDoseLog` declare `workspaceId`, so `Prisma.dmmf` enrols them in
 **`src/lib/export/__tests__/model-coverage.test.ts`** automatically. That guard exists because
@@ -1054,17 +1065,35 @@ rather than this document's, and the Article 9 item is now a decision rather tha
 words, *"A user exercising UK GDPR Art. 15/20 would have received an archive silently missing a
 table."*
 
-So: **three files, not two** — ⚠️ corrected 2026-08-15, having been written as two. At `47e015d` the
-guard asserts `read("collect.ts")` contains `prisma.<model>.`, that the model is **mentioned in
-`types.ts`**, and that `json.ts` serialises it. Miss any one and CI reds before review — a good
-outcome, and the reason it is listed here is so it is planned rather than discovered. For
-special-category data the omission would be considerably worse than for a playlist.
+⚠️ **The guard reads two files, and `json.ts` is not one of them.** Corrected 2026-08-16: this
+paragraph previously claimed three files, and claimed it *as a correction* of an earlier "two" that
+had been right all along. Verified by reading every `read(` call in the guard at `origin/main` after
+`!357` rewrote it — each one names `collect.ts` or `types.ts`, and `json.ts` occurs in that file's
+comments only. So, precisely:
 
-⚠️ **And that guard is being widened while this spec sits open.** `!357` extends its predicate from
-"declares `workspaceId`" to "has a relation to `User`", adds a `VIA_PINNED_MODULE` registry for models
-the scoping harness confines to one module, and adds a **column-grain** check on `User`. None of that
-changes the obligation for these two tables — both are workspace-scoped and read directly — but an
-implementer should read the guard rather than this paragraph if `!357` has landed by then.
+- **Enforced — `collect.ts` queries the model.** Asserted as containing `prisma.<model>.` rather than
+  the bare model name, so that a mention in a doc comment cannot pass for coverage.
+- **Enforced — `types.ts` mentions the model**, case-insensitively. Deliberately weak: the snapshot's
+  field names are not derivable from the model names (`brainDumpItem` is carried as `inbox`), so it
+  asserts there is *somewhere for the model to go* rather than guessing the field name.
+- ⚠️ **Not enforced — `json.ts` serialises it.** The obligation is real and unchanged: `json.ts` is the
+  only lossless tier, so a model absent from it is a table missing from the archive a user receives
+  under UK GDPR Art. 15/20 — the exact `FocusPlaylist` failure quoted above. **But nothing mechanical
+  checks it, so it is a review item, and CI will not remind anyone.** The guard's own docblock states
+  the requirement — a model *"is still required to be in `types.ts` and in `json.ts`"* — in prose it
+  never asserts. That is the same shape as the CHECK registry above: a comment describing a safety net
+  that does not exist. **Put `json.ts` on the implementation MR's checklist by hand.**
+
+For special-category data every one of those omissions would be considerably worse than for a playlist,
+which is why the unenforced leg is named here rather than left to be discovered.
+
+⚠️ **That guard was widened while this spec sat open, and `!357` has now landed.** It extends the
+predicate from "declares `workspaceId`" to "declares `workspaceId` **or** has a relation to `User`",
+adds a `VIA_PINNED_MODULE` registry for models the scoping harness confines to one module, and adds a
+**column-grain** check on `User`. None of that changes the obligation for these two tables — both are
+workspace-scoped and read directly, and the `workspaceId` arm is retained — and none of it adds a
+`json.ts` check. The file roughly tripled in length in that rewrite, so **no line number from it is
+quoted here**; read the guard itself.
 
 `MedicationDose` carries no `workspaceId` and is reached via `include`, exactly as `Step` is, so it
 falls outside the guard's predicate and is exported as part of its parent.
@@ -1359,12 +1388,13 @@ is that, not your own citation.
   single register carrying a rotating set. Unscheduled, in Backlog, and this feature is not blocked on
   it in either order — see *§6a*. It cites this MR for `Settings.voice` being the schema's one CHECK-less
   pseudo-enum
-- **`!357` — Draft: fix(legal): correct ten measured drifts between the legal pages and the code** —
+- **`!357` — fix(legal): correct ten measured drifts between the legal pages and the code** —
   rewrites the health paragraph this feature has to amend, withdraws the Article 9(2)(a) basis this
   document had planned to extend, and names `/help` and `src/lib/export/readme.ts` as two more surfaces
   carrying the same disclosure. **It deliberately says nothing about medication**, so none of the
-  privacy checklist is done by it. Whichever lands first, the other rebases — a single
-  `LEGAL_EFFECTIVE_DATE` cannot move twice for one publication
+  privacy checklist is done by it. ⚠️ **Merged 2026-08-15**, so its text is now `main`'s and the meds
+  amendment is the next publication event to move `LEGAL_EFFECTIVE_DATE`. It also rewrote the export
+  coverage guard — see *Export coverage*
 - **#268 — Three WCAG target-size citations are inverted, and the guard built to catch them cannot see
   any** — why the citation to copy for the nav control's 44×44 floor is `controlSurface`'s docblock and
   not `touchTarget`'s, which sits directly above the constant and is one of the inverted sites
@@ -1379,6 +1409,3 @@ is that, not your own citation.
   export guard this design follows throughout
 - **`docs/design/specs/2026-08-11-offline-capture-queue-design.md`** — the live-region and
   announcement conventions the reward, banner and both nav modes follow
-- **`_reports/2026-08-15-meds-pill-mockups.html`** — live mockups of every nav shape considered, on the
-  real tokens and the real 44×44 control surface, each panel carrying its own trade-offs. Source of
-  truth for what `B★` and `E` *are*; this document is the source of truth for the decision between them
