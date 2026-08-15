@@ -50,6 +50,14 @@ type FakeOptions = {
 export type FakeIdb = {
   /** Hand the store rows directly, including ones no validator would accept. */
   seed(store: string, rows: Row[]): void;
+  /**
+   * Remove a row from **outside** any transaction.
+   *
+   * Models another actor taking a row away mid-pass — a Discard, which deletes
+   * the mirror entry first by design, or a second tab. A pass that walks one
+   * snapshot cannot see it, which is the point.
+   */
+  drop(store: string, key: string): void;
   /** Everything currently held, for asserting on a write from the outside. */
   rows(store: string): Row[];
   /** How many transactions have been opened, so a caller can count round trips. */
@@ -200,6 +208,9 @@ export function fakeIdbFactory(
       for (const row of rows) {
         target.rows.set(String(row[target.keyPath]), row);
       }
+    },
+    drop(store: string, key: string) {
+      stores.get(store)?.rows.delete(String(key));
     },
     rows(store: string) {
       return [...(stores.get(store)?.rows.values() ?? [])];

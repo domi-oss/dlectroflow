@@ -1374,6 +1374,14 @@ So each expanded entry carries a **Discard** control:
      never-saved capture has no `200` duplicate to absorb the re-`POST`, so the row is **created**.
      Re-read the whole entry rather than testing presence: it also picks up a `blockedBy` that a
      concurrent pass or the mirror carve-out wrote while this pass waited.
+  6. ⚠️ **And `public/sw.js`'s drain loop owes the same rule, for the same reason.** Also `!348` — the
+     worker had the identical shape and was found by Duo review round 5 citing step 5 above against it.
+     **`sync` can fire while a tab is open**, so this needs no closed-tab premise: the connection returns,
+     the platform fires the sync, the user is looking at the strip, and a Discard removes the mirror row —
+     *first*, by the ordering above — inside the window the loop is suspended in. The two paths cannot share
+     code, so this is the third rule they hold in common by test-on-both-sides rather than by construction,
+     alongside the terminal-mark conjunction and the constants. **A rule stated only for the foreground is
+     half-written**, and the worker is the half whose breakage is silent.
 
   **Why a claim rather than suppressing flush triggers while the dialog is open:** suppression would need
   every trigger to know about a dialog, which is four call sites and a new coupling, and it fails open —

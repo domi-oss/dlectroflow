@@ -414,6 +414,125 @@ describe("sw.js — the sync handler drains the mirror (#175)", () => {
     expect(harness.fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * ⚠️ **`isCapture` claims to be a copy of `isMirroredCapture` and was not**, in
+   * two ways: it validated neither `blockedBy` nor `capturedAt`. Reported by Duo
+   * review round 5 on `!348`, which found the `blockedBy` half.
+   *
+   * Not harmful today — a malformed `blockedBy` simply fails the
+   * `=== "account-revoked"` comparison and falls through to a retry — but the
+   * claimed parity is the invariant this whole file rests on, because it can
+   * import nothing and a drift here has no symptom. Stricter is the safe
+   * direction: the mirror is writable by anything on the origin and this worker
+   * `POST`s what it finds, while `mirroredFrom` guarantees both fields for
+   * anything the app itself wrote.
+   */
+  it("validates blockedBy and capturedAt, as isMirroredCapture does", async () => {
+    const harness = await loadWorker(() => reply(201));
+    seedMirror(harness, [
+      // A `blockedBy` outside CAPTURE_BLOCK_REASONS.
+      entry({ clientKey: "bad-mark", blockedBy: "not-a-reason" }),
+      // `capturedAt` present but not finite — the shape a truncated write leaves.
+      entry({ clientKey: "bad-clock", capturedAt: Number.NaN }),
+      entry({ clientKey: "real" }),
+    ]);
+
+    await harness.fireSync();
+
+    const posted = harness.fetchMock.mock.calls.map(
+      (c) => JSON.parse((c[1] as { body: string }).body).clientKey as string,
+    );
+    expect(posted).toEqual(["real"]);
+  });
+
+  it("accepts session-expired, which IS one of the two reasons", async () => {
+    // The non-vacuous control for the case above: parity means matching
+    // `isMirroredCapture`, not merely being stricter. A validator that only
+    // allowed `account-revoked` would pass that case while silently dropping
+    // every 409'd capture out of the background path.
+    const harness = await loadWorker(() => reply(201));
+    seedMirror(harness, [
+      entry({ clientKey: "held", blockedBy: "session-expired" }),
+    ]);
+
+    await harness.fireSync();
+
+    // Reached the network at all, which is what the validator decides. Only
+    // `account-revoked` is skipped, and that skip has its own case above.
+    expect(harness.fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The worker's own copy of the defect the foreground pass had.
+ *
+ * Reported by Duo review round 5 on `!348`, which spotted that `drainMirror` has
+ * *"exactly the 'read once, then a network round-trip per entry' shape"* the spec's
+ * new step 5 calls insufficient — and cited that step against the worker. Verified
+ * and fixed here.
+ *
+ * ⚠️ **`sync` can fire while a tab is open**, so this needs no closed-tab premise:
+ * the connection returns, the platform fires the sync, and the user is looking at
+ * the strip. A Discard deletes the mirror row **first**, deliberately — the
+ * ordering the design calls *"the whole fix"* — so a removal mid-pass is precisely
+ * what this loop sees, and its snapshot does not.
+ */
+describe("sw.js — a pass acts on live state, not its snapshot (#175)", () => {
+  /** Seeds two rows and gates `a`'s POST open until the returned fn is called. */
+  async function passStalledOnFirst(): Promise<{
+    harness: Harness;
+    release: () => void;
+  }> {
+    let release: (() => void) | null = null;
+    const harness = await loadWorker(async (...args: unknown[]) => {
+      const init = args[1] as { body: string };
+      if (JSON.parse(init.body).clientKey === "a") {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return reply(201);
+    });
+    seedMirror(harness, [entry({ clientKey: "a" }), entry({ clientKey: "b" })]);
+    return { harness, release: () => release?.() };
+  }
+
+  function posted(harness: Harness): string[] {
+    return harness.fetchMock.mock.calls.map(
+      (c) => JSON.parse((c[1] as { body: string }).body).clientKey as string,
+    );
+  }
+
+  it("does not POST a row a Discard removed while the pass was mid-flight", async () => {
+    const { harness, release } = await passStalledOnFirst();
+    const draining = harness.fireSync();
+    // The overlap itself, asserted before anything relies on it: `a`'s POST is
+    // genuinely outstanding, so the pass really is suspended with `b` ahead of it.
+    await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(1));
+
+    // Exactly what a Discard does to this store, and it happens first.
+    harness.idb.drop(CAPTURE_MIRROR_STORE, "b");
+
+    release();
+    await draining;
+
+    expect(posted(harness)).toEqual(["a"]);
+  });
+
+  it("does reach the second row when nothing removed it", async () => {
+    // The non-vacuous control. "`b` was not POSTed" would also be satisfied by a
+    // pass that died after its first entry — which is the head-of-line failure
+    // this design refuses, and a worse bug than the one above.
+    const { harness, release } = await passStalledOnFirst();
+    const draining = harness.fireSync();
+    await vi.waitFor(() => expect(harness.fetchMock).toHaveBeenCalledTimes(1));
+
+    release();
+    await draining;
+
+    expect(posted(harness).sort()).toEqual(["a", "b"]);
+  });
+
   it("still hosts notifications — the worker's original job", async () => {
     // `registerServiceWorker` has four callers and none of them is this feature.
     const harness = await loadWorker(() => reply(201));

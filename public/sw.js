@@ -77,7 +77,26 @@ function isCapture(row) {
     typeof row.text === "string" &&
     row.text.length > 0 &&
     typeof row.workspaceId === "string" &&
-    row.workspaceId.length > 0
+    row.workspaceId.length > 0 &&
+    // ⚠️ These last two were MISSING while the docblock above claimed this was a
+    // copy of `isMirroredCapture` (Duo review round 5 on !348, which found the
+    // `blockedBy` half). Not harmful as it stood — a malformed `blockedBy` just
+    // failed the `=== "account-revoked"` comparison below and fell through to a
+    // retry — but the claimed parity IS the invariant this file rests on, because
+    // it can import nothing and a drift here has no symptom.
+    //
+    // Finiteness rather than `typeof number`, for the reason `isQueuedCapture`
+    // gives: `NaN` compares false against everything, so a corrupt value becomes
+    // permanent rather than loud.
+    typeof row.capturedAt === "number" &&
+    Number.isFinite(row.capturedAt) &&
+    // The two `CAPTURE_BLOCK_REASONS`, spelled out because nothing can be
+    // imported here. Both of them: allowing only `account-revoked` would look
+    // stricter and would silently drop every 409'd capture out of the background
+    // path, which is the opposite of what this validator is for.
+    (row.blockedBy === undefined ||
+      row.blockedBy === "session-expired" ||
+      row.blockedBy === "account-revoked")
   );
 }
 
@@ -245,14 +264,34 @@ async function drainMirror() {
   // No mirror, no work, and nothing a retry would fix.
   if (!db) return;
 
-  const entries = await readMirror(db);
-  if (entries.length === 0) return;
+  const keys = (await readMirror(db)).map((row) => row.clientKey);
+  if (keys.length === 0) return;
 
   const saved = [];
   const terminal = [];
   let retryable = 0;
 
-  for (const entry of entries) {
+  // ⚠️ **The keys are the plan; every row is re-read against the live mirror.**
+  //
+  // `flushOne` awaits a network round-trip, so a snapshot taken once is stale for
+  // every row after the first. **`sync` can fire while a tab is open**, so this
+  // needs no closed-tab premise: the connection returns, the platform fires the
+  // sync, and the user is looking at the strip. A Discard deletes the mirror row
+  // **first** — deliberately, the ordering this design calls "the whole fix" — so a
+  // removal inside that window is exactly what this loop meets, and its snapshot
+  // cannot see it. POSTing the stale copy resurrects a capture the user explicitly
+  // destroyed, and a never-saved capture has no `200` duplicate to absorb it, so
+  // the row is CREATED.
+  //
+  // Reported by Duo review round 5 on !348, against the rule the spec's step 5
+  // states for the foreground pass. The two paths cannot share code — this file
+  // imports nothing — so the rule is carried by tests on both sides and this note,
+  // the same arrangement `flushOne`'s terminal-mark conjunction uses.
+  for (const key of keys) {
+    const entry = (await readMirror(db)).find((row) => row.clientKey === key);
+    // Discarded or already flushed while this pass was mid-flight. Not counted as
+    // retryable: there is nothing left to come back for.
+    if (!entry) continue;
     // Skipped rather than flushed: a terminal entry must not be POSTed on every
     // pass for the life of the browser profile.
     if (entry.blockedBy === "account-revoked") continue;
