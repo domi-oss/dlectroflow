@@ -74,7 +74,7 @@ standing on. **Every row where the re-read corrected what the brainstorm asserte
 | The production image has no `src/`, so that entrypoint is self-contained | **Confirmed twice over.** The chart's own comment calls it "a SELF-CONTAINED entrypoint (imports only @prisma/client, no app source) because the standalone image has no src/", and `src/lib/scheduled-purge.test.ts` enforces it: no `@/` specifier, no `../src`, and `expect(packages).toEqual(["@prisma/client"])` |
 | ⚠️ `src/lib/manifest-hygiene.test.ts` is a second guard on that entrypoint | **No — it is unrelated.** It tests `packageNameOf` / `importedPackages`, an import-specifier parser. `docs/CONTRIBUTING.md` describes the `manifest-hygiene` guard as "a root config file imports something `package.json` doesn't declare". `scheduled-purge.test.ts` does **not** import it; it runs its own inline regex scan. The purity guard is that one file alone |
 | `src/lib/email.ts` exists | **Confirmed** — exports `emailConfigured()`, `EmailResult`, `sendRoundupEmail()`, `roundupEmailHtml()`; Resend-backed via `RESEND_API_KEY`, imported lazily. ⚠️ It is **round-up specific**: a reminder would reuse the transport and need a new template function, not just a call |
-| `src/lib/best-effort.ts` — the #257 helper | ⚠️ **Absent at `90d97dd`** (`git show` exits 128). `!339 — Draft: fix(257): a failed post-commit payout no longer reports the write failed` is **open and still Draft** on `fix/257-throw-after-commit`. The class is real and cited from **#257**; the helper is in flight and this document does not name a file that does not exist |
+| `src/lib/best-effort.ts` — the #257 helper | ⚠️ **Absent at `90d97dd`** (`git show` exits 128), so the 2026-08-13 pass cited the issue rather than a file. ⚠️ **This row has since expired — see the second pass below**, where it is on `main` |
 | `notifyRoundup` / `notifyAging` / `notifyDailyReview` are client-delivered only | **Confirmed on both halves.** The schema comment reads `// Phase 6 — per-type notification preferences (client-delivered only)` (`:164`), and `notifyRoundup` is a field of `RoundupSettings` in `src/components/dashboard/roundup-card.tsx`, a client component that calls `showReminder` from `src/lib/notifications.ts` |
 | ⚠️ `workdayEndTime` is compared against **the browser's** clock, not the server's | **This is the most load-bearing row in the table.** `roundup-card.tsx`'s `targetTimeToday(hhmm)` builds `new Date()` and sets hours on it, inside a client `useEffect`. So "17:00" already means *17:00 where the user is*. See *Whose clock* |
 | ⚠️ `Settings.workingDays` has **no editor surface anywhere** | Zero hits across `src/app` and `src/components`. **Control: the same query for `shoppingList` returns 19 files**, so the zero is a real absence and not a query that never ran. Its only reader is `src/lib/rewards.ts`. In practice every workspace sits on the default `"1,2,3,4,5"`. Recipe below |
@@ -107,6 +107,7 @@ decisions of 2026-08-15 rest on facts the first pass never queried, so those are
 | ⚠️ A legal-accuracy sweep of `/privacy` is in flight | **`!357 — Draft: fix(legal): correct ten measured drifts between the legal pages and the code`**, branch `docs/legal-accuracy-sweep`, milestone **v0.7.0**, still Draft on one open owner decision. ⚠️ **It does not touch `/terms`** — its own description records that `/terms`' fingerprint "comes back byte-identical". It does touch `/privacy`, `docs/legal.md`, `src/lib/export/readme.ts`, `/help` and the export code. See *The legal copy* |
 | ⚠️ "nothing infers anything about … how you are doing" was **already** overstated | **Confirmed, and by the sweep rather than by this document.** `!357`: *"What was overstated is 'nothing infers anything about how you are doing', because `DayRollup.narrative` is an LLM-written, stored, second-person text about the reader's day. Narrowed, not deleted."* The column is `narrative String?` (`prisma/schema.prisma:669`); `src/lib/rollup.ts`'s `generateTodayRollup` fills it from `getLLM().generate()` for an owner workspace and from a local builder for a guest |
 | ⚠️ Amending `/privacy` is a **publication event**, not a copy edit | `src/lib/legal.ts`: `LEGAL_EFFECTIVE_DATE` is *"ONE date [covering] both documents"*, and a fingerprint gate means *"the text cannot move without someone deciding about this date"*. `!357`'s description states the consequence — split across MRs, *"each merge would invalidate the other's recorded hash and the date would move N times for one publication"*. **So the meds amendment is one commit, and it cannot ride alongside `!357`'s** |
+| ⚠️ `src/lib/best-effort.ts` is now **on `main`** — the first pass's row has expired | **`!339` merged 2026-08-15 and `#257` is closed.** The helper exists at `47e015d`; its docblock states the rule as *"the `try` governs the WRITE; anything after it is a consequence of success and cannot un-write the row"* and names the three sites that had reached it independently. **This does not change the reward decision** — the argument was never "the helper is missing", it was that a presentational reward has no post-commit step for the defect to live in. It changes only what this document may cite: the file, now, rather than the issue |
 
 ## Design
 
@@ -357,7 +358,7 @@ falls back to `workdayEndTime`.
 Keeping it optional is what keeps the meal-relative model honest: a user who thinks in "after
 breakfast" is never asked to invent a clock time, and a user who does want one is not blocked.
 
-### The CHECK constraint — yes, and here is the exact obligation
+### The CHECK constraints — yes, twice, and here are the exact obligations
 
 **`MedsDoseLog.state` is a pseudo-enum and gets a CHECK constraint.** The doctrine migration
 (`prisma/migrations/20260719171754_add_status_check_constraints/migration.sql`) states the rule and
@@ -366,23 +367,40 @@ the naming:
 > The allowed value sets live in `src/lib/constants.ts` and are the single source of truth; the CHECK
 > constraints below mirror them exactly […] Constraint naming: `"<Table>_<column>_check"`.
 
-So, precisely:
+So, precisely — **two constraints, because the nav control settled on 2026-08-15 adds a second
+pseudo-enum** (`Settings.medsNavMode`, argued in *Configurability*):
 
-| Thing | Value |
-| --- | --- |
-| Constraint name | **`MedsDoseLog_state_check`** |
-| Constant | **`MedsDoseState`** in `src/lib/constants.ts`, `{ Taken: "taken", Skipped: "skipped" }` |
-| SQL | `CHECK ("state" IN ('taken', 'skipped'))` — **no `IS NULL` allowance**, because the column is NOT NULL |
-| Registry entry | **`REGISTRY` in `src/lib/enum-constraint-sync.integration.test.ts`**, `nullable: false` |
+| Thing | `MedsDoseLog.state` | `Settings.medsNavMode` |
+| --- | --- | --- |
+| Constraint name | **`MedsDoseLog_state_check`** | **`Settings_medsNavMode_check`** |
+| Constant | **`MedsDoseState`** in `src/lib/constants.ts`, `{ Taken: "taken", Skipped: "skipped" }` | **`MedsNavMode`**, `{ Dots: "dots", Next: "next" }` |
+| SQL | `CHECK ("state" IN ('taken', 'skipped'))` — **no `IS NULL` allowance**, because the column is NOT NULL | `CHECK ("medsNavMode" IN ('dots', 'next'))`, likewise NOT NULL with a default |
+| Registry entry | **`REGISTRY` in `src/lib/enum-constraint-sync.integration.test.ts`**, `nullable: false` | same registry, `nullable: false` |
 
-⚠️ **The convention is dominant but not unanimous, so this needs an argument rather than a citation.**
-`Settings.voice` is the closest analogue in shape — a closed two-value set — and it has **no** CHECK.
-The discriminator is what an out-of-set value costs. An unrecognised `voice` degrades to the default
-register and the user sees slightly plainer copy; `Typeface`'s comment records that exact posture
-("an out-of-set value degrades to Figtree"). An unrecognised `state` has **no safe reading**: the
-strip would have to decide whether an unknown value means a dose was taken, and both answers are
+⚠️ **The convention is dominant but not unanimous, so `state` needs an argument rather than a
+citation.** `Settings.voice` is the closest analogue in shape — a closed two-value set — and it has
+**no** CHECK. The discriminator is what an out-of-set value costs. An unrecognised `voice` degrades to
+the default register and the user sees slightly plainer copy; `Typeface`'s comment records that exact
+posture ("an out-of-set value degrades to Figtree"). An unrecognised `state` has **no safe reading**:
+the strip would have to decide whether an unknown value means a dose was taken, and both answers are
 wrong about a health record. That is what earns the constraint here, and it is why `state` sits with
 the 21 rather than with `voice`.
+
+⚠️ **`medsNavMode` needs the opposite argument, and getting it right matters more than it looks.** An
+out-of-set `medsNavMode` *does* have a safe reading — fall back to the default mode — so the
+no-safe-reading test above does **not** reach it, and citing that test for both columns would be the
+document contradicting itself. It gets a constraint on the plain dominant-convention ground instead:
+its two nearest analogues are appearance columns that both have safe readings and both carry one
+anyway — `Settings.typeface` (`Settings_typeface_check`) and `Settings.focusTimerStyle`
+(`Settings_focusTimerStyle_check`). **The rule is "pseudo-enums get a constraint"; the
+no-safe-reading argument is why `state`'s is not negotiable, not why `medsNavMode` has one.**
+
+⚠️ **And the cited exception is on its way out.** `#86`'s owner decision deletes `Settings.voice`
+altogether, and its checklist names this MR for the reason — the column is *"the one pseudo-enum on
+this schema with **no** CHECK constraint"*. So the exception this section reasons against is being
+removed rather than resolved, which **strengthens** the argument above and changes nothing about it.
+Do not rewrite this section when that lands; `voice` will be a fact about a past commit, which is
+what a citation to `90d97dd` already is.
 
 The registry entry is the row a naive implementation drops, and the reason it matters is specific:
 
@@ -466,8 +484,12 @@ never a consolation prize.
 ⚠️ **This is a copy rule with teeth, and it is the one most likely to be quietly broken.** If skip
 copy is softer, sadder, more clinical, or shorter than taken copy, the honesty incentive breaks
 without anybody deciding to break it. "Logged." for a skip against "Nice one 🎉" for a taken *is* an
-adherence score, delivered in tone. **Both voices' copy sets are reviewed as a pair, and a test
-asserts equal cardinality** so one set cannot quietly grow.
+adherence score, delivered in tone. **The two copy sets are reviewed as a pair, and a test asserts
+equal cardinality** so one set cannot quietly grow.
+
+**This rule is unchanged by anything settled on 2026-08-15, and it is the constraint the rotating set
+in §5 has to satisfy.** It is stated here rather than only in the test list because it is the one
+thing in this document that a reviewer, not a pipeline, has to hold.
 
 #### 2. A broken medication streak is not emotionally equivalent to a broken focus streak
 
@@ -491,31 +513,47 @@ behaviour is the closest this app could come to contradicting that sentence.
 #### 4. The engineering consequence, which is real and load-bearing
 
 No streak, no badge and no points means **no `RewardEvent` row, no `logReward`, no `awardBadge`**
-(both exported from `src/lib/rewards.ts` — named as symbols rather than lines, since that file is
-under active change on `!339`). The reward is **purely presentational**: a string chosen and
-rendered, with nothing persisted and nothing to reconcile.
+(both exported from `src/lib/rewards.ts`, named as symbols rather than lines). The reward is **purely
+presentational**: a string chosen and rendered, with nothing persisted and nothing to reconcile.
 
-**So this feature cannot join the throw-after-commit defect class**, which is worth spelling out
-because that class is live in this repo today. **#257 — A failed streak touch reports the whole write
-failed, over work that is saved** states the rule it violates:
+**So this feature cannot join the throw-after-commit defect class.** **#257 — A failed streak touch
+reports the whole write failed, over work that is saved** states the rule it violates:
 
 > the `try` governs the WRITE; anything after it is a consequence of success and cannot un-write the
 > row.
 
 A meds log write has **no post-commit consequence at all**. There is no second write to fail after
 the first has committed, so there is no shape here for that defect to take — not "we were careful",
-but "the code the defect lives in does not exist". ⚠️ The shared helper #257 asks for is **not yet on
-`main`**: `!339` is open and Draft. This document therefore cites the issue, not a file.
+but "the code the defect lives in does not exist".
+
+⚠️ **Updated 2026-08-15: that class is no longer live — `#257` closed and `!339` merged**, so
+`src/lib/best-effort.ts` is on `main` and this document may name the file rather than the issue.
+Nothing about the decision moves, because the argument never rested on the helper's absence. What
+does move is the **advice to an implementer**: there is now a shared `bestEffort` to reach for if a
+later tier ever grows a post-commit step, and the honest instruction is *reach for it then, and not
+before* — wrapping a call that has nothing after it would be cargo-cult, and its docblock names the
+three sites that earned it.
 
 There is a second, smaller consequence: `RewardPoints` is typed
 `Record<RewardType, number>`, so a new `RewardType` **cannot** be added without also assigning it a
 point value — TypeScript requires the key. There is no "reward event worth nothing" shape available.
 The type system agrees with the product decision, which is a good sign about both.
 
-#### 5. The reward must vary, or it stops registering
+#### 5. The reward must vary, or it stops registering — **settled 2026-08-15: a small rotating set, not one fixed word**
 
 Habituation to a fixed string is fast, and it is the specific ADHD-relevant failure: a reward you can
 predict exactly is not a reward, it is a label. So: **a small rotating set of micro-copy.**
+
+**The owner settled this on 2026-08-15, and it settles it in the direction §6 below used to leave
+open.** An earlier draft of this section reasoned about the reward across two registers and floated
+one fixed word as the plainer option; **§6 records why that framing has expired.** With one register
+left, the register cannot supply the variety, so the set does.
+
+**How small: sized like the repo's own sets, which are 8 and 6 — not twenty.** `FALLBACK_SPARKS`
+(`src/lib/spark.ts`) is **8** lines and `FABLE_LINES` (`src/lib/fable-lines.ts`) is **6**, both
+re-counted at `47e015d`; the recipe is in *Reproducing these numbers*. Two sets are needed here, one
+for `taken` and one for `skipped`, and **they must be equal in size** — that is §1's honesty rule
+expressed as a number, and the one half of it a test can hold.
 
 **Rotating, not random**, for three separate reasons — one product, two engineering:
 
@@ -538,30 +576,64 @@ predict exactly is not a reward, it is a label. So: **a small rotating set of mi
 The module shape follows `fable-lines.ts` and `spark.ts`: a plain exported array plus one pure
 selector, in its own module, no React import.
 
-#### 6. Reuse the app's existing completion language — do not invent one
+#### 6. ⚠️ The two-voice framing has expired — there is one register, and it carries the variety
 
-Three settings already define what "done" looks and sounds like, and all three are verified above:
+**This section used to weigh a `plain` reward against a `playful` one and lean toward `plain` being
+one fixed word.** That reasoning is stale as of the owner's decision of 2026-08-14, and the correction
+is recorded rather than quietly deleted, because the deleted version is the one a reader arrives with
+if they have read an earlier draft.
+
+**`#86 — Make the plain/playful voice convention enforceable` carries the decision: the playful voice
+is deleted entirely.** Its own words — *"Remove the `playful` half of every `{plain, playful}` pair in
+`src/lib/strings.ts` and collapse the accessor so callers take a single string"*, and remove the
+`Settings.voice` column with it. So:
+
+- **There is no second register to be plainer than.** "Keep `plain` genuinely plain" was a
+  *contrastive* instruction: it made sense only against a warmer sibling that carried the emoji. With
+  one voice, following it literally would leave the reward as bare as `Logged.` while nothing anywhere
+  else supplies the warmth the owner asked for — *"should at least give something cute"*.
+- **So the variety moves from the register to the set.** One register, a rotating set of the size §5
+  names. That is the whole of the decision.
+- **`"action.complete"`'s identical-across-voices precedent no longer says anything here.** It was a
+  citation about two voices agreeing. It survives as a fact about the current tree and dies with the
+  deletion, so it is not load-bearing for this design and is dropped rather than restated.
+
+⚠️ **Name the twee risk explicitly, because a rotating cheerful string is the most annoying thing
+this feature could ship.** Read two hundred times, warmth becomes noise. With the register no longer
+available as a mitigation, **the set's size is the only structural one left** — hence §5's 8-and-6
+ceiling, and hence the reviewer-held rule in §1. A twenty-line set is not more varied, it is more
+places for one bad line to hide.
+
+**What does still transfer from the existing completion language:**
 
 - **`Settings.completeTickColor`** (`green | black`) and **`completeStrikethrough`** — the visual
   vocabulary for a completed thing. A dose chip marked *Taken* uses them rather than a new colour.
-- **`Settings.voice`** (`plain | playful`) — the register. `src/lib/strings.ts` states the contract:
-  plain is *"self-evident labels, no decorative emoji. Functional glyphs only"*; playful is *"same
-  labels + flavour emoji"*.
+  Neither is touched by #86.
+- **The emoji rule survives the deletion, and #86 says so**: *"Keep the existing emoji guard. It
+  polices the *plain* voice being emoji-free, which is still a live rule with one voice."* So the
+  reward set carries **no decorative emoji** — the same contract `src/lib/strings.ts` states as
+  *"self-evident labels, no decorative emoji. Functional glyphs only"*.
 
-⚠️ **Name the twee risk explicitly, because a rotating cheerful string is the most annoying thing
-this feature could ship.** Read two hundred times, warmth becomes noise. Two mitigations, both
-structural:
+#### 6a. ⚠️ Sequencing against #86, because it is unscheduled and this feature is not blocked on it
 
-- **Keep the set small.** The repo's own sets are **8** (`FALLBACK_SPARKS`) and **6**
-  (`FABLE_LINES`); that is the right order of magnitude, not twenty.
-- **Keep `plain` genuinely plain.** "Logged." is a complete and sufficient reward for someone who
-  does not want to be congratulated by software, and `plain` is the **default voice**, so it is what
-  most reads look like. `playful` can be warmer and carries the emoji.
+`#86` sits in **Backlog** with no milestone, and its stated move-back condition is *"whenever an MR is
+already editing `strings.ts` broadly"* — which a meds feature adding a handful of keys is not. **So
+meds may well ship while `strings.ts` still holds pairs**, and the design must not deadlock on that.
 
-There is precedent for going further where drift would be harmful: `"action.complete"` is
-*deliberately identical* across both voices, so the button cannot drift between surfaces. If review
-decides the plain reward should be one fixed word rather than a rotating set, that is a defensible
-position with a citation, and it costs nothing to adopt later.
+It does not, and the reason is structural rather than lucky:
+
+- **The reward set is its own module and never goes through `t()` at all.** §5's module shape is
+  `fable-lines.ts` and `spark.ts` — a plain exported array plus one pure selector. `FABLE_LINES` is
+  already a flat array with no voice pairing, so the reward is voice-free by construction and needs
+  nothing from #86 in either order.
+- **The chip and banner *labels* do go through `t()`**, so those keys take whatever shape
+  `strings.ts` has on the day they are written, and #86 sweeps them with everything else. Writing a
+  pair that #86 later collapses costs one line in that sweep; the reverse — waiting for #86 — costs
+  the feature.
+- ⚠️ **One file the meds work touches is a `t(key, voice)` caller and needs naming:**
+  `src/components/nav/quick-access.tsx` resolves `const label = t(labelKey, voice)` and receives
+  `voice` as a prop. The nav control below follows that pattern, so **#86's collapse reaches this
+  feature's nav code** as well as its own. Not a blocker in either direction; a line in #86's sweep.
 
 ### ⚠️ The today-strip goes on the home page, not on `/dashboard`
 
