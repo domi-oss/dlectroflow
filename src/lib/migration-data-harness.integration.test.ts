@@ -62,8 +62,9 @@ import { FocusSound, FocusSoundCategory } from "@/lib/constants";
  * would quietly override the staged subset that makes staged application possible.
  *
  * Needs the real Postgres, and creates its own schemas (dropped afterwards) so it
- * cannot disturb the schema the rest of the suite shares:
- *   set -a; . ./.env; set +a; npm run test
+ * cannot disturb the schema the rest of the suite shares. CI wires up a service DB
+ * and runs `prisma migrate deploy` first; locally `config/vitest.config.ts`
+ * forwards DATABASE_URL from `.env` — only that one variable, by design: #84.
  */
 
 const REPO_ROOT = process.cwd();

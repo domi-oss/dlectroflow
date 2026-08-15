@@ -14,10 +14,9 @@
  * writes below deliberately bypass the Prisma client's types (raw SQL), which is
  * the only way an out-of-set value can reach Postgres at all.
  *
- * Needs the real Postgres (CI wires up a service DB and runs
- * `prisma migrate deploy` first; locally it uses your DATABASE_URL schema —
- * vitest does NOT read .env):
- *   set -a; . ./.env; set +a; npm run test
+ * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

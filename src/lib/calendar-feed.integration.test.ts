@@ -40,7 +40,8 @@ import {
  *    stops resolving" fails.
  *
  * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
- * deploy` first; locally `vitest.config.ts` forwards DATABASE_URL from `.env`).
+ * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
+ * `.env` — only that one variable, by design: #84).
  */
 
 const SUB_PREFIX = "test-154-feed-";
