@@ -50,7 +50,35 @@ import AxeBuilder from "@axe-core/playwright";
 //     is exactly why two 20px controls in `breakdown-chat.tsx` reached `main`
 //     unseen (#205's family). So the two checks are complementary rather than
 //     redundant: theirs is stricter but only exists where someone wrote one,
-//     while this one is repo-wide and measures RENDERED geometry.
+//     while this one measures RENDERED geometry and so cannot be fooled by a
+//     class that does not apply.
+// ── Widening the tag list only helps where a scan actually runs ──────────────
+//
+// An earlier draft of the paragraph above called this gate "repo-wide". It was
+// not, and the correction is worth keeping, because an overclaim about coverage
+// is #263's own defect rather than a wording slip. This gate reaches exactly the
+// surfaces some spec hands to `scanA11y` — and when #263 was measured, two
+// routes were not among them:
+//
+//   * **owner `/settings`** was visited four times over and never WCAG-scanned.
+//     `e2e/a11y-contrast.spec.ts` and `e2e/a11y/axe-people-panel.spec.ts` reach
+//     it through `scanColorContrast`, which is `.withRules(["color-contrast"])`
+//     and evaluates ONE rule rather than `WCAG_TAGS`;
+//     `e2e/a11y/axe-shopping.spec.ts` only goes there to flip a toggle;
+//     `e2e/a11y/axe-account-deletion.spec.ts` does use `WCAG_TAGS` but
+//     `.include()`s the delete dialog alone. It is the app's largest page — nine
+//     disclosures, 70 interactive targets expanded — and precisely where #205's
+//     family of undersized controls would recur.
+//   * **`/login`** had no accessibility scan of ANY kind, contrast included. It
+//     is the sign-in page, and every other spec carries the forged owner session
+//     that `src/proxy.ts` redirects AWAY from it.
+//
+// Both are now scanned — `e2e/a11y/axe-settings.spec.ts` and
+// `e2e/a11y/axe-login.spec.ts` — and both were clean when added (63 rules
+// evaluated, `target-size` in `passes`), so that is additive coverage rather
+// than a fix. The general point survives the two specific holes being filled:
+// this gate is only as wide as its call sites, so a NEW route is unscanned until
+// someone adds one, and no widening of this list changes that.
 //
 // `wcag22a` matches zero axe rules today: the only Level A criteria new in 2.2
 // are 3.2.6 Consistent Help and 3.3.7 Redundant Entry, and axe implements
