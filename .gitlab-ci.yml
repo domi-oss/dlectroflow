@@ -28,7 +28,7 @@ stages:
   - maintenance
 
 # ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
-# Five pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
+# Six pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
 #   1. "Weekly base-image rescan"  → no extra variables. Rebuilds the image on the
 #      current main and re-runs all scanners so new base/dependency CVEs surface in
 #      the Vulnerability Report even when no code changed. Does NOT deploy. Also
@@ -36,6 +36,8 @@ stages:
 #   2. "Weekly Renovate"           → variable RENOVATE_RUN=true. Runs ONLY the
 #      renovate job, which opens update MRs (npm deps + Docker base). Each MR then
 #      runs the full scanner suite and is gated by review (see .gitlab/renovate.json).
+#      Fires 07:00 Monday, inside the `schedule` window .gitlab/renovate.json sets
+#      — this is the only schedule that may OPEN an update MR.
 #   3. "Weekly registry prune"     → variable REGISTRY_PRUNE=true. Runs ONLY the
 #      prune_registry job, which bounds the main-* registry tag set (#114).
 #   4. "Monthly security assessment" → variable SECURITY_ASSESSMENT=true. Runs ONLY
@@ -45,7 +47,7 @@ stages:
 #      docs/quality-audit-prompts.md ## Cadence long before anything ran it, which
 #      is how 8 unread HIGH findings accumulated in the baseline.
 #   5. "Hourly production state check" → variable PROD_STATE_CHECK=true. Runs ONLY
-#      the alert_prod_state job (#191). Unlike the other four this one is not
+#      the alert_prod_state job (#191). Unlike the other five this one is not
 #      housekeeping — it is the only thing on this cadence, and the cadence IS the
 #      feature: production served stale code on one replica for roughly 24 hours
 #      and nobody knew, because every existing signal was either weekly
@@ -58,6 +60,24 @@ stages:
 #      on every outcome that is not "verified healthy" — so the email needs
 #      nothing configured and cannot be forgotten. Whoever owns this schedule is
 #      who gets told; that is a deliberate property, not an accident of setup.
+#   6. "Renovate automerge recovery" → variable RENOVATE_RUN=true, 4-hourly at
+#      01/05/09/13/17/21. Deliberately the SAME flag as schedule 2, so it needs no
+#      new guard on any other job; what makes it different is the clock, and the
+#      `schedule` window in .gitlab/renovate.json, which none of those six hours
+#      fall inside. Out of that window Renovate opens nothing and only finishes
+#      work already in flight (#243).
+#
+#      Why it exists: Renovate arms GitLab's native auto-merge once, when it
+#      creates the MR, and never re-arms an MR it did not push a new commit to. It
+#      also swallows the failure, so an MR that loses that one attempt just sits
+#      there. Its own automerge does recover it — but only on a LATER run, and
+#      with schedule 2 alone the next run was seven days away. Five MRs opened
+#      2026-08-10 waited to be merged by hand for exactly that reason. This turns
+#      a seven-day recovery into a four-hour one for six short jobs a day.
+#
+#      Do NOT collapse this into schedule 2 by making that one 4-hourly instead:
+#      the two cadences carry different meanings, and the window is what keeps
+#      "run often" from also meaning "open MRs often".
 # Each flag variable gets a `when: never` guard on every OTHER scheduled job, so
 # a flagged maintenance schedule runs its own job and nothing else — no duplicate
 # ops digest, no pointless weekly rebuild. Add a flag, add its guards.
@@ -991,7 +1011,8 @@ deploy_production:
     - if: '$CI_COMMIT_BRANCH == "main"'
 
 # ── Renovate: automated dependency + base-image update MRs ────────────────────
-# Self-hosted Renovate, run by the "Weekly Renovate" schedule (RENOVATE_RUN=true).
+# Self-hosted Renovate, run by the "Weekly Renovate" and "Renovate automerge
+# recovery" schedules — both carry RENOVATE_RUN=true (#243).
 # Behaviour is configured in .gitlab/renovate.json (npm deps + Docker base, pinned digests,
 # automerge for patch/minor/digest once the pipeline — incl. scanners — is green).
 # Requires a masked CI/CD variable RENOVATE_TOKEN with `api` scope and Maintainer
@@ -1024,9 +1045,21 @@ renovate:
     # try runtime tool installs — they need github-releases API access.
     RENOVATE_BINARY_SOURCE: "global"
     RENOVATE_REQUIRE_CONFIG: "required"
+    # Stays at info ON PURPOSE, and #243 is the reason it looks like it should
+    # not. A failed attempt to arm auto-merge is logged at debug and swallowed,
+    # which is why five unarmed MRs produced no output — but debug for the whole
+    # run is tens of MB with that one line somewhere inside it, which is only a
+    # different way of being invisible. The `logLevelRemap` entry in
+    # .gitlab/renovate.json promotes exactly that message to warn instead, which
+    # also puts it on the Dependency Dashboard issue rather than in a job log.
+    # Raise this to debug for a one-off investigation; don't leave it there.
     LOG_LEVEL: info
   script:
     - renovate
+  # Two schedules, one flag: "Weekly Renovate" (07:00 Monday, inside
+  # renovate.json's `schedule` window — the run that opens MRs) and "Renovate
+  # automerge recovery" (4-hourly, outside it — finishes what that one started).
+  # See the schedule list at the top of this file.
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
 
