@@ -1157,9 +1157,9 @@ export default function PrivacyPage() {
           at the end of your working day a short narrative about that day is
           written from your own counts — how many steps you finished, how long
           you focused, your streak — and stored with that day&rsquo;s roll-up.
-          It is a friendly summary of what you did, written for you and for
-          nobody else — it appears on your own dashboard, and, only if you
-          switch the round-up email on, in that email, which means the email
+          It is a friendly summary of what you did, and no other person using
+          this app can see it — it appears on your own dashboard, and, only if
+          you switch the round-up email on, in that email, which means the email
           provider named in{" "}
           <Link href={`#${s("recipients").id}`} className="underline">
             Who else is involved

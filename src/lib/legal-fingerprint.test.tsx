@@ -185,6 +185,20 @@ const PUBLISHED = {
   // so the date does not move for it either. Recorded because the alternative is
   // a hash whose provenance nobody can reconstruct, and because it is the third
   // re-record inside one branch: two for substance and merge, one for copy.
+  // SIXTH re-record, and the reason is the most instructive one in this file:
+  // THE ROUND-8 FIX INTRODUCED ITS OWN CONTRADICTION. Correcting "shown only to
+  // you" produced "written for you and for nobody else — ... which means the
+  // email provider ... handles it", which asserts and then refutes itself inside
+  // a single sentence. Round 9 caught it.
+  //
+  // The lesson is narrower and more useful than "check the page against itself":
+  // when a fix ADDS a qualifier to an absolute claim, the absolute has to be
+  // RESCOPED, not merely qualified. "Nobody else" plus an exception is a
+  // contradiction; "no other person using this app" plus the processor path is a
+  // disclosure. Re-run the absolutes check on the FIX, not just on the original
+  // prose — a correction is new text and inherits none of the checking done on
+  // what it replaced.
+  //
   // FIFTH re-record. Round 8 exposed a defect CLASS this sweep had no method
   // for — page-versus-page rather than page-versus-code — so the same check was
   // then run deliberately over every absolute claim the branch added, and it
@@ -217,7 +231,7 @@ const PUBLISHED = {
   // A page this long is its own consistency surface, and a recipient named in one
   // section falsifies an "only you" written in another. Nothing was published
   // under the earlier hashes, so the date stays 2026-08-15 for all four.
-  privacy: "8a657b9b18cfb40c742f6bd184f7193de8c3f17f46363543b9ba3c3a161e07fa",
+  privacy: "29026594108298d800d061d5a61dbc658f8532f911654da7d1af4af27d4dee01",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",

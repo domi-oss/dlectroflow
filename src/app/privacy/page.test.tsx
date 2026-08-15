@@ -478,6 +478,52 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(text).toMatch(/no field for it/i);
   });
 
+  it("names all four withheld bookkeeping categories, symmetrically with the archive README", () => {
+    // `docs/legal.md`: /privacy and `src/lib/export/readme.ts` are one
+    // disclosure read in two places, and "those two wordings move together".
+    // The README got one assertion per omitted model and per omitted `User`
+    // column (`readme.test.ts`); this side had only the two credential
+    // exclusions, so the page was free to drift from the archive without a
+    // build failure — an asymmetry in a pair the doc says must stay in step.
+    //
+    // Counted on the defect's own axis, per omitted COLUMN, because this
+    // paragraph has already shipped a partial list twice: once as the original
+    // F6 defect, and once inside its own correction, when it named `status` and
+    // `lastSeenAt` while dropping `revokedAt` and `providerSub`.
+    const text = pageText();
+    expect(text).toMatch(/invitation record/i); // Allowlist
+    expect(text).toMatch(/AI usage count/i); // UserAiUsage
+    expect(text).toMatch(/timestamps on your calendar feed/i); // CalendarFeed
+    expect(text).toMatch(/active or revoked/i); // User.status
+    expect(text).toMatch(/when it was last seen/i); // User.lastSeenAt
+    expect(text).toMatch(/when access was withdrawn/i); // User.revokedAt
+    expect(text).toMatch(/account id GitLab issued/i); // User.providerSub
+    // The opposite direction: `provider` and `handle` ARE exported, so the page
+    // must not imply they are withheld while disclosing `providerSub`.
+    expect(
+      text,
+      "the page must not claim the username or provider name is withheld",
+    ).toMatch(/both of which the export does include/i);
+  });
+
+  it("discloses the three stored-content categories added by this sweep (#252, F7/F8)", () => {
+    // `User.displayName`, `FocusPlaylist.name` and `BreakdownTurn.message` were
+    // all stored and none was disclosed. The last is the instructive one: it was
+    // already NAMED in the Portability bullet as "the coaching conversations"
+    // while never appearing in "What I collect" — the page describing a thing it
+    // had not admitted to holding, which is why a Portability mention is not a
+    // substitute for a collection disclosure and this test asserts the latter.
+    const text = pageText();
+    expect(text).toMatch(/A display name/i);
+    expect(text).toMatch(/Focus playlists/i);
+    expect(text).toMatch(/Coaching conversations/i);
+    // Each needs its substance, not just its heading, or the bullet could be
+    // reduced to a label and still pass.
+    expect(text).toMatch(/instead of your GitLab username/i);
+    expect(text).toMatch(/which tracks you put in it/i);
+    expect(text).toMatch(/step lists it proposed back/i);
+  });
+
   it("says a note is copied into Google Tasks when a step is scheduled (#44)", () => {
     // `encodeReclaim` writes `buildScheduleNote`'s output — task note, step
     // note, a prompt line and a focus URL — into the Google Task's `notes`
