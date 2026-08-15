@@ -10,11 +10,41 @@
  *
  * **Five functions, nine calls** — stated both ways because the two numbers are
  * easy to read as a contradiction. `beginFocus`, `markTaskCompleted`,
- * `completeStep`, `completeFocus` and `confirmBreakdown` are the five that had the
- * unguarded shape; three of them split their payouts into one call per
- * consequence, so the union carries nine tags and the guard below asserts nine.
- * The reasoning per site is in `src/app/actions/post-commit-bookkeeping.test.ts`
- * and in `best-effort.ts`.
+ * `completeStep`, `completeFocus` and `confirmBreakdown` are the five **this MR
+ * guards**; three of them split their payouts into one call per consequence, so
+ * the union carries nine tags and the guard below asserts nine. The reasoning per
+ * site is in `src/app/actions/post-commit-bookkeeping.test.ts` and in
+ * `best-effort.ts`.
+ *
+ * ## "The five that had the unguarded shape" — withdrawn (`!339` review)
+ *
+ * That is what this said, and it is a completeness claim about the DEFECT while
+ * every number here is measured on the REMEDY. The two are not the same set, and
+ * reading one as the other is what let the sweep miss `completeItem` (`#265`) —
+ * counting `bestEffort` call sites cannot see a function that has none.
+ *
+ * Re-derived on the defect's own axis — *a payout statement that can reject,
+ * sitting after a committed write, with no guard between it and the caller* —
+ * there are **eleven** such functions, not five:
+ *
+ *  * five here, guarded by this MR;
+ *  * `completeItem` (`braindump.ts`), six consecutive unguarded awaits — `#265`;
+ *  * `triageBrainDumpItem`, `requestBreakdown`, `snoozeBrainDumpItem`,
+ *    `deleteBrainDumpItem` and `keepAsTask`, each an unguarded
+ *    `maybeAwardInboxZero` after a committed write, each stranding a
+ *    `revalidatePath` behind it — and `keepAsTask` also stranding the `taskId` it
+ *    returns, for a task that exists.
+ *
+ * `braindump.ts` contains exactly one `try` block and it is nowhere near any of
+ * them. The three prior private swallows are NOT on this list and that is the
+ * check that makes it a count rather than a grep: `awardFirstSchedule`,
+ * `settleShopping` and `writeCapture` each swallow inside the callee, so no
+ * rejection reaches their callers and none of their call sites is a defect site.
+ *
+ * Deliberately prose and not a new hygiene guard. A parser that decides "is there
+ * a committed write before this await" is a project, and this estate has already
+ * paid for one guard that cost more than the class it policed; `#265`'s checklist
+ * carries the correction of this count as its last item.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

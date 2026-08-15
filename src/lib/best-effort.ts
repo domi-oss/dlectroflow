@@ -35,6 +35,15 @@
  * outside #257's scope and `capture-write.ts` is `!334`'s open diff. They are the
  * natural next adopters; the tag union below is where their literals would go.
  *
+ * **Those five were not the whole class, and "five sites" must not be read as an
+ * inventory of it.** Six more functions carry the same shape and none has a
+ * `bestEffort` call, so nothing counted here could have seen them: `completeItem`
+ * (`#265`) and five `maybeAwardInboxZero` sites, all in `braindump.ts`. The
+ * derivation, and the axis that produces the number, are in
+ * `best-effort.test.ts`'s header — one place, because a count restated in two
+ * drifts in one of them, which is how "five" got written as a claim about the
+ * defect in the first place.
+ *
  * ## What this is NOT for
  *
  * Not a general error suppressor. It is for a statement that runs **after** a
