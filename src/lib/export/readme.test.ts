@@ -32,6 +32,27 @@ describe("README.md — the file that explains the archive", () => {
     expect(readme.toLowerCase()).toContain("token");
   });
 
+  it("names the account bookkeeping it withholds, and does not claim to be everything", () => {
+    // /privacy and this file are one disclosure read in two places, and
+    // `docs/legal.md` says so: "those two wordings move together". The page now
+    // names four kinds of held-but-unexported bookkeeping — the invitation row
+    // and its note (`Allowlist`), the AI usage count (`UserAiUsage`), the
+    // calendar feed's timestamps (`CalendarFeed`) and the account flags
+    // (`User.status` / `lastSeenAt`) — so an archive still saying it holds
+    // "everything dlectroflow holds about your account" is the weaker of two
+    // statements of the same fact, and the one a reader gets AFTER they have
+    // stopped reading the page.
+    expect(readme).toContain("What is not in this archive");
+    expect(readme.toLowerCase()).toContain("invitation");
+    expect(readme.toLowerCase()).toMatch(/usage count|ai usage/);
+    // The overclaim itself. A reader who opens the zip must not be told the
+    // list they just read is exhaustive when the page says it is not.
+    expect(
+      readme,
+      "the README still claims to be everything held about the account",
+    ).not.toMatch(/This is everything dlectroflow holds/);
+  });
+
   it("explains why VEVENT and not VTODO", () => {
     expect(readme).toContain("VEVENT");
     expect(readme).toContain("VTODO");

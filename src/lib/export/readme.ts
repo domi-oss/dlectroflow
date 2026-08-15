@@ -90,11 +90,12 @@ export function exportReadme(snapshot: ExportSnapshot): string {
     '- **An importer.** There is no "restore from export" button yet. `export.json` is the file designed for it — it is lossless and versioned — but today getting the data back in means a script.',
     "- **Streaks, badges, points, daily rollups and sparks are in `export.json` only**, not in `tasks.md` or the CSVs. They are calculated from your activity rather than typed by you, and they do not port anywhere.",
     "- **`estimateHistory` and the Google task identifiers are in `export.json` only.** The first is a list inside one field, which does not belong in a spreadsheet cell; the second identifies rows inside a Google account and means nothing outside it.",
+    "- **Some account bookkeeping.** dlectroflow also holds a few records *about* your account rather than things you wrote in it, and they are not in these files: your **invitation record** and any private note whoever invited you wrote on it, your **AI usage count**, the timestamps on your **calendar subscription feed**, and the internal flags saying whether the account is active and when it was last seen. They are still your personal data and you are still entitled to them — the Privacy Policy at `/privacy` says how to ask, and the invitation note is included in that, since it is about you.",
     "",
 
     "## Getting a copy of anything else",
     "",
-    "This is everything dlectroflow holds about your account that is yours. If you think something is missing, or you want it in another format, the Privacy Policy at `/privacy` says how to ask and how long the answer takes.",
+    "This is everything you wrote in dlectroflow, plus the account details it holds against your name. It is not literally every row with your id on it — the section above says what is held back and why. If you think something is missing, or you want it in another format, the Privacy Policy at `/privacy` says how to ask and how long the answer takes.",
   ]
     .join("\n")
     .trimEnd()
