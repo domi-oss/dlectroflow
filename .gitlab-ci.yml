@@ -60,12 +60,22 @@ stages:
 #      on every outcome that is not "verified healthy" — so the email needs
 #      nothing configured and cannot be forgotten. Whoever owns this schedule is
 #      who gets told; that is a deliberate property, not an accident of setup.
-#   6. "Renovate automerge recovery" → variable RENOVATE_RUN=true, 4-hourly at
-#      01/05/09/13/17/21. Deliberately the SAME flag as schedule 2, so it needs no
-#      new guard on any other job; what makes it different is the clock, and the
-#      `schedule` window in .gitlab/renovate.json, which none of those six hours
-#      fall inside. Out of that window Renovate opens nothing and only finishes
-#      work already in flight (#243).
+#   6. "Renovate automerge recovery" → variable RENOVATE_RUN=true, cron
+#      `0 1,5,9,13,17,21 * * *`, timezone **Europe/London**, ref refs/heads/main.
+#      Deliberately the SAME flag as schedule 2, so it needs no new guard on any
+#      other job; what makes it different is the clock, and the `schedule` window
+#      in .gitlab/renovate.json, which none of those six hours fall inside. Out of
+#      that window Renovate opens nothing and only finishes work already in
+#      flight (#243).
+#
+#      **The timezone is load-bearing, so it is written down rather than assumed.**
+#      The whole safety property is that these six hours miss the `* 7-8 * * 1`
+#      window, and that window is evaluated in `Europe/London` because
+#      .gitlab/renovate.json sets `"timezone": "Europe/London"`. Create this
+#      schedule in the same zone or the non-overlap silently stops holding —
+#      `renovate-hygiene.test.ts` guards the window's shape but cannot see a
+#      schedule that lives in GitLab settings. If the window is ever widened,
+#      re-check these hours against it by hand.
 #
 #      Why it exists: Renovate arms GitLab's native auto-merge once, when it
 #      creates the MR, and never re-arms an MR it did not push a new commit to. It
