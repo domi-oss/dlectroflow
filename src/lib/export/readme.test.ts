@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { sectionById, sectionLabel } from "@/lib/section-nav";
 import { exportReadme } from "./readme";
 import { EXPORT_FILES } from "./manifest";
 import { makeSnapshot, makeEmptySnapshot } from "./__tests__/fixture";
@@ -57,9 +58,21 @@ describe("README.md — the file that explains the archive", () => {
     expect(readme.toLowerCase()).toContain(
       "address of your calendar subscription feed",
     );
-    // And where to get it — the claim that nothing is lost holds only because the
-    // live URL is one click away.
-    expect(readme).toContain("Settings → Calendar");
+    // And where to get it — the claim that nothing is lost holds only because
+    // `calendar-feed.tsx` renders the live URL in a readOnly input with a copy
+    // button, so it is re-copyable rather than shown once.
+    //
+    // Derived from `SETTINGS_SECTIONS` rather than repeated as a literal: this
+    // MR's first draft wrote "Settings → Calendar" into all three surfaces, a
+    // section that does not exist, and literal assertions cannot tell a real path
+    // from an invented one.
+    const integrations = sectionLabel(
+      sectionById("settings-integrations"),
+      "plain",
+    );
+    expect(readme).toContain(
+      `Settings → ${integrations} → Calendar subscription`,
+    );
 
     // And the four records must be positively described as present, or "not in
     // this archive" could simply have gone quiet about them — which is the
@@ -69,6 +82,12 @@ describe("README.md — the file that explains the archive", () => {
     expect(readme.toLowerCase()).toContain("calendar subscription"); // CalendarFeed
     expect(readme.toLowerCase()).toMatch(/active or revoked/); // User.status
     expect(readme.toLowerCase()).toMatch(/last seen/); // User.lastSeenAt
+    // `revokedAt`. Restored after the rewrite of this block dropped it while the
+    // README's prose still carried it and `privacy/page.test.tsx` still asserted
+    // it — a guard listing three of the four columns its own surface discloses,
+    // which is the partial-list defect this MR exists to remove, committed inside
+    // the guard for it for the third time. Counted per column on purpose.
+    expect(readme.toLowerCase()).toMatch(/access was withdrawn/); // User.revokedAt
     expect(readme.toLowerCase()).toMatch(/id your sign-in provider issued/); // providerSub
 
     // The stale claims, asserted absent so the flip cannot be half-done. Each is

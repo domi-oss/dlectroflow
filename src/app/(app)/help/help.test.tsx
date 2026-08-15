@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import { sectionById, sectionLabel } from "@/lib/section-nav";
 import HelpPage from "./page";
 
 // The rest of the props are spread through rather than dropped, so the
@@ -213,7 +214,45 @@ describe("HelpPage", () => {
     expect(text).toMatch(/Delete my account/i);
     // Export: it is one archive, and it deliberately excludes the secrets.
     expect(text).toMatch(/\.zip/i);
-    expect(text).toMatch(/API key|Google connection/i);
+
+    // ── The third surface of the export disclosure ──────────────────────────
+    //
+    // `docs/legal.md` says /privacy, the archive's own README and THIS PAGE are
+    // one disclosure read in three places and that the three wordings move
+    // together. Two of the three had assertions per withheld item; this one had
+    // `/API key|Google connection/` — an ALTERNATION, which passes if either is
+    // dropped and passed unchanged while the list went from two items to three.
+    //
+    // That is not a missing guard, it is a guard whose assertion could not see
+    // the thing that changed, which is worse: the section looked covered. So the
+    // alternation is split into one assertion per key, on the same
+    // per-item axis `readme.test.ts` and `privacy/page.test.tsx` use.
+    expect(text).toMatch(/Google connection/i); // GoogleAuth tokens
+    expect(text).toMatch(/API key/i); // User.llmKeyEnc
+    expect(text).toMatch(/calendar feed/i); // CalendarFeed.token
+    expect(
+      text,
+      "the Help page must say the keys are the WHOLE exclusion",
+    ).toMatch(/three things are left out/i);
+
+    // The path to the feed URL, derived from the table the Settings nav actually
+    // renders rather than repeated as a literal. This is the assertion that would
+    // have caught the wrong path this MR shipped in its first draft — all three
+    // surfaces said "Settings → Calendar", which is not a section that exists.
+    const integrations = sectionLabel(
+      sectionById("settings-integrations"),
+      "plain",
+    );
+    expect(text).toContain(
+      `Settings → ${integrations} → Calendar subscription`,
+    );
+
+    // And the records that ARE included, so "left out" cannot quietly widen back.
+    expect(text).toMatch(/private note/i);
+    expect(
+      text,
+      "the Help page still says TWO things are left out",
+    ).not.toMatch(/two things are deliberately left out/i);
     // Deletion: the honest shape — a recoverable window, then removal by hand.
     expect(text).toMatch(/signed out/i);
     expect(text).toMatch(/type the word|type `?delete`?|typing the word/i);

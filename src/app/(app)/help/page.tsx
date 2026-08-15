@@ -292,9 +292,10 @@ export default async function HelpPage({
           are keys rather than records: your <strong>Google connection</strong>,
           any <strong>API key</strong> you have stored, and the secret address
           of your <strong>calendar feed</strong> — which you can copy any time
-          from <strong>Settings → Calendar</strong>. Everything else this app
-          holds about your account is in the download, the private note whoever
-          invited you wrote on your invitation included.
+          from <strong>Settings → Integrations → Calendar subscription</strong>.
+          Everything else this app holds about your account is in the download,
+          the private note whoever invited you wrote on your invitation
+          included.
         </p>
         <p className="text-sm">
           <strong>Delete your account.</strong>{" "}

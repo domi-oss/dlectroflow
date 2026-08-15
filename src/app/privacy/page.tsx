@@ -1343,10 +1343,11 @@ export default function PrivacyPage() {
           of any of them in a file you might forward to somebody would be the
           opposite of protecting your data, and none of them is a record of
           anything — so the download loses nothing by leaving them out. Your
-          feed address is in <strong>Settings → Calendar</strong> whenever you
-          want it, and reconnecting Google or re-entering a key takes seconds.{" "}
-          <strong>Nothing else is held back.</strong> If you think something is
-          missing, ask at <ContactLink />.
+          feed address is in{" "}
+          <strong>Settings → Integrations → Calendar subscription</strong>{" "}
+          whenever you want it, and reconnecting Google or re-entering a key
+          takes seconds. <strong>Nothing else is held back.</strong> If you
+          think something is missing, ask at <ContactLink />.
         </p>
         {/* #153 — erasure came off that list, so this paragraph had to stop
             saying it was on it. The caveat is not a hedge: the control freezes

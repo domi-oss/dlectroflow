@@ -8,6 +8,7 @@ import {
   LEGAL_CONTACT_EMAIL,
   formatEffectiveDate,
 } from "@/lib/legal";
+import { sectionById, sectionLabel } from "@/lib/section-nav";
 import PrivacyPage, { metadata } from "./page";
 
 afterEach(cleanup);
@@ -505,8 +506,29 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     // and it is the only one of the three stored in plain text.
     expect(text).toMatch(/secret address of your calendar feed/i);
     // Where to get it, since the page tells the reader they lose nothing by its
-    // absence. That claim is only true because the live URL is one click away.
-    expect(text).toMatch(/Settings → Calendar/);
+    // absence. That claim is only true because the live URL is one click away —
+    // `calendar-feed.tsx` renders it in a readOnly input with a copy button, so
+    // it is re-copyable rather than shown once.
+    //
+    // The section name is DERIVED from `SETTINGS_SECTIONS`, not repeated as a
+    // literal, and that is the whole point of this assertion. The first draft of
+    // this MR wrote "Settings → Calendar" into all three surfaces — a section
+    // that does not exist — and three literal assertions agreeing with three
+    // wrong strings is exactly how a page and a tree drift apart while the suite
+    // stays green. Renaming the section now reds the copy.
+    const integrations = sectionLabel(
+      sectionById("settings-integrations"),
+      "plain",
+    );
+    expect(text).toContain(
+      `Settings → ${integrations} → Calendar subscription`,
+    );
+    // The label is voice-independent (`{ text: "Integrations" }`, not a `{ key }`),
+    // which is what makes it safe to hardcode a path in copy that every voice
+    // reads. `settings-account` IS keyed, so this check is not redundant.
+    expect(sectionLabel(sectionById("settings-integrations"), "playful")).toBe(
+      integrations,
+    );
     expect(
       text,
       "the page must say the three keys are the WHOLE exclusion, not some of it",

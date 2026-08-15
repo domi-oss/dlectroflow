@@ -260,7 +260,36 @@ const PUBLISHED = {
   //
   // `terms` is untouched again, which is what makes the two documents' hashes
   // independent evidence rather than two copies of one claim.
-  privacy: "cbbf81ff91e56f369e6c5c669a3a26b488b981dfda590696a5f36b8b3e2dfeee",
+  // EIGHTH re-record, and the cheapest possible lesson: the seventh shipped a
+  // Settings path that does not exist. The new export paragraph told readers their
+  // calendar feed address was in "Settings → Calendar". There is no Calendar
+  // section — `src/lib/section-nav.ts` declares `{ id: "settings-integrations",
+  // heading: { text: "Integrations" } }` and the control's own label is "Calendar
+  // subscription" (`integrations-panel.tsx`'s `FEED_NAME`, and the heading
+  // `calendar-feed.tsx` renders). Corrected to the real path on all three
+  // surfaces.
+  //
+  // **This MR's own defect class, committed by the MR, in the paragraph closing
+  // it.** Nine of the ten original findings were page-versus-code; so was this,
+  // and it survived a full page-versus-page pass because that pass compared the
+  // new prose against the OTHER SECTIONS and against the sibling surfaces — which
+  // all agreed, because all three carried the same wrong string. **Three surfaces
+  // agreeing is not evidence when one hand wrote all three.**
+  //
+  // The durable fix is not the corrected string, it is where the string now comes
+  // from: all three copy tests DERIVE the section name from `SETTINGS_SECTIONS`
+  // via `sectionLabel(sectionById("settings-integrations"))` instead of repeating a
+  // literal. A literal assertion cannot tell a real path from an invented one, and
+  // that is exactly how a test suite stays green while a page lies. So the rule for
+  // the next sweep: **any UI path, section name or control label asserted in copy
+  // is checked against the component that renders it, and pinned to that component's
+  // own source of truth wherever one exists.**
+  //
+  // COPY, not substance: the paragraph discloses the same exclusion, the same
+  // recipient (none) and the same retention — it corrects a wayfinding instruction.
+  // LEGAL_EFFECTIVE_DATE stays 2026-08-15, and nothing has been published under
+  // any of the eight hashes because the branch has not merged. `terms` unchanged.
+  privacy: "f555d63e514a066aef4f054d4dcf90d632ce9f818e0adcd1f7653d3ee07abc83",
   // Untouched by both #85 and this sweep, and unchanged — the evidence that
   // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
