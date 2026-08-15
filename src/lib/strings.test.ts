@@ -409,9 +409,17 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   // this file is deliberately not a second copy of that list, because two copies
   // is how it went stale twice. A reader arrives here by following the recipe's own
   // allowlist (`strings.ts` AND `strings.test.ts`), so it must not contradict it.
-  // Five of the ten have no case pinned anywhere: `action.confirmSteps`,
-  // `freshness.recent`, `focus.pauseForNow`, `focus.hyper.turnOff` and
-  // `focus.launcher.intro`.
+  //
+  // FOUR of the ten have no case pinned in this file: `action.confirmSteps`,
+  // `focus.pauseForNow`, `focus.hyper.turnOff` and `focus.launcher.intro`.
+  //
+  // Four, not five (Duo review round 5, !356 — this comment contradicted the list
+  // it had just promised not to contradict, in the sentence directly above). The
+  // five it named came from the recipe's ELEVEN-key output and included
+  // `freshness.recent`, which `strings.ts` documents as the recipe's one
+  // over-report: live, reached by a computed lookup, and therefore not one of the
+  // ten at all. `focus.complete` (:429) and `pill.toDo` (:313, :316) both do have
+  // pinned cases, so neither belongs in a "no case pinned" list either.
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });
