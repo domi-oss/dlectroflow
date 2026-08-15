@@ -82,7 +82,7 @@ function failureMessageKey(failure: DeleteFailure): StringKey {
  * ── Why not just render `<LibraryRows>` here ────────────────────────────────
  *
  * That was the obvious move — `plated`/`pantry` already use it and it carries a
- * delete. But it also carries **▶ Start focusing, ✓ Complete, an inline estimate
+ * delete. But it also carries **▶ Start focusing, Complete, an inline estimate
  * editor, an editable task note, a row number, an age label and select mode**,
  * and every one of those is meaningless on a closed to-do: there is nothing left
  * to focus, nothing to complete, and no estimate worth revising. Its `tab` prop

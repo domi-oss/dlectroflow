@@ -31,6 +31,7 @@ to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning proj
 - [📅 Connecting Google Tasks](#-connecting-google-tasks)
 - [🎧 Focus music](#-focus-music)
 - [🗄️ Database & migrations](#️-database--migrations)
+- [Running E2E tests (Playwright)](#running-e2e-tests-playwright)
 - [🐳 Deploy](#-deploy)
 - [💸 What it costs to run](#-what-it-costs-to-run)
 - [🧯 Troubleshooting](#-troubleshooting)
@@ -38,6 +39,7 @@ to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning proj
 - [🤝 Contributing](#-contributing)
 - [🧭 Roadmap](#-roadmap)
 - [🧠 A note for fellow neurodivergent nerds](#-a-note-for-fellow-neurodivergent-nerds)
+- [📄 License](#-license)
 - [⚖️ Legal & privacy](#️-legal--privacy)
 
 ---
@@ -49,6 +51,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 | Feature | State |
 |---|---|
 | 🧠 Brain Dump — capture, triage, aging reminders | ✅ works |
+| 📝 Notes on a to-do and on a step | ✅ works — jot the context you'd otherwise lose and it rides along into the Google Task or the calendar entry, task note first where both exist. Capture can write one inline: a `{…}` group at the **very end** of what you type splits off as the note, so `water the plants {can under sink}` splits and `fix the {foo} handler` stays exactly as typed. |
 | 🔔 Desktop notifications + demo override | ✅ works |
 | ✂️ AI task breakdown (streaming chat) | ✅ works — Claude by default (needs an Anthropic API key) |
 | 🤖 Bring your own LLM (`LLM_PROVIDER`) | ⚠️ **partly** — `anthropic` is what runs in production; `openai-compatible` ships but is unit-tested only, and **no human has yet run it against a real non-Anthropic endpoint** (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) |
@@ -56,6 +59,8 @@ This is **in active development**. Being honest so you don't hit surprises:
 | ⏱️ Focus timer — true pause/resume, one-number setup screen, auto-advance | ✅ works — finishing a step no longer dead-ends: a 5-second countdown opens the **next step's start screen**, and nothing starts its timer for you. **Escape** cancels, as does a **Stay here** button. **Hyper focus mode** extends the same chaining to single-task to-dos and is **off by default**. |
 | 🎧 Focus music — 10 bundled CC0 lo-fi tracks, in-session mini-player, shuffle | ✅ works — plus an optional operator-run store for the full 166-track catalogue via `FOCUS_CATALOG_ORIGIN` (off by default). The browser never contacts that store either way (see [Focus music](#-focus-music)). |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
+| 🛒 Shopping list | ✅ works — but **off by default**, behind **Settings → Shopping list**. It's a plain list at its own `/shopping` destination for the things that aren't tasks: no estimate, no steps, nothing that lands in your calendar, and ticking one off doesn't touch your streak. A **Saved for later** section sits under the live list, and turning the switch back off hides the list rather than deleting it. |
+| 👤 Your name in the header, timer and trolley one tap away | ✅ works — **Settings → Account → Your name** sets what the bar greets you with; leave it empty and it falls back to the username your OAuth provider issued. The header also carries a **focus timer** button, **on by default** and hidden from **Settings → Focus timer → Shortcut in the header**, plus a **trolley** whenever shopping-list mode is on. |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
 | 📦 Export your own data | ✅ works — **Settings → Account → Download my data (.zip)**: one archive holding a readable `tasks.md`, three CSVs, a `scheduled.ics` and a lossless `export.json`, with a README inside explaining each. Your Google connection and any stored LLM key are **never** exported. |
@@ -109,7 +114,8 @@ cd dlectroflow
 cp .env.example .env
 
 # 3. Start Postgres, install deps + create the database (one command)
-npm run setup        # = docker compose up -d db && npm install && prisma migrate dev
+# = docker compose -f docker/docker-compose.yml up -d db && npm install && prisma migrate dev
+npm run setup
 
 # 4. Add your Claude API key (see options below), e.g. for this shell session:
 #    (or point the app at a model of your own instead — see "Bring your own LLM")
@@ -409,12 +415,16 @@ silent. Licence and provenance for the streamed set are in
 
 ## 🗄️ Database & migrations
 
-Postgres — runs locally via Docker Compose. Start it with `docker compose up -d db`.
-Every command below takes its connection string from `DATABASE_URL` in **`.env`**
+Postgres — runs locally via Docker Compose. The compose file lives in `docker/`,
+so every `docker compose` call needs `-f docker/docker-compose.yml`: there is no
+compose file at the repo root, and without the flag Docker answers *"no
+configuration file provided: not found"*. Every command below takes its
+connection string from `DATABASE_URL` in **`.env`**
 (see [which file?](#which-file-env-vs-envlocal)).
 
 ```bash
-docker compose up -d db   # start local Postgres (idempotent — safe to re-run)
+# start local Postgres (idempotent — safe to re-run)
+docker compose -f docker/docker-compose.yml up -d db
 npm run db:migrate        # create/apply migrations after schema changes
 npm run db:studio         # open Prisma Studio to browse data
 ```
@@ -457,11 +467,14 @@ because it runs against an ephemeral, per-job Postgres service.
 
 ### Accessibility gate (axe)
 
-`e2e/a11y/axe-core-flow.spec.ts` runs [`@axe-core/playwright`](https://github.com/dequelabs/axe-core-npm)
-over the core flow (inbox/capture → clarify → schedule → focus → reward) and
-fails on **new serious/critical** WCAG 2.0/2.1 A+AA violations (contrast, labels,
-roles, name/role/value). It rides the same `e2e_test` CI job as the smoke suite,
-so it is already a blocking gate before the image build.
+`e2e/a11y/` runs [`@axe-core/playwright`](https://github.com/dequelabs/axe-core-npm)
+and fails on **new serious/critical** WCAG 2.0/2.1 A+AA violations (contrast,
+labels, roles, name/role/value). `axe-core-flow.spec.ts` covers the core flow
+(inbox/capture → clarify → schedule → focus → reward); the sibling specs scan
+the surfaces that flow never reaches — guest surfaces, the legal pages, the
+schedule menu, the shopping list, the people panel and account deletion. They
+ride the same `e2e_test` CI job as the smoke suite, so the gate already blocks
+before the image build.
 
 Pre-existing serious/critical violations are allow-listed in
 `e2e/a11y/axe-baseline.json` (keyed by route, one `ruleId::selector` fingerprint
@@ -576,7 +589,7 @@ practice, or $0 if you point it at a model you run yourself.
 ## 🗺️ Tech stack
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
-- **Tailwind CSS v4** + **shadcn/ui** + **Motion** (née Framer Motion)
+- **Tailwind CSS v4** + **shadcn/ui** + **Base UI** (the unstyled primitives behind the menus, popovers, alert dialogs and buttons) + **Motion** (née Framer Motion)
 - **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GKE, deployed via GitLab CI/CD)
 - **Provider-agnostic LLM seam** (`src/lib/llm/`) — **Claude API** by default (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
 - …or **any OpenAI-compatible endpoint** via the `openai` SDK — a local runner or another vendor (see [BYO-LLM](#-bring-your-own-llm-byo-llm))

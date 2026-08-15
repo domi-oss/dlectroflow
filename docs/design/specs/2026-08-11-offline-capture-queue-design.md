@@ -1560,8 +1560,8 @@ land here, and both cover things no other check in the repo can see:
   background swap passes every other gate in the suite; #117 is the precedent.
 
   ⚠️ **The criterion, stated correctly — and an earlier version of this bullet had it wrong in exactly the
-  way this document already caught once for target size.** It said *"WCAG 2.4.11 Focus Appearance, AA"*,
-  which conflates a number with a different criterion's name:
+  way this document already caught once for target size.** It attached the *Focus Appearance* name to the
+  Focus-Not-Obscured number and called it AA, conflating a number with a different criterion's name:
 
   | Criterion | Name | Level | What it is about |
   | --- | --- | --- | --- |
@@ -1573,19 +1573,27 @@ land here, and both cover things no other check in the repo can see:
   swap is what `a11y-class-hygiene` additionally rejects, and that reach is toward **2.4.13 at AAA** — a
   bar this project has chosen to hold, which is worth knowing is a choice rather than a requirement.
 
-  ⚠️ **The same mislabel is in the repo's own control**, not just here. In `src/lib/a11y-class-hygiene.ts`
-  the name *"Focus Appearance"* is attached to the number 2.4.11 in **three** places — the module docblock,
-  the docblock over `findWeakFocusIndicators` (the file's Rule D), and one of the two `reason` strings that
-  rule emits — and that middle one also asserts the level: *"WCAG 2.4.11 Focus Appearance is **AA in WCAG
-  2.2**"*. `CLAUDE.md` carries the same wrong number, describing the gate as *"the only check in the repo
-  that can see WCAG 2.4.11"*. **That is a compensating control misnaming the criterion it enforces**, which
-  matters because it is read precisely when somebody is deciding whether a change is compliant — and the
-  `reason` string is the worst of the three, because it is what a failing pipeline puts in front of an
-  author. **Tracked as #258 — _"a11y-class-hygiene names the wrong WCAG criterion, and reports the wrong
-  level"_**; it is the repo's control, not this design's, and correcting it here would make a docs-only MR
-  touch `src/`.
+  ✅ **The same mislabel was in the repo's own control, and has since been fixed.** In
+  `src/lib/a11y-class-hygiene.ts` the *Focus Appearance* name was attached to the Focus-Not-Obscured number
+  in **three** places — the module docblock, the docblock over `findWeakFocusIndicators` (the file's Rule
+  D), and one of the two `reason` strings that rule emits, which additionally asserted a level for that
+  wrong pairing. `CLAUDE.md` carried the same wrong number in its description of the gate. **That was a
+  compensating control misnaming the criterion it enforces**, which mattered because it is read precisely
+  when somebody is deciding whether a change is compliant — and the `reason` string was the worst of the
+  three, because it is what a failing pipeline puts in front of an author.
 
-  ⚠️ **The sites are enumerated rather than counted, deliberately** — the bare number 2.4.11 occurs six
+  **Fixed by #258 — _"a11y-class-hygiene names the wrong WCAG criterion, and reports the wrong level"_**,
+  merged 2026-08-13 as `88b969a`. That MR also added the mechanical guard that now reads this very file, and
+  ⚠️ **that guard is why the two sentences above no longer quote the wrong pairing verbatim.** It scans
+  `src`, `e2e` and `docs`, and it has no exemption mechanism — so it cannot tell a citation being *asserted*
+  from one being *quoted as an example of the error*. Quoting the mistake in order to explain it reproduces
+  it as far as any text scanner is concerned. **Describe the phrase; do not reproduce it.**
+
+  That is the same trap in a second place: a text check over prose cannot distinguish a claim from a
+  discussion of that claim. GitLab's issue-closing regex has it too — a sentence denying that it closes an
+  issue closes that issue.
+
+  ⚠️ **The sites are enumerated rather than counted, deliberately** — the bare criterion number occurred six
   times in that file and the phrase three, so any single count is wrong for one reading and stale for both.
   **An enumeration of what and where survives an edit; a count does not.**
 

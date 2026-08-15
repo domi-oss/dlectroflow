@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  within,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 
@@ -12,16 +19,20 @@ vi.mock("next/link", () => ({
   // depends on it. A mock that silently drops the ref makes a working focus fix
   // look broken — which is exactly what it did on the first run of that spec.
   // React 19 passes `ref` as an ordinary prop to function components.
+  //
+  // #253 — and it now forwards EVERYTHING ELSE too, `className` included, because
+  // this double dropped that prop and the hazard its own note describes happened a
+  // second time: the ▾ list's restored focus-timer entry is a `Link` carrying
+  // `rowMenuEntry()`, and the 44px guard read `className=""` and failed on markup
+  // that is correct in the browser. Enumerating props is what makes a double diverge
+  // from the thing it stands in for, so it stops enumerating them.
   default: ({
     children,
     href,
     ref,
-  }: {
-    children: React.ReactNode;
-    href: string;
-    ref?: React.Ref<HTMLAnchorElement>;
-  }) => (
-    <a href={href} ref={ref}>
+    ...rest
+  }: React.ComponentPropsWithRef<"a"> & { href: string }) => (
+    <a href={href} ref={ref} {...rest}>
       {children}
     </a>
   ),
@@ -109,9 +120,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   it("each not-done row renders Complete + Start Focus + the 🔽 dropdown trigger", () => {
     render(<TaskSteps taskId="t1" steps={steps()} />);
     // Shared CompleteButton (plain voice → "Complete") on each row.
-    expect(screen.getAllByRole("button", { name: "✓ Complete" })).toHaveLength(
-      2,
-    );
+    expect(screen.getAllByRole("button", { name: "Complete" })).toHaveLength(2);
     // Inline Start Focus CTA on each row.
     expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
@@ -122,15 +131,117 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     expect(screen.queryByTitle("Send to review")).not.toBeInTheDocument();
   });
 
-  it("the 🔽 dropdown lists all five entries", async () => {
+  // #253 — three entries, not five. "Start focus timer" pointed at the same
+  // `/focus/${id}` as the inline ▶ Start Focus and "Complete step" called the same
+  // `complete(id)` as the inline Complete, so both were height in a list that is
+  // now the only route to what is left. Asserted as an exact set rather than three
+  // `getByText` calls: a re-added mirror is the regression, and presence checks
+  // cannot see one.
+  /**
+   * #253 — the ▾ is this STEP's canonical action list, asserted as an exact ordered
+   * list because the claim is about sequence and completeness, which presence checks
+   * cannot see.
+   *
+   * `Send back to review` leads as the step-grain "where does this belong" question
+   * (`ejectStepToInbox` re-buckets the step into Needs review — it is this row's
+   * `Move to…`, not its Delete). Then the two twins of the inline bar, restored
+   * because the list is the complete set and the bar a shortcut subset of it. Then
+   * the property edit, which takes the tail slot only because a step has nothing
+   * destructive to put there.
+   *
+   * `Edit step title` is asserted ABSENT, and that is a tenth instance of the mirror
+   * class #253 has been removing: it fired `setEditEstId(null);
+   * setEditTitleId(s.id)`, character-for-character what the ✎ pencil fires, and the
+   * pencil's `aria-label` ("Edit First") names the step, so it is strictly clearer.
+   * `Edit time estimate` STAYS by the same test applied honestly — the estimate is a
+   * plain `<span>`, not a control, so that entry is its only route.
+   */
+  it("the 🔽 dropdown is the step's canonical actions, in order, and carries no Edit-title mirror", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
-    expect(screen.getByText("Start focus timer")).toBeInTheDocument();
-    expect(screen.getByText("Complete step")).toBeInTheDocument();
-    expect(screen.getByText("Edit time estimate")).toBeInTheDocument();
-    expect(screen.getByText("Edit step title")).toBeInTheDocument();
-    expect(screen.getByText("Send back to review")).toBeInTheDocument();
+    const popup = screen.getByRole("dialog", { name: "All options" });
+    expect(
+      Array.from(popup.querySelectorAll("a, button")).map((b) => b.textContent),
+    ).toEqual([
+      "Send back to review",
+      "Start focus timer",
+      "Complete step",
+      "Edit time estimate",
+    ]);
+    expect(
+      within(popup).queryByText("Edit step title"),
+      "the Edit-title mirror of the ✎ pencil is back",
+    ).toBeNull();
+    // Four groups' worth of entries in three intent groups → two rules, and they are
+    // decoration: no role, so they cannot be announced or counted as entries.
+    expect(
+      popup.querySelectorAll(":scope > [aria-hidden='true']"),
+    ).toHaveLength(2);
+  });
+
+  // Every ▾ entry is the sole route to its action now, so each carries the 44px
+  // minimum the row controls have always had (`rowMenuEntry`). Height only: a
+  // full-width entry is already far past 44px wide.
+  it("every 🔽 entry carries the 44px minimum height", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await openMenu(user);
+    // `a, button` rather than the button role: the focus-timer entry is a `Link`,
+    // and the restored twins are exactly the entries most likely to be given the
+    // 44px floor last, since each has an inline sibling that already has it.
+    const entries = Array.from(
+      screen
+        .getByRole("dialog", { name: "All options" })
+        .querySelectorAll<HTMLElement>("a, button"),
+    );
+    expect(entries).toHaveLength(4);
+    for (const entry of entries) {
+      expect(entry.className, `"${entry.textContent}"`).toContain("min-h-11");
+    }
+  });
+
+  /**
+   * #205's leg on this file, folded in because #253 is what makes it load-bearing.
+   *
+   * The ✎ pencil was a ~20px convenience (`px-1 text-xs`) while `Edit step title`
+   * sat in the ▾ at 44px. This issue removed that entry as a mirror — correctly,
+   * the two fired identical calls — which leaves the pencil as the SOLE route to
+   * renaming a step, at a fifth of the area of the entry it outlived.
+   *
+   * That is the line `anchored-popup.ts` draws for itself, applied here: "entries
+   * whose sole-route status THIS change creates". The pencil's status was created by
+   * this change, so this change sizes it, rather than deferring a control it just
+   * promoted.
+   *
+   * 44x44 is **2.5.5 Target Size (Enhanced), AAA**; **2.5.8 (Minimum) is the AA
+   * one, at 24x24**. A house convention, not a conformance fix — see
+   * `breakdown/note-field.tsx`, which records having had to undo that inversion.
+   *
+   * Both dimensions, unlike the ▾-entry test above: that one checks height only
+   * because a full-width entry is already far past 44px wide. This is an
+   * emoji-only glyph, so width is the dimension it actually fails.
+   */
+  it("the ✎ pencil carries the 44px minimum, being the only route to a rename now", () => {
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    const pencil = screen.getByRole("button", { name: "Edit First" });
+    expect(pencil.className, "the ✎ pencil is under 44px tall").toContain(
+      "min-h-11",
+    );
+    expect(pencil.className, "the ✎ pencil is under 44px wide").toContain(
+      "min-w-11",
+    );
+  });
+
+  it("the sized pencil still opens the title editor for its own step", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    // Pins the behaviour the class change rides on: the pencil's `onClick` clears
+    // the estimate editor and opens the title one for THIS step.
+    expect(
+      screen.getByRole("textbox", { name: "Edit step title" }),
+    ).toBeInTheDocument();
   });
 
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
@@ -140,6 +251,10 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     );
     expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
+    // #253 — BOTH halves again, and the resumable variant has to reach both: the
+    // dropdown twin is restored, and it takes its label from the same `s.resumable`
+    // the inline CTA does. A pass that wired the entry to the Start label on a
+    // resumable step would be invisible without this.
     await openMenu(user);
     expect(screen.getByText("Resume focus timer")).toBeInTheDocument();
     expect(screen.queryByText("Start focus timer")).not.toBeInTheDocument();
@@ -169,7 +284,7 @@ describe("TaskSteps — done steps", () => {
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -223,7 +338,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       screen.getByRole("button", { name: /mark not done/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "✓ Complete" }),
+      screen.queryByRole("button", { name: "Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -367,7 +482,7 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
 
     const undo = screen.getByRole("button", {
       name: /mark not done: second/i,
@@ -384,15 +499,18 @@ describe("TaskSteps — complete step", () => {
   it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
-    await user.click(screen.getAllByRole("button", { name: "✓ Complete" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Complete" })[0]);
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 
-  it("the dropdown Complete step entry calls completeStep", async () => {
+  // #253 replaced the dropdown mirror with the inline control it duplicated. The
+  // behaviour under test — a press reaches `completeStep` with this step's id —
+  // is kept and re-pointed rather than deleted, because that is the assertion, not
+  // the button it was made through.
+  it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Complete step"));
+    await user.click(screen.getByRole("button", { name: "Complete" }));
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 });
@@ -451,11 +569,13 @@ describe("TaskSteps — send back to review (dropdown)", () => {
 });
 
 describe("TaskSteps — inline editors", () => {
+  // #253 — reached through the ✎ pencil, which is the row's only edit route now
+  // that the ▾ mirror of it is gone. The behaviour under test (renameStep on Enter)
+  // is unchanged; only the way in is.
   it("Edit step title saves the new text via renameStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.clear(input);
     await user.type(input, "Renamed step{Enter}");
@@ -472,8 +592,7 @@ describe("TaskSteps — inline editors", () => {
   it("Edit step title Escape cancels without saving", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    await openMenu(user);
-    await user.click(screen.getByText("Edit step title"));
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
     const input = screen.getByLabelText("Edit step title");
     await user.type(input, "nope{Escape}");
     expect(renameStep).not.toHaveBeenCalled();
@@ -522,7 +641,7 @@ describe("TaskSteps — inline editors", () => {
 describe("TaskSteps — the note trigger sits in the step's action group (#44)", () => {
   it("puts the trigger in the SAME action group as that step's Complete", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const complete = screen.getByRole("button", { name: "Complete" });
     const trigger = screen.getByRole("button", {
       name: "Note for step 1 of 2: First",
     });
@@ -554,7 +673,7 @@ describe("TaskSteps — the note trigger sits in the step's action group (#44)",
     });
     expect(box.closest("[data-row-actions]")).toBeNull();
     expect(box.closest("li")).toBe(
-      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+      screen.getByRole("button", { name: "Complete" }).closest("li"),
     );
   });
 });
@@ -850,9 +969,7 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     // NOT the Complete button: the user has just un-completed this step, so
     // landing focus on the one control that would re-complete it turns a stray
     // Enter into an undo of their undo.
-    expect(
-      screen.getByRole("button", { name: "✓ Complete" }),
-    ).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "Complete" })).not.toHaveFocus();
   });
 
   it("hands off to BOTH rows when two undos are in flight at once", async () => {
@@ -867,6 +984,20 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     // server flips s1 alone. At that render the only pending id under the old
     // single-slot version was s2, whose row is still done, so nothing was focused
     // and s1's correction ended on <body>.
+    //
+    // #237 re-decided ONE line of this spec, and it is worth saying which and why
+    // rather than leaving it to a blame trawl. It used to leave focus on s2's undo
+    // across both releases and still assert that s1's Start Focus took focus — so
+    // it pinned a hand-off firing onto a row the user was NOT standing on, which is
+    // the defect #237 is about. What round 15 actually needs to observe is that the
+    // two ARMS do not clobber each other, and arming is what the `.focus()` calls
+    // below preserve: both writes are still in flight together, and each resolves
+    // while its own row's undo holds focus.
+    //
+    // Reachable, not a contrivance: both undos are `aria-disabled` rather than
+    // `disabled` (round 15, so a busy control can still hold focus), so a keyboard
+    // user who presses s1's undo, presses s2's, then Shift+Tabs back to s1 while
+    // both are still out is exactly this.
     const user = userEvent.setup();
     // `…Once`, twice: `vi.clearAllMocks()` does not reset implementations, so a
     // plain `mockImplementation` here would leak an un-resolving undo into every
@@ -888,15 +1019,30 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
       <TaskSteps taskId="t1" steps={[done1, done2]} />,
     );
 
-    await user.click(
-      screen.getByRole("button", { name: /mark not done: first/i }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: /mark not done: second/i }),
-    );
+    const undo1 = screen.getByRole("button", {
+      name: /mark not done: first/i,
+    });
+    const undo2 = screen.getByRole("button", {
+      name: /mark not done: second/i,
+    });
+    await user.click(undo1);
+    await user.click(undo2);
     expect(uncompleteStep).toHaveBeenCalledTimes(2);
 
+    // Both are out before either resolves, which is what makes the two arms
+    // simultaneous and reproduces the single-slot clobber. Focus rides with the row
+    // whose write is landing, so each arm is legitimately entitled to its hand-off
+    // under #237's gate — the property under test is that the second arming does
+    // not erase the first.
+    // Awaited between the two releases, not fired back to back: the gate reads
+    // `document.activeElement` in the continuation after the write's `await`, so
+    // both continuations would otherwise run as microtasks AFTER both `.focus()`
+    // calls and both would read s2's undo. That is a property of this spec's
+    // instrumentation, not of the component.
+    undo1.focus();
     releases[0]();
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    undo2.focus();
     releases[1]();
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
 
@@ -935,5 +1081,183 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
       screen.getByRole("link", { name: /start focus/i }),
     ).not.toHaveFocus();
     expect(document.body).toHaveFocus();
+  });
+});
+
+describe("TaskSteps — a hand-off only fires when the press held focus (#237)", () => {
+  // #237. The two describes above pin WHERE focus goes when a control the user is
+  // standing on is destroyed. Neither pinned the prior question, and both
+  // hand-offs armed without asking it: 2.4.3 is about focus that is destroyed, it
+  // does not license taking focus off something else, and doing that is 3.2.2's
+  // harm instead.
+  //
+  // Why the press cannot be trusted to have held focus — re-measured in Playwright
+  // against both engines rather than inherited:
+  //
+  //   gesture                                    WebKit    Chromium
+  //   click a <button>, nothing focused          BODY      BUTTON
+  //   click a <button> while typing in a field   BODY      BUTTON
+  //   Enter on a focused <button>                BUTTON    BUTTON
+  //
+  // So on WebKit — Safari, and every browser on iOS — a mouse or touch press never
+  // holds focus, which makes the unguarded arm the ORDINARY mouse case there
+  // rather than an edge. Assistive-technology activation is the second route: it
+  // fires a click without moving DOM focus on every engine.
+  //
+  // This list is where that becomes reachable, and the reason is structural: the
+  // failed-undo notice renders per row, inside the same `steps.map()` as the two
+  // `autoFocus` inline editors, so the control that unmounts and the field the user
+  // is typing in are siblings.
+  //
+  // `focus-timer.tsx` is deliberately left unguarded, but NOT for the reason #237's
+  // table gives — "nowhere else focus could be" is wrong, and this comment said so
+  // in its first draft. It has the re-estimate minutes field at `:2092`, in the same
+  // phase block as the failure notice whose hand-off is unarmed. What stands in for
+  // a guard there is `showEstimateField` (`:1209`) unmounting that field across any
+  // in-flight window that has not yet failed. See the correction on #237 for the one
+  // path where that does not hold.
+  //
+  // Same guard, same shape and same reason as `breakdown-chat.tsx`'s "leaves focus
+  // where it was when the press did not come from it" and `inbox-view.tsx`'s
+  // `retryCtaRef.current === document.activeElement`. Following the in-tree
+  // pattern is the point — four components had grown this machinery and two had
+  // the guard.
+  //
+  // `fireEvent.click` rather than `user.click` for the press under test:
+  // userEvent focuses the element first, which is the very thing being guarded, so
+  // it would make the unguarded code pass. fireEvent dispatches the press without
+  // moving focus, which is what WebKit does.
+
+  /** Row 1 not done, so it carries the ✎ pencil and its `autoFocus` editor; row 2
+   *  done, so it can carry the failed undo and the Retry inside its notice. The
+   *  two live in one `<ol>`, which is the whole hazard. */
+  const mixedRows = () => [
+    { ...baseStep(), id: "s1", text: "First", done: false },
+    { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+  ];
+
+  it("leaves focus in another row's editor when the Retry press never held it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      // The retry hangs, so the state after the press is observable rather than
+      // racing a resolution — the shape the #215 specs above use.
+      .mockImplementationOnce(() => new Promise<void>(() => {}));
+    render(<TaskSteps taskId="t1" steps={mixedRows()} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+
+    // The user is mid-word in the OTHER row's title editor.
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    const field = screen.getByLabelText("Edit step title");
+    await user.clear(field);
+    await user.type(field, "half a wor");
+    expect(field).toHaveFocus();
+
+    fireEvent.click(retry);
+
+    // The press is still honoured — the retry runs and its notice still
+    // withdraws. Only the focus move is suppressed, so this is not the guard
+    // passing vacuously by refusing the press.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /try again/i }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(uncompleteStep).toHaveBeenCalledTimes(2);
+
+    expect(field).toHaveFocus();
+    // The words survive too. On WebKit the click blurs the field but keeps its
+    // value (measured above), so a hand-off that fires anyway costs the user the
+    // caret in text they are still holding, not the text itself.
+    expect(field).toHaveValue("half a wor");
+    expect(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    ).not.toHaveFocus();
+  });
+
+  it("leaves focus in another row's editor when the undo's press never held it", async () => {
+    // The same defect on the OTHER hand-off — the successful-undo one — reached
+    // the same way, and this is the arm whose window is widest: it opens when the
+    // write resolves and closes only when `router.refresh()` comes back. So it
+    // does not need WebKit to fire on the wrong element; a user who opened another
+    // row's inline editor while the undo was in flight is enough, on any engine.
+    // Both arms sit in `uncomplete`'s two routes in, so guarding one and not the
+    // other would leave the file inconsistent with itself — which is what #237 is
+    // about.
+    const user = userEvent.setup();
+    let release!: () => void;
+    vi.mocked(uncompleteStep).mockImplementationOnce(
+      () =>
+        new Promise<void>((res) => {
+          release = res;
+        }),
+    );
+    const rows = mixedRows();
+    const { rerender } = render(<TaskSteps taskId="t1" steps={rows} />);
+
+    const pencil = screen.getByRole("button", { name: "Edit First" });
+    pencil.focus();
+    fireEvent.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+
+    // Mid-flight, the user opens the other row's title editor — an ordinary thing
+    // to do while a write is out, and it is where focus is when the refresh lands.
+    await user.click(pencil);
+    const field = screen.getByLabelText("Edit step title");
+    expect(field).toHaveFocus();
+
+    release();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    // What the refresh does in production: the server re-renders row 2 as
+    // not-done, unmounting the undo that was pressed.
+    rerender(
+      <TaskSteps taskId="t1" steps={[rows[0], { ...rows[1], done: false }]} />,
+    );
+
+    const links = screen.getAllByRole("link", { name: /focus/i });
+    expect(links).toHaveLength(2);
+    expect(links[1]).not.toHaveFocus();
+    expect(field).toHaveFocus();
+  });
+
+  it("still hands off when the press DID hold focus, on both arms", async () => {
+    // The control for the two specs above. Without it "focus did not move" could
+    // be true because the guard disabled the feature outright, and #206/#215 both
+    // exist because focus dropping to <body> here is a real defect.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      .mockResolvedValueOnce(undefined);
+    const rows = mixedRows();
+    const { rerender } = render(<TaskSteps taskId="t1" steps={rows} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    await user.keyboard("{Enter}");
+
+    // Arm one: the Retry unmounted under a user who was standing on it, so focus
+    // lands on the row's own undo.
+    const undo = await screen.findByRole("button", {
+      name: /mark not done: second/i,
+    });
+    await waitFor(() => expect(undo).toHaveFocus());
+
+    // Arm two: that undo is where focus now is, so when the refresh unmounts it
+    // the reopened row's Start Focus receives the hand-off.
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    rerender(
+      <TaskSteps taskId="t1" steps={[rows[0], { ...rows[1], done: false }]} />,
+    );
+    const links = screen.getAllByRole("link", { name: /focus/i });
+    expect(links).toHaveLength(2);
+    await waitFor(() => expect(links[1]).toHaveFocus());
   });
 });

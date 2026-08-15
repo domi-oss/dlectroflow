@@ -7,6 +7,27 @@ import { expect, type Page } from "@playwright/test";
 // diverges (e.g. the single-task row lookups) stays local to its spec.
 export const CAPTURE_PLACEHOLDER = "Brain dump anything… (Enter to save)";
 
+/**
+ * Two ▾-list entry labels, hoisted because #253 renamed both and five specs plus a
+ * fixture query them by exact accessible name.
+ *
+ * The rule behind the words is that an action is named after the state it produces,
+ * in the words the destination bucket uses: `ROW_MENU_ADD_TODO` names
+ * `section.singleTask` ("Single-task to-dos"), and `ROW_MENU_SCHEDULE` names where
+ * the row is actually sent — `lib/google.ts` posts to `tasks.googleapis.com` into
+ * the Reclaim-synced list, and Reclaim is what turns those tasks into calendar time.
+ *
+ * ⚠️ `ROW_MENU_SCHEDULE` is NOT the same string as the Schedule DIALOG's submit
+ * button, which is still the bare "Schedule" — `row-actions.tsx`'s `icon` variant
+ * and its `label` default are unchanged, and aligning the rest of the app is #259.
+ * That is why the specs below keep `exact: true` on both: with the entry renamed,
+ * a substring match for "Schedule" inside an open row would resolve to two
+ * controls, which is Playwright strict-mode failure rather than a wrong assertion —
+ * but only once the dialog is open, so it would look intermittent.
+ */
+export const ROW_MENU_ADD_TODO = "Add as single-task to-do";
+export const ROW_MENU_SCHEDULE = "Schedule to calendar (send to Google Tasks)";
+
 // Capture a brain-dump item. The capture bar has no submit button — Enter
 // saves it. Callers assert on the resulting row themselves.
 export async function captureItem(page: Page, label: string): Promise<void> {
@@ -21,6 +42,75 @@ export function needsReviewRow(page: Page, label: string) {
     .locator('[data-bucket="needsReview"]')
     .getByRole("listitem")
     .filter({ hasText: label });
+}
+
+/**
+ * What `document.activeElement` is once every queued focus move has run — its
+ * `aria-label`, else its visible text.
+ *
+ * ⚠️ Use this, not `toBeFocused()`, for "focus came back to X after a popup
+ * closed". `expect(locator).toBeFocused()` is a RETRYING matcher: it passes on
+ * the first poll where the condition holds, so a focus that lands on the right
+ * control for one frame and is then stolen satisfies it. That is not a
+ * hypothetical here — Base UI's `Popover.Popup` focus manager restores focus to
+ * the popup CONTAINER when a descendant loses it, queued from a microtask into
+ * the next animation frame (see `restoreFocusToTrigger` in
+ * src/components/ui/anchored-popup.ts for the whole mechanism), so a nested
+ * dismissal passes through exactly that shape. #253 shipped one nested layer
+ * whose focus never landed on the entry at all, which a retrying matcher DID
+ * catch — and one whose focus landed and was then taken away a frame later,
+ * which it did not.
+ *
+ * Two frames, because the steal is queued one frame ahead: sampling after them
+ * reads the settled state rather than racing it. Returns a label rather than a
+ * boolean so a failure names what actually holds focus instead of only saying
+ * that the expected control does not.
+ *
+ * A non-control is suffixed, and that is load-bearing rather than cosmetic: the
+ * ▾ popup and the ▾ trigger carry the SAME accessible name ("All options"), so a
+ * bare name would have reported the container that fails the criterion and the
+ * button that satisfies it identically.
+ */
+export async function settledFocusLabel(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      new Promise<string>((resolve) => {
+        const sample = () => {
+          const el = document.activeElement as HTMLElement | null;
+          if (!el || el === document.body) {
+            resolve("(document body — focus was lost)");
+            return;
+          }
+          const name =
+            el.getAttribute("aria-label") ??
+            el.textContent?.trim().slice(0, 60) ??
+            "";
+          const role = el.getAttribute("role");
+          const operable =
+            el.matches("button, a[href], input, select, textarea") ||
+            ["button", "link", "menuitem", "option"].includes(role ?? "");
+          resolve(
+            operable
+              ? name
+              : `${name} (not a control: <${el.tagName.toLowerCase()}` +
+                  `${role ? ` role=${role}` : ""}>)`,
+          );
+        };
+        let sampled = false;
+        const once = () => {
+          if (sampled) return;
+          sampled = true;
+          sample();
+        };
+        requestAnimationFrame(() => requestAnimationFrame(once));
+        // Fallback, and not decoration: a page that is not currently rendering
+        // never fires `requestAnimationFrame`, so waiting on it alone hangs until
+        // the test's own timeout and reports "target closed" instead of naming
+        // what held focus. Timers still fire. 250ms is well past the one queued
+        // frame this is waiting out.
+        setTimeout(once, 250);
+      }),
+  );
 }
 
 // ── Shared viewports / theme / shell helpers ────────────────────────────────
@@ -47,13 +137,35 @@ export type Theme = "light" | "dark";
 export const THEMES: readonly Theme[] = ["light", "dark"];
 
 /**
- * Sets df-theme in localStorage before the app's own scripts run, matching the
- * inline bootstrap in src/app/layout.tsx (`localStorage.getItem('df-theme') ===
- * 'dark'`) and the toggle in src/components/theme-toggle.tsx. addInitScript
- * re-runs on every subsequent navigation in this page, so it survives
- * page.goto() calls after this — but it must be called BEFORE the first goto.
+ * Pins a theme EXPLICITLY, and pins the OS against it.
+ *
+ * Two things, because #85 made one of them necessary:
+ *
+ *  1. `df-theme` in localStorage before the app's own scripts run, matching the
+ *     bootstrap in `src/app/layout.tsx` (now `@/lib/theme`'s
+ *     `THEME_BOOTSTRAP_SCRIPT`) and the controls in
+ *     `src/components/theme-toggle.tsx`. `addInitScript` re-runs on every
+ *     subsequent navigation in this page, so it survives later `page.goto()`
+ *     calls — but it must be called BEFORE the first goto.
+ *  2. ⚠️ `prefers-color-scheme` emulated to the OPPOSITE of the theme asked for.
+ *
+ * Point 2 is the important one and it is not belt-and-braces. `system` is now
+ * the DEFAULT preference, so "which theme is on screen" is only pinned by the
+ * explicit value in (1) continuing to outrank the OS. Leaving the OS setting
+ * unpinned would make every both-themes gate in this suite depend on Playwright's
+ * default `colorScheme` (`light`), and the day the override broke, the dark half
+ * of those gates would quietly become a SECOND LIGHT SCAN — reporting green on a
+ * page it never looked at, which is the failure this helper's sibling
+ * `expectThemeApplied` exists to catch and which no contrast assertion can see.
+ *
+ * Setting the OS to disagree instead means the override is load-bearing in every
+ * one of those tests: if it stops working, the page renders the wrong theme and
+ * `expectThemeApplied` fails by name. Nothing in the app reads
+ * `prefers-color-scheme` for anything but the theme, so there is no other
+ * behaviour to perturb.
  */
 export async function setTheme(page: Page, theme: Theme): Promise<void> {
+  await page.emulateMedia({ colorScheme: theme === "dark" ? "light" : "dark" });
   await page.addInitScript((value: Theme) => {
     try {
       localStorage.setItem("df-theme", value);
@@ -64,27 +176,64 @@ export async function setTheme(page: Page, theme: Theme): Promise<void> {
 }
 
 /**
+ * Emulate the OS colour scheme WITHOUT storing a preference, so the app is left
+ * on its `system` default (#85). The complement of `setTheme`: that one pins an
+ * explicit override, this one exercises the path a first visit actually takes.
+ */
+export async function setOsColorScheme(
+  page: Page,
+  scheme: "light" | "dark",
+): Promise<void> {
+  await page.emulateMedia({ colorScheme: scheme });
+}
+
+/**
  * Guard the precondition of any theme-scoped assertion: a silently-light "dark"
  * scan is worse than no scan, because it looks like it was checked.
+ *
+ * #85 — also asserts the PREFERENCE on `<html>`, when one is expected. The
+ * resolved class alone can no longer tell "explicitly light" from "system, on a
+ * light device", and for a gate that means an explicit-light scan and an
+ * accidental-light scan are indistinguishable from the class.
  */
 export async function expectThemeApplied(
   page: Page,
   theme: Theme,
+  expectedPreference?: "system" | Theme,
 ): Promise<void> {
+  const state = await page.evaluate(() => ({
+    dark: document.documentElement.classList.contains("dark"),
+    preference: document.documentElement.getAttribute("data-theme"),
+  }));
   expect(
-    await page.evaluate(() =>
-      document.documentElement.classList.contains("dark"),
-    ),
-    `expected the ${theme} theme to be applied (html.dark = ${theme === "dark"})`,
+    state.dark,
+    `expected the ${theme} theme to be applied (html.dark = ${theme === "dark"}; data-theme = ${state.preference})`,
   ).toBe(theme === "dark");
+  if (expectedPreference !== undefined) {
+    expect(
+      state.preference,
+      `expected html[data-theme] to be "${expectedPreference}"`,
+    ).toBe(expectedPreference);
+  }
 }
 
 /**
  * Wait for the always-present app shell (the brand link in the shared header)
  * so assertions and axe scans see a fully-rendered page, not a hydrating one.
+ *
+ * `timeout` is opt-in and omitted by every caller but one, so the Playwright
+ * default still applies everywhere it always did. #193 needs it: that spec
+ * CPU-throttles the page 20x and derives its own test timeout from the SUM of the
+ * bounded waits inside each iteration, and a wait whose bound is an inherited
+ * default is not a term you can add up.
  */
-export async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
+export async function waitForShell(
+  page: Page,
+  timeout?: number,
+): Promise<void> {
+  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible({
+    timeout,
+  });
 }
 
 // ── #101: every /settings section is a disclosure ───────────────────────────

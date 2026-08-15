@@ -4,9 +4,11 @@ import {
   waitForShell,
   setTheme,
   expectThemeApplied,
+  settledFocusLabel,
   THEMES,
   MOBILE,
   DESKTOP,
+  ROW_MENU_SCHEDULE,
 } from "../helpers";
 import {
   MARKER,
@@ -91,14 +93,23 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
 
   const row = multiStepRow(page);
   await expect(row).toBeVisible();
-  // Configured AND connected, so the end-cluster control is the Google one.
-  // `exact`: the marker is the task title, so "Drag <title>" / "Edit <title>"
-  // also contain it — only the 📅 control is named exactly "Schedule".
-  const trigger = row.getByRole("button", { name: "Schedule", exact: true });
+  // Configured AND connected, so the row's control is the Google one.
+  //
+  // #253 — reached from the ▾ list; the 📅 icon went with the trailing icon
+  // cluster, and the entry opens the same #106 dialog. `exact` because the marker
+  // is the task title, so "Drag <title>" / "Edit <title>" also contain it — and
+  // because this entry's renamed label CONTAINS the dialog's own "Schedule" submit
+  // button, so a loose match would resolve to two controls once it is open.
+  await row.getByRole("button", { name: "All options" }).click();
+  const trigger = row.getByRole("button", {
+    name: ROW_MENU_SCHEDULE,
+    exact: true,
+  });
   await trigger.click();
 
   // Portaled into the row, so a row-scoped query still finds it (#92's idiom).
-  const dialog = row.getByRole("dialog");
+  // #253 — named, because the ▾ list Base UI renders is a `dialog` as well.
+  const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
   await expect(dialog).toBeVisible();
   await expect(dialog).toHaveAccessibleName(`Schedule ${MARKER}`);
 
@@ -126,6 +137,17 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   await expect(dialog).toBeHidden();
   // Focus comes back to the control that opened it, not to the document.
   await expect(trigger).toBeFocused();
+  // …and it STAYS there, which `toBeFocused()` above cannot tell you: it is a
+  // retrying matcher, so it is satisfied by focus that touches the entry for one
+  // frame on its way somewhere else. #253 made that distinction matter — the ▾
+  // popover this entry lives in re-grabs focus onto its own container a frame
+  // after an inner popup closes, so both the "never arrived" and the "arrived and
+  // was taken away" shapes are live here. See `settledFocusLabel` and
+  // `restoreFocusToTrigger` (src/components/ui/anchored-popup.ts).
+  expect(
+    await settledFocusLabel(page),
+    "focus after the Schedule dialog closes",
+  ).toBe(ROW_MENU_SCHEDULE);
 });
 
 test("the menu remembers the choice, and the .ics path keeps its one click", async ({
@@ -144,17 +166,31 @@ test("the menu remembers the choice, and the .ics path keeps its one click", asy
   await page.goto("/");
   await waitForShell(page);
   const row = multiStepRow(page);
-  await row.getByRole("button", { name: "Schedule", exact: true }).click();
+  await row.getByRole("button", { name: "All options" }).click(); // #253
+  await row
+    .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
+    .click();
 
-  const dialog = row.getByRole("dialog");
+  // #253 — named, because the ▾ list Base UI renders is a `dialog` as well.
+  const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
   await expect(dialog.getByLabel("Priority")).toHaveValue("critical");
   await expect(dialog.getByRole("radio", { name: "Personal" })).toBeChecked();
   await expect(dialog.getByLabel("Done by")).toHaveValue("2026-12-24");
   await page.keyboard.press("Escape");
 
-  // The .ics alternative in the ▾ menu still downloads on one click — no dialog,
-  // no second step. A guest has nothing the menu could offer beyond a deadline.
-  await row.getByRole("button", { name: "All options" }).click();
+  // The .ics alternative in the ▾ menu still downloads on one press of the entry —
+  // no dialog, no second step. A guest has nothing the menu could offer beyond a
+  // deadline.
+  //
+  // No re-open: Escape dismisses the Schedule dialog and leaves the ▾ list
+  // standing — one Escape per layer. Asserted here directly rather than inferred
+  // from the sibling spec's focus check, which is what the note here used to do:
+  // it read that check as evidence the list was open while the check was in fact
+  // failing (the entry never kept focus — see `restoreFocusToTrigger`). Two
+  // claims about the same behaviour, one of them unverified, and the false one was
+  // the one being cited. Pressing the trigger again would have toggled the list
+  // shut.
+  await expect(row.getByRole("dialog", { name: "All options" })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await row.getByRole("button", { name: "Add to calendar (.ics)" }).click();
   const download = await downloadPromise;
@@ -167,8 +203,12 @@ test("the menu is usable on a 390px phone screen", async ({ page }) => {
   await waitForShell(page);
 
   const row = multiStepRow(page);
-  await row.getByRole("button", { name: "Schedule", exact: true }).click();
-  const dialog = row.getByRole("dialog");
+  await row.getByRole("button", { name: "All options" }).click(); // #253
+  await row
+    .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
+    .click();
+  // #253 — named, because the ▾ list Base UI renders is a `dialog` as well.
+  const dialog = row.getByRole("dialog", { name: `Schedule ${MARKER}` });
   await expect(dialog).toBeVisible();
 
   // #92's lesson: an anchored popup near the right edge used to lay out off
@@ -179,6 +219,10 @@ test("the menu is usable on a 390px phone screen", async ({ page }) => {
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(box.y).toBeGreaterThanOrEqual(0);
 
+  // The DIALOG's submit, which is still the bare "Schedule" — #253 renamed the ▾
+  // ENTRY that opens this dialog, not the primary action inside it, and aligning the
+  // rest of the app's Schedule labels is #259. Scoped to `dialog` so the two cannot
+  // be confused, and `exact` so this can never silently match the longer entry.
   const go = dialog.getByRole("button", { name: "Schedule", exact: true });
   await expect(go).toBeVisible();
   const goBox = (await go.boundingBox())!;
@@ -210,22 +254,21 @@ test.describe("schedule menu — screenshots", () => {
 
         const row = multiStepRow(page);
         await expect(row).toBeVisible();
+        await row.getByRole("button", { name: "All options" }).click(); // #253
         await row
-          .getByRole("button", { name: "Schedule", exact: true })
+          .getByRole("button", { name: ROW_MENU_SCHEDULE, exact: true })
           .click();
-        await expect(row.getByRole("dialog")).toBeVisible();
+        const dialog = row.getByRole("dialog", {
+          name: `Schedule ${MARKER}`,
+        }); // #253: named — the ▾ list is a dialog too
+        await expect(dialog).toBeVisible();
         await page.screenshot({ path: `${SHOTS}/${size}-${theme}-open.png` });
 
         // The warning mood, which is the other half of the surface: a deadline
         // already past cannot hold 2h15m of work, and the menu says so without
         // blocking.
-        await row
-          .getByRole("dialog")
-          .getByLabel("Done by")
-          .fill(passedDeadlineInputValue());
-        await expect(row.getByRole("dialog").getByRole("status")).toContainText(
-          /need/i,
-        );
+        await dialog.getByLabel("Done by").fill(passedDeadlineInputValue());
+        await expect(dialog.getByRole("status")).toContainText(/need/i);
         await page.screenshot({
           path: `${SHOTS}/${size}-${theme}-warning.png`,
         });

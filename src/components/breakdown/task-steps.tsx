@@ -13,9 +13,11 @@ import {
 } from "@/app/actions/focus";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
+import { rowMenuEntry } from "@/components/ui/anchored-popup";
+import { groupedRowMenu } from "@/components/ui/row-menu-separator";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
 import { StepNote } from "@/components/breakdown/task-note";
@@ -197,6 +199,10 @@ export function TaskSteps({
   // let the second row's hand-off overwrite the first's, leaving the row that had
   // been waiting longest with nothing. Refs, not state — the hand-off is a
   // one-shot DOM side effect and must not drive a render.
+  //
+  // #237 — and ARMED only when the press held focus, which is the question that
+  // has to be settled before "where does focus go": see the gate at the Retry's
+  // own `onClick`, and `justUndidRef`'s matching one in `uncomplete`.
   const retryHandoffRef = useRef<Set<string>>(new Set());
   const undoRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
@@ -252,7 +258,30 @@ export function TaskSteps({
         // the re-render that unmounts this button arrives. Added to the set rather
         // than assigned over it, so a second row undone while this one is still
         // waiting for its refresh cannot erase this row's hand-off.
-        justUndidRef.current.add(stepId);
+        //
+        // #237 — and only if this row's undo is the control the user is standing
+        // on, the same question the Retry's arm asks. Read HERE rather than at the
+        // press, for the reason `breakdown-chat.tsx` reads its own after the
+        // await: this control is destroyed by the refresh, not by the press, so
+        // whether it is still the one holding focus can only be answered at the
+        // last moment before the state change that takes it away.
+        //
+        // Of the two arms this is the WIDER window — it opens when the write
+        // resolves and closes only when `router.refresh()` comes back — so it does
+        // not need WebKit's never-focus-a-button behaviour to fire on the wrong
+        // element. A user who opened another row's inline editor while the undo was
+        // in flight is enough, on any engine, and waiting on a server round-trip is
+        // exactly when someone starts doing something else.
+        //
+        // The row's undo is the right thing to compare against for BOTH routes in:
+        // its own press lands on it directly, and a Retry press that was honoured
+        // has already been handed to it by the effect on `undoFailedIds`. A Retry
+        // press that was NOT honoured leaves focus where the user put it, so both
+        // arms decline together rather than the second undoing the first's
+        // restraint.
+        const pressed = undoRefs.current.get(stepId);
+        if (pressed && pressed === document.activeElement)
+          justUndidRef.current.add(stepId);
         router.refresh();
       } catch {
         // Deliberately not rethrown. The server action is atomic, so a rejection
@@ -420,12 +449,36 @@ export function TaskSteps({
                       armed below and consumed by the effect on `undoFailedIds`. */}
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
                       // Armed only when the press is actually honoured. Arming on
                       // a swallowed press would leave an id queued to steal focus
                       // at whatever unrelated render moved `undoFailedIds` next.
                       if (undoing) return;
-                      retryHandoffRef.current.add(s.id);
+                      // #237 — and only when the press came FROM this button.
+                      // 2.4.3 asks where focus goes when the focused control is
+                      // destroyed; it does not license taking focus off something
+                      // else, which is 3.2.2's harm instead. The note above calls
+                      // this "the likeliest thing holding focus" and that is true
+                      // — but likeliest is not always, and the gap is not a rare
+                      // one: WebKit does not focus a `<button>` on click (measured
+                      // against Chromium in the spec's own table), so on Safari
+                      // and everything on iOS a mouse or touch press NEVER holds
+                      // it. Assistive-technology activation is the second route,
+                      // on every engine.
+                      //
+                      // It matters in THIS file and not in `focus-timer.tsx`
+                      // because this notice renders per row, inside the same map
+                      // as the two `autoFocus` inline editors below — so the
+                      // user's caret can be in a sibling row's field, and the
+                      // unguarded arm moved it to another row's busy control.
+                      //
+                      // `currentTarget`, read synchronously: this is the button,
+                      // and the question is only whether the user is standing on
+                      // it. Same shape as `breakdown-chat.tsx`'s dismiss control
+                      // and `inbox-view.tsx`'s `retryCtaRef` comparison — the
+                      // pattern two of these four components already had.
+                      if (e.currentTarget === document.activeElement)
+                        retryHandoffRef.current.add(s.id);
                       uncomplete(s.id);
                     }}
                     aria-disabled={undoing}
@@ -451,6 +504,8 @@ export function TaskSteps({
           s.resumable ? "step.resumeFocus" : "step.startFocus",
           voice,
         );
+        // #253 — the ▾ twin of the CTA above. Restored: this list is the step's
+        // canonical action set, and the inline bar a shortcut subset of it.
         const focusMenuLabel = t(
           s.resumable ? "step.resumeFocusTimer" : "step.startFocusTimer",
           voice,
@@ -475,6 +530,19 @@ export function TaskSteps({
                 <span className="min-w-0 flex-1 break-words">
                   {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
                   {s.text}{" "}
+                  {/* #205 leg, folded in because #253 is what makes it
+                      load-bearing. This was a ~20px convenience while `Edit step
+                      title` sat in the ▾ at 44px; removing that entry as a mirror
+                      leaves the pencil as the SOLE route to renaming a step, at a
+                      fifth of the area of the entry it outlived. `anchored-popup.ts`
+                      draws the line as "entries whose sole-route status THIS change
+                      creates" — that is exactly this control, so this change sizes
+                      it rather than deferring one it just promoted.
+
+                      Both dimensions matter here, unlike a full-width ▾ entry: it is
+                      an emoji-only glyph, so width is the dimension it failed.
+                      44x44 is 2.5.5 (Enhanced), AAA — a house convention, not the
+                      AA 24x24 of 2.5.8. */}
                   <button
                     type="button"
                     aria-label={`Edit ${s.text}`}
@@ -482,7 +550,10 @@ export function TaskSteps({
                       setEditEstId(null);
                       setEditTitleId(s.id);
                     }}
-                    className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+                    className={cn(
+                      touchTarget,
+                      "text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs",
+                    )}
                   >
                     ✏️
                   </button>
@@ -545,53 +616,90 @@ export function TaskSteps({
                       />,
                       trigger,
                     ]}
-                    menu={[
-                      <Link
-                        key="focus-m"
-                        href={`/focus/${s.id}`}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {focusMenuLabel}
-                      </Link>,
-                      <button
-                        key="complete-m"
-                        type="button"
-                        onClick={() => complete(s.id)}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {t("step.complete", voice)}
-                      </button>,
-                      <button
-                        key="edit-est-m"
-                        type="button"
-                        onClick={() => {
-                          setEditTitleId(null);
-                          setEditEstId(s.id);
-                        }}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {t("step.editEstimate", voice)}
-                      </button>,
-                      <button
-                        key="edit-title-m"
-                        type="button"
-                        onClick={() => {
-                          setEditEstId(null);
-                          setEditTitleId(s.id);
-                        }}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {t("step.editTitle", voice)}
-                      </button>,
-                      <button
-                        key="review-m"
-                        type="button"
-                        onClick={() => sendToReview(s.id)}
-                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      >
-                        {t("step.sendToReview", voice)}
-                      </button>,
-                    ]}
+                    /* ── #253: the ▾ is this STEP's canonical action list ──────
+                       A mid-issue pass in this MR stripped the two entries that
+                       mirrored an inline button. Withdrawn — the owner's principle
+                       is that the ▾ holds everything a row can do and the inline bar
+                       is a shortcut subset, and a principle reversed on two of three
+                       surfaces is not one. Both twins are back: the focus-timer link
+                       (same `/focus/${s.id}` as the CTA) and `step.complete` (same
+                       `complete(s.id)` as the inline Complete). The list is behind a
+                       trigger, so its length costs the row no height, which is the
+                       only thing #253 is about.
+
+                       DERIVED from what a step can do, not copied from the inbox's
+                       eight — this row operates on a STEP, not an item:
+
+                       • `Send back to review` leads. It is this row's "where does
+                         this belong" question, the step-grain analogue of the inbox's
+                         `Move to…`: `ejectStepToInbox` moves the step out of the task
+                         and back into Needs review. Re-bucketing, not deletion — so
+                         it belongs in the leading slot, not the trailing one.
+                       • Nothing here is destructive. A step has no delete, so the
+                         tail slot goes to the lowest-stakes, least-frequent action
+                         instead: `Edit time estimate`, a property edit. That entry is
+                         the ONLY route to it — the estimate renders as a plain
+                         `<span>{s.estMinutes}m</span>`, not a control — which is why
+                         it stays while its Library counterpart does not.
+                       • No `Move to…`, `Schedule` or `Add to calendar`: a step has no
+                         bucket, and scheduling is a TASK-level act reached from
+                         `breakdown/task-schedule.tsx`.
+
+                       ⚠️ `Edit step title` is GONE, and it is a tenth instance of the
+                       mirror class this issue has been chasing — found here, not
+                       briefed. It fired `setEditEstId(null); setEditTitleId(s.id)`,
+                       character-for-character what the permanently-visible ✎ pencil
+                       on this row's title line fires. Same disposition as the inbox's
+                       `editMenuItem`, for the same reason and by the same test: the
+                       pencil's `aria-label={`Edit ${s.text}`}` names the step, which
+                       is strictly clearer than "Edit step title". The pencil itself is
+                       untouched.
+
+                       A DONE step never reaches here — that branch returns earlier
+                       with its own hand-rolled `step.uncomplete` row, the way the
+                       inbox's Done bucket hand-rolls its line. */
+                    menu={groupedRowMenu([
+                      [
+                        <button
+                          key="review-m"
+                          type="button"
+                          onClick={() => sendToReview(s.id)}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.sendToReview", voice)}
+                        </button>,
+                      ],
+                      [
+                        <Link
+                          key="focus-m"
+                          href={`/focus/${s.id}`}
+                          className={rowMenuEntry()}
+                        >
+                          {focusMenuLabel}
+                        </Link>,
+                        <button
+                          key="complete-m"
+                          type="button"
+                          onClick={() => complete(s.id)}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.complete", voice)}
+                        </button>,
+                      ],
+                      [
+                        <button
+                          key="edit-est-m"
+                          type="button"
+                          onClick={() => {
+                            setEditTitleId(null);
+                            setEditEstId(s.id);
+                          }}
+                          className={rowMenuEntry()}
+                        >
+                          {t("step.editEstimate", voice)}
+                        </button>,
+                      ],
+                    ])}
                   />
                   {body}
                 </>

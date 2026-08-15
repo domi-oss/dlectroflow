@@ -60,11 +60,20 @@ test("the delete-account dialog is usable and axe-clean at 390px", async ({
     expect(box!.height).toBeGreaterThanOrEqual(44);
   }
 
-  // Scoped to the dialog: the rest of /settings is scanned by the owner-session
-  // specs in this project, and an open modal makes everything behind it inert
-  // anyway. `WCAG_TAGS` rather than a fourth copy of the tag list — this file
-  // used to restate it, and a gate whose scope is stated in several places
-  // drifts in one of them.
+  // Scoped to the dialog, because an open modal makes everything behind it
+  // inert. `WCAG_TAGS` rather than a fourth copy of the tag list — this file used
+  // to restate it, and a gate whose scope is stated in several places drifts in
+  // one of them.
+  //
+  // ⚠️ This comment used to add "the rest of /settings is scanned by the
+  // owner-session specs in this project", and that was false in two ways
+  // (corrected while measuring #263). Those specs reach `/settings` through
+  // `scanColorContrast`, which calls `.withRules(["color-contrast"])` and so
+  // evaluates ONE rule rather than `WCAG_TAGS` — and they drive the OWNER's
+  // `/settings` on the other server, not the member's. So the page behind this
+  // dialog has no `WCAG_TAGS` scan anywhere in the suite; `.include()` here is
+  // the only reason that is acceptable, and it is a deliberate narrowing rather
+  // than a hand-off to coverage that exists.
   const results = await new AxeBuilder({ page })
     .include('[role="alertdialog"]')
     .withTags(WCAG_TAGS)

@@ -1675,3 +1675,84 @@ describe("BreakdownChat — ejecting mid-confirm and mid-re-plan (!304 review)",
     );
   });
 });
+
+/**
+ * #205 / WCAG 2.5.8 — the step row's two action controls were **below the AA
+ * floor**, and this is a different severity class from the rest of #205's sweep.
+ *
+ * That issue's body states its shortfalls are voluntary: 44x44 is **2.5.5 Target
+ * Size (Enhanced), AAA**, while **2.5.8 (Minimum) is AA at 24x24**, "which these
+ * controls already meet". These two did not, so that sentence was wrong about this
+ * surface. A sibling MR turned on axe's `target-size` rule — the only WCAG 2.2 AA
+ * rule axe-core 4.12.1 ships — and it measured:
+ *
+ *   "Back to inbox"      86.3 x 22px   (`px-1.5 py-0.5 text-xs`)
+ *   "Remove this step" ✕ 86.3 x 16px   (`px-1 text-xs`, no vertical padding)
+ *
+ * Both fail on size AND on the 24px spacing exception, so neither could be excused
+ * by the other. **This is a real AA conformance failure, not a house-convention
+ * shortfall.**
+ *
+ * Reachability is ordinary: press "Break into steps", land in the editor, and every
+ * step row offers a 16px-tall ✕ that deletes that step. On a phone a mis-tap costs a
+ * step — and the ✕ sits beside a control that sends the row somewhere else, so the
+ * two failures compound.
+ *
+ * Fixed with the repo's shared `touchTarget` (44x44) rather than the 24px minimum,
+ * because that is the convention every other control in this MR was brought to, and
+ * clearing AA by a margin costs nothing here. `justify-start` is appended AFTER it on
+ * the LABELLED control — `touchTarget` carries `justify-center` and `cn` is
+ * `twMerge`, so order decides, and a left-aligned label must stay left-aligned. The
+ * ✕ is a centred glyph and takes a bare `touchTarget`.
+ */
+describe("BreakdownChat — the step row's controls clear WCAG 2.5.8 (AA)", () => {
+  const expect44 = (el: HTMLElement, what: string) => {
+    expect(el.className, `${what} is under 44px tall`).toContain("min-h-11");
+    expect(el.className, `${what} is under 44px wide`).toContain("min-w-11");
+  };
+
+  it("'Back to inbox' carries the shared touch target, label still left-aligned", () => {
+    renderChat();
+    const back = ejectButton(0);
+    expect44(back, '"Back to inbox"');
+    // `justify-start` must come AFTER `touchTarget` for twMerge to keep it; if the
+    // order were reversed this would read `justify-center` and the label would
+    // centre inside a 44px box.
+    expect(back.className, "the label lost its left alignment").toContain(
+      "justify-start",
+    );
+    expect(back.className).not.toContain("justify-center");
+  });
+
+  it("the ✕ remove control carries it too, centred as a glyph", () => {
+    renderChat();
+    const remove = screen.getAllByTitle("Remove this step")[0];
+    expect44(remove, "the ✕ remove control");
+    // Opposite of the above: a bare glyph SHOULD stay centred in its 44px box.
+    expect(remove.className).toContain("justify-center");
+    expect(remove.className).not.toContain("justify-start");
+  });
+
+  it("every step row gets both, not just the first", () => {
+    renderChat();
+    const backs = screen.getAllByTitle(
+      "Send back to the inbox as its own item to re-break-down",
+    );
+    const removes = screen.getAllByTitle("Remove this step");
+    // Guard the guard: measuring only index 0 would pass on a fixture of one, and
+    // the defect is per-row.
+    expect(backs.length).toBeGreaterThan(1);
+    expect(removes).toHaveLength(backs.length);
+    for (const el of [...backs, ...removes]) expect44(el, el.title);
+  });
+
+  it("sizing did not cost the eject control's held/busy semantics", () => {
+    renderChat();
+    const back = ejectButton(0);
+    // These ride the same element the class change touched, and #212 exists because
+    // they were got wrong once already.
+    expect(back).toHaveAttribute("aria-label", "Back to inbox");
+    expect(back).toHaveAttribute("aria-busy", "false");
+    expect(back).not.toBeDisabled();
+  });
+});

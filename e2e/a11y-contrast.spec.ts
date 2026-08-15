@@ -2,11 +2,14 @@ import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import {
   captureItem,
+  expectThemeApplied,
   needsReviewRow,
   setTheme,
   waitForShell,
   expandAllSections,
   THEMES,
+  ROW_MENU_ADD_TODO,
+  type Theme,
 } from "./helpers";
 import {
   scanColorContrast,
@@ -154,6 +157,40 @@ async function cleanupSeed(
   await prisma.$disconnect();
 }
 
+/**
+ * Open a route and PROVE the theme took, before anything is measured.
+ *
+ * ⚠️ #85 turned this from tidiness into the thing this gate depends on. The theme
+ * default is now `system`, which reads `prefers-color-scheme`, so "this page is
+ * dark" is no longer implied by having written `df-theme` — it holds because the
+ * explicit value outranks the OS. If that ever stopped being true, every test
+ * below would still pass: axe would scan a light page, find no contrast
+ * violation, and the dark half of a zero-tolerance both-themes gate would have
+ * become a second light scan reporting green. No contrast assertion can detect
+ * that, because there is nothing wrong with the page it actually scanned.
+ *
+ * `setTheme` emulates the OS to the OPPOSITE scheme for the same reason, so the
+ * override is load-bearing in every case here rather than agreeing with the
+ * runner's default by luck. The pair is the control: OS disagreeing, and the
+ * resolved theme asserted by name.
+ */
+async function openThemed(
+  page: import("@playwright/test").Page,
+  path: string,
+  theme: Theme,
+): Promise<void> {
+  await page.goto(path);
+  await waitForShell(page);
+  await expectThemeApplied(page, theme, theme);
+}
+
+// Two variants, not three: `system` is deliberately NOT a third pass. Under
+// `system` on a dark device the app resolves to the identical DOM as an explicit
+// dark choice — the same `.dark` class on the same `<html>` — so a third variant
+// would triple this gate's runtime to re-measure pixels it has already measured.
+// What `system` needs proving about is that it RESOLVES at all, and on the first
+// paint; that is a different question and it is asked in
+// e2e/smoke/os-dark-mode.spec.ts.
 for (const theme of THEMES) {
   test.describe(`accessibility: color-contrast (axe) — ${theme} mode`, () => {
     test.beforeEach(async ({ page }) => {
@@ -173,8 +210,7 @@ for (const theme of THEMES) {
       test(`zero color-contrast violations: ${route.name} (${route.path})`, async ({
         page,
       }) => {
-        await page.goto(route.path);
-        await waitForShell(page);
+        await openThemed(page, route.path, theme);
         expectNoContrastViolations(await scanColorContrast(page));
       });
     }
@@ -187,8 +223,7 @@ for (const theme of THEMES) {
     test(`zero color-contrast violations: settings with every section expanded (${theme})`, async ({
       page,
     }) => {
-      await page.goto("/settings");
-      await waitForShell(page);
+      await openThemed(page, "/settings", theme);
       await expandAllSections(page);
       expectNoContrastViolations(await scanColorContrast(page));
     });
@@ -206,8 +241,7 @@ for (const theme of THEMES) {
       // /help, not the inbox: the header is byte-identical everywhere and /help
       // holds still (no live clock re-render, #105), so the popup cannot be
       // scanned mid-remount.
-      await page.goto("/help");
-      await waitForShell(page);
+      await openThemed(page, "/help", theme);
       await page
         .locator("header")
         .getByRole("button", { name: /^Account: / })
@@ -231,8 +265,7 @@ for (const theme of THEMES) {
       try {
         // Default hub tab is "Single-task" (plated) — now holding the 12 seeded
         // items, so its active count chip renders "12" (2 digits).
-        await page.goto("/library");
-        await waitForShell(page);
+        await openThemed(page, "/library", theme);
         const activePill = page.locator(
           'nav[aria-label="Library tabs"] a[aria-current="page"] span.rounded-full',
         );
@@ -258,8 +291,7 @@ for (const theme of THEMES) {
       const marker = `${SAVED_MARKER}-${theme}`;
       const prisma = await seedSavedLaterItem(marker);
       try {
-        await page.goto("/");
-        await waitForShell(page);
+        await openThemed(page, "/", theme);
         const savedRow = page
           .locator('[data-bucket="savedLater"]')
           .getByRole("listitem")
@@ -290,8 +322,7 @@ for (const theme of THEMES) {
       try {
         // Default hub tab is "Single-task" (plated), which is where a triaged,
         // task-less item lands and the only tab that renders AgeLabel per row.
-        await page.goto("/library");
-        await waitForShell(page);
+        await openThemed(page, "/library", theme);
         const row = page.getByRole("listitem").filter({ hasText: marker });
         await expect(row).toBeVisible();
         // Guard the repro precondition: the label must be in its AMBER state, or
@@ -316,13 +347,14 @@ for (const theme of THEMES) {
       page,
     }) => {
       const label = `A11y contrast focus-run ${theme} ${Date.now()}`;
-      await page.goto("/");
-      await waitForShell(page);
+      await openThemed(page, "/", theme);
       await captureItem(page, label);
 
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
-      await row.getByRole("button", { name: "Add to-do" }).click();
+      // #253 — Add to-do moved off the row into its ▾ list, under the full label.
+      await row.getByRole("button", { name: "All options" }).click();
+      await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
 
       const todoRow = page
         .locator('[data-bucket="singleTask"]')
@@ -363,9 +395,8 @@ for (const theme of THEMES) {
     // foreground, src/components/inbox/inbox-view.tsx) only renders once an
     // item sits in the Multi-step bucket with 0 steps ("awaitingBreakdown" —
     // see inbox-view.tsx's `awaitingBreakdown = item.stepsTotal === 0`).
-    // Drive the real UI path (capture → All options → Move to… → Multi-step
-    // to-dos) instead of seeding DB state, so this scan exercises the exact
-    // rendered DOM the dark-mode AA fix targets — in dark mode, white text on
+    // Drive the real UI path instead of seeding DB state, so this scan exercises the
+    // exact rendered DOM the dark-mode AA fix targets — in dark mode, white text on
     // --destructive was 3.52:1 (fails AA-normal 4.5:1); the fix swaps in the
     // --destructive-foreground token (near-black in dark, white in light).
     // We deliberately do NOT click the CTA itself — that starts the AI
@@ -375,15 +406,30 @@ for (const theme of THEMES) {
       page,
     }) => {
       const label = `A11y contrast destructive-cta ${theme} ${Date.now()}`;
-      await page.goto("/");
-      await waitForShell(page);
+      await openThemed(page, "/", theme);
       await captureItem(page, label);
 
+      // ⚠️ #253 — two hops rather than one, and the reason is a real behavioural
+      // difference rather than a longer path for its own sake. The nested "Move to…"
+      // picker is gone, so `requestBreakdown` — the write that PARKS a row in
+      // Multi-step with this CTA instead of navigating into the editor — is reached
+      // from a SINGLE-TASK row's ▾. On a Needs-review row the same label runs
+      // `startBreakdown`, which opens the editor and would never render the CTA at
+      // all. So: capture → Add as single-task to-do → Add as multi-step to-do.
       const row = needsReviewRow(page, label);
       await expect(row).toBeVisible();
       await row.getByRole("button", { name: "All options" }).click();
-      await row.getByRole("button", { name: "Move to…" }).click();
-      await row.getByRole("menuitem", { name: /Multi-step/ }).click();
+      await row.getByRole("button", { name: ROW_MENU_ADD_TODO }).click();
+
+      const singleTaskRow = page
+        .locator('[data-bucket="singleTask"]')
+        .getByRole("listitem")
+        .filter({ hasText: label });
+      await expect(singleTaskRow).toBeVisible();
+      await singleTaskRow.getByRole("button", { name: "All options" }).click();
+      await singleTaskRow
+        .getByRole("button", { name: "Add as multi-step to-do" })
+        .click();
 
       const multiStepRow = page
         .locator('[data-bucket="multiStep"]')

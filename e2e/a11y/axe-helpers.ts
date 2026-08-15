@@ -3,11 +3,100 @@ import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-// WCAG 2.0 + 2.1, levels A and AA — the standard *mechanical* ruleset that
+// WCAG 2.0 + 2.1 + 2.2, levels A and AA — the standard *mechanical* ruleset that
 // catches contrast, missing labels, wrong/absent roles and name/role/value
 // issues (issue #31). Axe's "best-practice" rules are intentionally excluded:
 // they are not WCAG-normative and would add noise to a blocking gate.
-export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+//
+// ── #263: the 2.2 pair is the fix, not decoration ────────────────────────────
+//
+// This list was `["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]` for the life of
+// the suite. axe turns it into `runOnly: { type: "tag" }` and runs a rule only if
+// one of the rule's tags is in the list, so no WCAG 2.2 success criterion had
+// ever been evaluated — seven specs reporting green on criteria nothing looked
+// at, which is the failure shape the `document-title` paragraph below and
+// `e2e-project-split.test.ts` are both about.
+//
+// What the pair actually buys, measured in a real browser against axe-core
+// 4.12.1 (pinned by `@axe-core/playwright@4.12.1`): 62 rules evaluated before,
+// 63 after, delta exactly `["target-size"]`, nothing dropped. That rule is
+// **WCAG 2.5.8 Target Size (Minimum), Level AA**, whose normative figure is 24 by
+// 24 CSS pixels, and its checks report at impact `serious` — so it clears
+// BLOCKING_IMPACTS and can genuinely fail the gate.
+//
+// Three things this does NOT do, stated because a change about criterion
+// coverage that overclaims its coverage is the original bug one level up:
+//
+//   * It does not deliver **2.4.11 Focus Not Obscured (Minimum), Level AA** —
+//     axe-core has no rule for it at any tag, and a keyboard walk is still
+//     outstanding on #263. Nothing in this repo detects real 2.4.11 today.
+//     ⚠️ `a11y-class-hygiene` is NOT 2.4.11 coverage, whatever a comment
+//     elsewhere may still say — its Rule D catches a focus indicator that is
+//     merely a colour swap, i.e. **2.4.13 Focus Appearance (AAA)** and **1.4.11
+//     Non-text Contrast (AA, WCAG 2.1)**. It carried 2.4.11's NUMBER with
+//     2.4.13's TITLE; #258 / !340 is the correction, and any surviving comment
+//     that reads otherwise predates it. Real 2.4.11 is a focused control coming
+//     to rest UNDER a sticky bar — geometry, which no class-string check can
+//     reach at all.
+//   * It does not improve **1.4.11 Non-text Contrast**, which is Level AA and
+//     WCAG *2.1* — already covered by `wcag21aa` — and which axe cannot measure
+//     reliably for a focus indicator against adjacent colours.
+//   * It does not reach the 44px the house style asks of interactive controls.
+//     44px is **2.5.5 Target Size (Enhanced)**, Level **AAA**; axe's rule is the
+//     AA floor of 24px, so a 30px control passes here. That bar is enforced by
+//     COLOCATED COMPONENT UNIT TESTS asserting `min-h-[44px]`/`min-h-11` class
+//     strings (`theme-toggle.test.tsx`, `sub-header.test.tsx`,
+//     `inbox-view.test.tsx` …) — there is no repo-wide touch-target gate, which
+//     is exactly why two 20px controls in `breakdown-chat.tsx` reached `main`
+//     unseen (#205's family). So the two checks are complementary rather than
+//     redundant: theirs is stricter but only exists where someone wrote one,
+//     while this one measures RENDERED geometry and so cannot be fooled by a
+//     class that does not apply.
+// ── Widening the tag list only helps where a scan actually runs ──────────────
+//
+// An earlier draft of the paragraph above called this gate "repo-wide". It was
+// not, and the correction is worth keeping, because an overclaim about coverage
+// is #263's own defect rather than a wording slip. This gate reaches exactly the
+// surfaces some spec hands to `scanA11y` — and when #263 was measured, two
+// routes were not among them:
+//
+//   * **owner `/settings`** was visited four times over and never WCAG-scanned.
+//     `e2e/a11y-contrast.spec.ts` and `e2e/a11y/axe-people-panel.spec.ts` reach
+//     it through `scanColorContrast`, which is `.withRules(["color-contrast"])`
+//     and evaluates ONE rule rather than `WCAG_TAGS`;
+//     `e2e/a11y/axe-shopping.spec.ts` only goes there to flip a toggle;
+//     `e2e/a11y/axe-account-deletion.spec.ts` does use `WCAG_TAGS` but
+//     `.include()`s the delete dialog alone. It is the app's largest page — nine
+//     disclosures, 70 interactive targets expanded — and precisely where #205's
+//     family of undersized controls would recur.
+//   * **`/login`** had no accessibility scan of ANY kind, contrast included. It
+//     is the sign-in page, and every other spec carries the forged owner session
+//     that `src/proxy.ts` redirects AWAY from it.
+//
+// Both are now scanned — `e2e/a11y/axe-settings.spec.ts` and
+// `e2e/a11y/axe-login.spec.ts` — and both were clean when added (63 rules
+// evaluated, `target-size` in `passes`), so that is additive coverage rather
+// than a fix. The general point survives the two specific holes being filled:
+// this gate is only as wide as its call sites, so a NEW route is unscanned until
+// someone adds one, and no widening of this list changes that.
+//
+// `wcag22a` matches zero axe rules today: the only Level A criteria new in 2.2
+// are 3.2.6 Consistent Help and 3.3.7 Redundant Entry, and axe implements
+// neither. It is here so a future axe-core release that adds one is picked up
+// without a code change.
+//
+// `e2e/a11y/axe-wcag22-coverage.spec.ts` is the proof and the regression guard:
+// it fails if either tag is removed, and — because `target-size` ships
+// `enabled: false` in axe-core and is switched on purely by being named in
+// `runOnly` — it also fails if an axe-core upgrade stops honouring that.
+export const WCAG_TAGS = [
+  "wcag2a",
+  "wcag2aa",
+  "wcag21a",
+  "wcag21aa",
+  "wcag22a",
+  "wcag22aa",
+];
 
 // Only serious/critical block the gate. moderate/minor still appear in the axe
 // output for awareness but never fail CI — the conventional axe blocking
@@ -18,12 +107,42 @@ const BLOCKING_IMPACTS = new Set(["serious", "critical"]);
 // stable route key (NOT the live URL — dynamic ids are normalised away). The
 // gate fails only on fingerprints that are NOT in this file, so it starts green
 // and then catches regressions per-MR.
-const BASELINE_PATH = path.join(process.cwd(), "e2e/a11y/axe-baseline.json");
+//
+// Exported for `axe-wcag22-coverage.spec.ts`, whose `records no synthetic
+// fixture` test reads this file to prove no fixture key was ever baselined.
+// That spec carried its own copy of this path until review on !341, and a second
+// literal is the wrong shape for a guard: the day this one moves or becomes
+// configurable, the copy keeps resolving, the guard reads a file nobody writes,
+// and it passes vacuously. That is the #263 defect one level up — a green result
+// that means nothing was looked at — so there is one definition and the guard
+// cannot drift away from the thing it guards.
+export const BASELINE_PATH = path.join(
+  process.cwd(),
+  "e2e/a11y/axe-baseline.json",
+);
 
 // Refresh mode: `A11Y_UPDATE_BASELINE=1 npx playwright test e2e/a11y` rewrites
 // the baseline from the current run instead of asserting against it. Used to
 // seed the file and to intentionally accept a reviewed pre-existing violation.
-const UPDATE_BASELINE = process.env.A11Y_UPDATE_BASELINE === "1";
+//
+// Exported for the two `test.skip` guards in `axe-wcag22-coverage.spec.ts`,
+// which keep a synthetic fixture from being written into the committed baseline
+// (a fixture baselined by accident makes that file's positive control pass
+// vacuously ever after). They read the raw env var themselves until review on
+// !341, and sharing the flag is a correctness fix rather than a tidy-up: what
+// those guards need to predict is whether `scanA11y` will take its WRITING
+// branch, and that branch is decided by THIS value. A guard that re-derives the
+// predicate from a second source is asserting about a value the writer does not
+// consult, so the two can only ever agree by coincidence.
+//
+// Evaluated once at module load rather than per call, which is safe here and
+// checked rather than assumed: nothing in the repo assigns to
+// `process.env.A11Y_UPDATE_BASELINE` (only `README.md` and this file's own
+// message text mention it), so it is fixed by the shell before the process
+// starts and cannot change between import and assertion. If that ever stops
+// being true this must become a function — a stale `false` would silently
+// un-skip both guards, which is the failure direction that matters.
+export const UPDATE_BASELINE = process.env.A11Y_UPDATE_BASELINE === "1";
 
 // Types are derived straight from AxeBuilder.analyze() so we don't depend on the
 // exact shape of axe-core's exported types.
@@ -85,8 +204,22 @@ function report(violations: Violation[], allowed: Set<string>): string {
     for (const node of v.nodes) {
       const fp = nodeFingerprint(v.id, node);
       if (allowed.has(fp)) continue;
+      // `failureSummary` as well as `help`, added with the WCAG 2.2 widening
+      // (#263). `help` is the rule's generic sentence — for `target-size` it
+      // reads "All touch targets must be 24px large, or leave sufficient
+      // space", which names neither the measured size nor which half of the
+      // rule failed, so a red CI job said what the rule wants and not what the
+      // page did. axe puts both in `failureSummary` ("Target has insufficient
+      // size (20px by 20px…)"), and the contrast reporter below has always
+      // printed it — this side simply did not, which only became expensive once
+      // a geometry rule started firing. Indented to stay inside the node block.
+      const summary = (node.failureSummary ?? "")
+        .split("\n")
+        .map((line) => `      ${line}`)
+        .join("\n");
       lines.push(
-        `  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}`,
+        `  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}` +
+          (summary.trim() ? `\n${summary}` : ""),
       );
     }
   }

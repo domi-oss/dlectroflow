@@ -14,9 +14,23 @@ describe("CompleteButton", () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it('renders the "✓ complete" leading-checkmark label (matches the focus-lane affordance)', () => {
+  // #253 — the label is a bare word, with NO leading glyph. Asserted as an exact
+  // accessible name rather than `toHaveTextContent`, which is a substring match
+  // and would pass on "✓ Complete" too — the very string this is guarding
+  // against. This button is on every row of every list, so the glyph's width was
+  // charged to all of them.
+  it("renders the bare-word label — no leading checkmark", () => {
     render(<CompleteButton voice="plain" onClick={vi.fn()} />);
-    expect(screen.getByRole("button")).toHaveTextContent("✓ Complete");
+    expect(screen.getByRole("button")).toHaveAccessibleName("Complete");
+    expect(screen.getByRole("button").textContent).not.toContain("✓");
+  });
+
+  // Both voices, because `action.complete` is deliberately identical across them
+  // (strings.ts) and a playful-only glyph creeping back would be invisible to
+  // the plain-voice test above.
+  it("carries no glyph in the playful voice either", () => {
+    render(<CompleteButton voice="playful" onClick={vi.fn()} />);
+    expect(screen.getByRole("button")).toHaveAccessibleName("Complete");
   });
 
   it("a11y: has a ≥44px touch target (min-h-11 / min-w-11)", () => {

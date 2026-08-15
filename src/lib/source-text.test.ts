@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { stripComments, stripShellComments } from "./source-text";
+import {
+  stripComments,
+  stripShellComments,
+  stripYamlComment,
+} from "./source-text";
 
 // These three moved here verbatim from manifest-hygiene.test.ts when #150 gave
 // `stripComments` a second caller and its own module. The rest were added at
@@ -156,5 +160,73 @@ describe("stripShellComments", () => {
     expect(stripShellComments('echo "oops\nDAYS=30 # kept')).toBe(
       'echo "oops\nDAYS=30 # kept',
     );
+  });
+});
+
+// Arrived here in #226, unchanged, when `ci-job-deps` became the second reader of
+// `.gitlab-ci.yml` needing it — the trigger this module's own doc names for a
+// move. It was previously private to `ci-schedule-guards`, exercised only through
+// `guardedFlags`; those tests still stand and pin that the move changed nothing,
+// while these say what the function itself promises.
+describe("stripYamlComment", () => {
+  it("drops a trailing comment and keeps the value before it", () => {
+    expect(stripYamlComment("    action: stop # and why")).toBe(
+      "    action: stop ",
+    );
+  });
+
+  it("drops a whole-line comment, indented or at column 0", () => {
+    expect(stripYamlComment("# a header")).toBe("");
+    expect(stripYamlComment("  # an indented note")).toBe("  ");
+  });
+
+  it("keeps a `#` that does not begin a word", () => {
+    // YAML's rule, and narrower than shell's: `a#b` is the scalar `a#b`. A
+    // branch name or an anchor carrying a `#` must survive intact.
+    expect(stripYamlComment("ref: release#1")).toBe("ref: release#1");
+  });
+
+  it("keeps a `#` inside single quotes", () => {
+    const line = "    - if: '$CI_COMMIT_TITLE =~ / #191/'";
+    expect(stripYamlComment(line)).toBe(line);
+  });
+
+  it("keeps a `#` inside double quotes", () => {
+    const line = '    - job: "build#1"';
+    expect(stripYamlComment(line)).toBe(line);
+  });
+
+  it("leaves a comment-free line untouched", () => {
+    expect(stripYamlComment("  needs: []")).toBe("  needs: []");
+  });
+
+  it("returns an empty string for empty input", () => {
+    expect(stripYamlComment("")).toBe("");
+  });
+
+  // ── Why this is not `stripShellComments` ──────────────────────────────────
+  // #226 asked whether one `#` stripper could serve both callers. These two
+  // measure the answer rather than leaving it as an argument in a docblock: each
+  // function is wrong in the other's language, so collapsing them would reopen a
+  // shipped fix in one direction or the other.
+  it("does not borrow shell's operator word-starts, which truncate a YAML scalar", () => {
+    // `;` is in shell's measured word-start set (!261) and correctly so. In YAML
+    // it is an ordinary scalar character, so shell's rule loses everything after
+    // it — a value read as half of itself, silently.
+    expect(stripYamlComment("ref: a;#b")).toBe("ref: a;#b");
+    expect(stripShellComments("ref: a;#b")).toBe("ref: a;");
+  });
+
+  it("does not borrow shell's whole-input quote tracking, which would spread #226 file-wide", () => {
+    // A YAML plain scalar may contain an apostrophe, and `.gitlab-ci.yml` is a
+    // long file. Tracking quotes across the whole input leaves that apostrophe
+    // open forever, so every comment BELOW it stops being stripped — which is
+    // precisely #226's defect, no longer confined to one line. Per-line, the same
+    // apostrophe costs only its own line.
+    const yml = "name: Domi's review app\n    action: stop # kept";
+    expect(yml.split("\n").map(stripYamlComment).join("\n")).toBe(
+      "name: Domi's review app\n    action: stop ",
+    );
+    expect(stripShellComments(yml)).toBe(yml);
   });
 });
