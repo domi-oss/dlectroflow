@@ -19,23 +19,37 @@
  * ── The mechanism, measured HERE rather than inherited ──────────────────────
  * Two adjacent commits on !347 make this observable directly, same branch, same
  * ruleset, same analyzer (GitLab Semgrep analyzer v6.19.1). Before the escapes,
- * the `semgrep-sast` job log carried exactly two of these:
+ * the `semgrep-sast` job log named 19 files it could not parse. Two of them:
  *
  *   [WARN] tool notification warning: Syntax error at line
  *     src/lib/breakdown-context.test.ts:317:
  *   [WARN] tool notification warning: Syntax error at line
  *     src/lib/breakdown.test.ts:292:
  *
- * — the two lines holding the raw bytes. After the escapes, neither file appears
- * in the log at all.
+ * — the two holding the raw bytes. After the escapes the log names 17, and the
+ * set difference is exactly those two files, with nothing added and nothing else
+ * removed. That is what makes it a measurement rather than a coincidence.
+ *
+ * ⚠️ An earlier version of this comment said the log carried "exactly two of
+ * these". It carried 19, and the other 17 are still there on every pipeline.
+ * They are all test files and they fail to parse for a DIFFERENT reason — no
+ * tracked file holds a control byte any more, which the sweep below proves over
+ * the whole tree — so they are outside #224 and this guard neither catches nor
+ * should catch them. The count is recorded because it is the point: reading two
+ * lines of that log and stopping is how a blind spot survives a second time,
+ * and #224's own conclusion that this warning beats `file -b` as a detector
+ * only holds for someone who reads all of it.
  *
  * Two refinements to the mechanism as #224 describes it, both worth having:
  *
  *   1. The analyzer does NOT drop the file from its target list. `Scanning 796
  *      files`, `ts … 655`, `Targets scanned: 678` and `Findings: 37` were
- *      IDENTICAL across the two commits. So the file is counted as scanned while
- *      its contents are not parsed, which is the worst possible combination for
- *      anyone auditing coverage from the summary.
+ *      IDENTICAL across the two commits — and identical again on the head
+ *      commit, with 19 unparsed files on one side of the change and 17 on the
+ *      other. So the file is counted as scanned while its contents are not
+ *      parsed, which is the worst possible combination for anyone auditing
+ *      coverage from the summary: a summary that cannot move when two files
+ *      start being parsed cannot show the remaining 17 either.
  *   2. Because of that, a FINDING COUNT is the wrong evidence surface — #224's
  *      own scope line says "an unchanged 0 proves nothing", and here it stayed 0
  *      on both sides. The per-file `Syntax error` warning is the signal, and it
