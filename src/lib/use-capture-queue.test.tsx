@@ -407,6 +407,48 @@ describe("useCaptureQueue — the storage-event re-enqueue (#175)", () => {
     expect(before).toHaveLength(1);
   });
 
+  /**
+   * The sibling direction of the known two-tab defect, which `#267 — A capture you
+   * discarded in one tab comes back and saves itself from another` leaves as an
+   * open question on its own checklist: *"does a capture added in one tab reach the
+   * other correctly?"*
+   *
+   * Answered here rather than left open, because it is a test and no fix: a foreign
+   * ADD must make this tab re-read and must not touch `awaiting`. Both failures are
+   * real — a tab that re-enqueued on any event would be the `#267` defect, and one
+   * that ignored the event would leave two tabs disagreeing about whether
+   * somebody's words are saved, which is the thing the shared store exists to stop.
+   */
+  it("shows a capture ANOTHER tab added, and leaves its own alone", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<Host />);
+    await userEvent.click(screen.getByRole("button", { name: "add" }));
+    const ours = readQueue(window.localStorage)[0]!.clientKey;
+
+    await act(async () => {
+      // An APPEND, not a clobber: our entry is still present, so the re-enqueue
+      // has nothing to recover and the only correct reaction is to re-read.
+      seed([
+        ...readQueue(window.localStorage),
+        capture({ clientKey: "from-the-other-tab", text: "theirs" }),
+      ]);
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: CAPTURE_QUEUE_STORAGE_KEY }),
+      );
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mine")).toHaveTextContent("2"),
+    );
+    // Order preserved and nothing duplicated — a re-enqueue firing here would
+    // append `ours` a second time.
+    expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+      ours,
+      "from-the-other-tab",
+    ]);
+  });
+
   it("does not resurrect a capture another tab successfully flushed", async () => {
     // The other direction, and the one that makes this a delta rather than a
     // union: re-adding a key whose flush is outstanding would put back something
@@ -644,6 +686,41 @@ describe("useCaptureQueue — a pass acts on live state, not its snapshot (#175)
     await waitFor(() => expect(readQueue(window.localStorage)).toEqual([]));
     expect(postedKeys()).not.toContain("b");
     expect(postedKeys()).toEqual(["a"]);
+  });
+
+  /**
+   * The api's own promise is *"Safe to call concurrently; overlapping passes
+   * coalesce."* Overlap is ordinary rather than contrived: three of the four
+   * triggers are the hook's own, and `visibilitychange` plus `online` can both
+   * arrive inside one 10s round-trip.
+   *
+   * `inFlightKeys` is what stops a double POST, and its check-and-add is one
+   * synchronous pair — but it only covers an entry whose POST is *outstanding*,
+   * which is why the snapshot is the other half of the same property: the second
+   * pass finishing an entry the first has not reached yet leaves that entry in the
+   * first pass's snapshot and gone from the store.
+   */
+  it("two overlapping passes POST each entry exactly once", async () => {
+    const release = await passStalledOnFirst();
+
+    // The second trigger, fired while `a`'s POST is still outstanding. It skips
+    // `a` on `inFlightKeys` and takes `b`, which the first pass has not reached.
+    const second = latest!.flush();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(postedKeys()).toContain("b"));
+
+    await act(async () => {
+      release();
+      await second;
+    });
+
+    await waitFor(() => expect(readQueue(window.localStorage)).toEqual([]));
+    // Each exactly once. A duplicate is answered `200` rather than doubling the
+    // row, so the cost is a wasted request on a connection this feature exists
+    // because it is bad — but it also falsifies the coalescing the api promises.
+    expect([...postedKeys()].sort()).toEqual(["a", "b"]);
   });
 
   it("respects a mark another pass wrote while this one was mid-flight", async () => {
