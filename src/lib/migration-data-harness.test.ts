@@ -57,6 +57,74 @@ describe("findDataDependentStatements — the shapes whose outcome depends on ro
     ]);
   });
 
+  it("flags a BACKFILL by its SOURCE tables, which is what decides it wrote anything (#233)", () => {
+    // The sixth shape, and the mirror image of the other five: it cannot FAIL on an
+    // empty source, it silently writes nothing — so a backfill that never ran reads
+    // as a clean pass on every gate this project has. That is the exact structural
+    // property #190 exists to remove.
+    expect(
+      shapesOf(
+        `INSERT INTO "EngagementDay" ("id", "day", "workspaceId")
+         SELECT gen_random_uuid()::text, to_char(r."createdAt", 'YYYY-MM-DD'), r."workspaceId"
+           FROM "RewardEvent" r;`,
+      ),
+    ).toEqual(["backfill-insert-select:RewardEvent"]);
+  });
+
+  it("names EVERY source of a backfill, not just the first", () => {
+    // A join means two tables have to hold rows for the statement to be exercised,
+    // and reporting one of them would leave the other permanently untested.
+    expect(
+      shapesOf(
+        `INSERT INTO "EngagementDay" ("id")
+         SELECT i."id" FROM "BrainDumpItem" i JOIN "Streak" s ON s."workspaceId" = i."workspaceId";`,
+      ),
+    ).toEqual([
+      "backfill-insert-select:BrainDumpItem",
+      "backfill-insert-select:Streak",
+    ]);
+  });
+
+  it("does not count the backfill's own TARGET as a source it needs seeding", () => {
+    // #233's idempotency guard reads the target on purpose, so that a re-run is a
+    // no-op. Counting that as a source demands a seed for the very table the
+    // statement exists to populate — unsatisfiable, because seeding it would
+    // disable the guard and stop the backfill running at all. Measured: this
+    // reported `backfill-insert-select:EngagementDay` and reddened the coverage
+    // gate on a migration that was correct.
+    expect(
+      shapesOf(
+        `INSERT INTO "EngagementDay" ("id", "workspaceId")
+         SELECT r."id", r."workspaceId" FROM "RewardEvent" r
+          WHERE NOT EXISTS (SELECT 1 FROM "EngagementDay");`,
+      ),
+    ).toEqual(["backfill-insert-select:RewardEvent"]);
+  });
+
+  it("does NOT read an UPDATE … FROM (subquery) as a backfill", () => {
+    // Seven committed migrations write in that shape, where the `update` rule has
+    // already named the right table. A bare FROM rule would have reported the
+    // subquery's source as a second, wrong finding on every one of them.
+    expect(
+      shapesOf(
+        `UPDATE "Step" AS s SET "total" = c.n
+           FROM (SELECT "taskId", count(*) AS n FROM "Step" GROUP BY "taskId") AS c
+          WHERE s."taskId" = c."taskId";`,
+      ),
+    ).toEqual(["update:Step"]);
+  });
+
+  it("does NOT read an INSERT … VALUES as a backfill", () => {
+    // `20260706130912_workspaces` seeds the owner Workspace this way. It depends on
+    // no stored row, so flagging it would demand a seed for a statement that cannot
+    // be affected by one.
+    expect(
+      shapesOf(
+        `INSERT INTO "Workspace" ("id","kind") VALUES ('owner','owner') ON CONFLICT ("id") DO NOTHING;`,
+      ),
+    ).toEqual([]);
+  });
+
   it("flags a DELETE, whose blast radius is invisible on an empty table", () => {
     expect(shapesOf(`DELETE FROM "Task" t WHERE t."id" IS NULL;`)).toEqual([
       "delete:Task",

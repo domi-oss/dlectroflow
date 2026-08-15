@@ -446,6 +446,12 @@ describe("the real tree", () => {
     // very three findings this MR cites as the footer's. Re-count, never assume a
     // delta. The message below is what turns the failure from a puzzle into a
     // one-line fix, so keep it attached to the assertion.
+    //
+    // 28 → 29 on #233: `FROM_OR_JOIN_TABLE` in `migration-data-harness.ts`, which
+    // classifies as `constant` like every other pattern in that module — its source
+    // is assembled once at module load from the file-level `IDENT` literal and
+    // nothing a caller passes ever reaches it. Taken from the scanner's OWN recount
+    // rather than from 28 + 1, which is what this comment asks for.
     expect(
       sites.length,
       "A `new RegExp` was added to or removed from src/ or e2e/. That is fine — " +
@@ -455,7 +461,7 @@ describe("the real tree", () => {
         "stay green. If the count went DOWN and you did not delete a " +
         "construction, the tokeniser has stopped seeing one, which is the bug " +
         "this guard exists to prevent.",
-    ).toBe(28);
+    ).toBe(29);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);

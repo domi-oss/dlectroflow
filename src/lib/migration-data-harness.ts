@@ -71,6 +71,7 @@ import {
 export type DataDependentShape =
   | "update"
   | "delete"
+  | "backfill-insert-select"
   | "set-not-null"
   | "add-check-constraint"
   | "validate-constraint"
@@ -160,6 +161,31 @@ const CREATE_TABLE = new RegExp(
 
 const INSERT_INTO = new RegExp(
   `\\bINSERT\\s+INTO\\s+(?:ONLY\\s+)?${IDENT}`,
+  "gi",
+);
+
+/**
+ * `INSERT INTO … SELECT` — a BACKFILL, and the sixth shape whose outcome depends
+ * on stored rows (#233).
+ *
+ * The five listed in this module's docblock are all shapes that FAIL on data the
+ * author did not expect. This one is the mirror image and was the blind spot: it
+ * cannot fail on an empty source, it silently writes NOTHING, and every gate this
+ * project has would report a clean pass on a backfill that never ran. That is
+ * precisely the structural property #190 exists to remove — "the defect was not
+ * missed; it was structurally incapable of failing anywhere except production" —
+ * applied to the one statement shape that populates a new table from an old one.
+ *
+ * The tables that decide the outcome are the SOURCES, not the target: the target is
+ * usually created by the same migration and therefore provably empty. So this rule
+ * reads the `FROM`/`JOIN` clauses, and it is asked only of statements that are an
+ * `INSERT … SELECT` — a bare `FROM` rule would also match the `UPDATE … FROM
+ * (subquery)` shape seven committed migrations use, where the `update` rule has
+ * already named the right table.
+ */
+const IS_INSERT_SELECT = /\bINSERT\s+INTO\b[\s\S]*?\bSELECT\b/i;
+const FROM_OR_JOIN_TABLE = new RegExp(
+  `\\b(?:FROM|JOIN)\\s+(?:ONLY\\s+)?${IDENT}`,
   "gi",
 );
 
@@ -318,6 +344,26 @@ const RULES: ReadonlyArray<{
   {
     shape: "delete",
     tables: (s) => every(DELETE_TABLE, s),
+  },
+  {
+    // See the note on IS_INSERT_SELECT: a backfill's SOURCES decide whether it
+    // wrote anything, and an empty source makes it a silent no-op rather than a
+    // failure — the one shape here that reads as a clean pass having done nothing.
+    //
+    // The INSERT's own TARGET is excluded, and that is not a convenience. A
+    // backfill's target is normally a table created moments earlier and therefore
+    // provably empty, and an idempotency guard reads it on purpose —
+    // `WHERE NOT EXISTS (SELECT 1 FROM "EngagementDay")` is the shape #233 uses to
+    // make a re-run a no-op. Counting that as a source demanded a seed for the very
+    // table the statement exists to populate, which is unsatisfiable: seeding it
+    // would disable the guard and stop the backfill running at all.
+    shape: "backfill-insert-select",
+    tables: (s) => {
+      if (!IS_INSERT_SELECT.test(s)) return [];
+      const target = INSERT_INTO.exec(s)?.[1];
+      INSERT_INTO.lastIndex = 0; // `g`-flagged and shared; see `every`
+      return every(FROM_OR_JOIN_TABLE, s).filter((t) => t !== target);
+    },
   },
   {
     shape: "set-not-null",
