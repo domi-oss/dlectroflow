@@ -38,16 +38,24 @@ export type ExportTask = Task & {
 /**
  * The account behind the export, as far as the export is concerned.
  *
- * Two deliberate omissions:
+ * **Exactly one column of `User` is withheld: `llmKeyEnc`.** It is the encrypted
+ * per-user LLM key, and it must stay absent — `json.test.ts` asserts that no
+ * ciphertext-shaped key reaches `export.json` at all, so a future column called
+ * `somethingEnc` fails a test rather than shipping in somebody's download. A
+ * credential in a file the reader may forward to somebody is the opposite of
+ * protecting them.
  *
- *  - **`llmKeyEnc` is absent, and must stay absent.** It is the encrypted
- *    per-user LLM key. `json.test.ts` asserts that no ciphertext-shaped key
- *    reaches `export.json` at all, so a future column called `somethingEnc`
- *    fails a test rather than shipping in somebody's download.
- *  - **`providerSub` is absent.** It is the login mapping's internal identifier,
- *    not content: an import happens into an account you have already signed in
- *    to, so the subject is re-derived from the OAuth flow rather than restored
- *    from a file.
+ * Everything else `User` holds is here, and `__tests__/model-coverage.test.ts`
+ * derives that list from `Prisma.dmmf` rather than trusting this comment: a new
+ * column on `User` fails a test until it is either exported or argued for as a
+ * credential. That guard exists because the previous version of this docblock
+ * named `providerSub` as a considered omission on the grounds that an importer
+ * re-derives the subject from the OAuth flow — which was true about IMPORT and
+ * beside the point about ACCESS. Art. 15 covers the identifiers the controller
+ * holds about the data subject, whether or not a future importer would want them
+ * back, and three more columns (`status`, `lastSeenAt`, `revokedAt`) were absent
+ * with no reasoning at all. Being able to state the rule as "every column but
+ * one" is what makes /privacy's claim checkable.
  *
  * `email` IS present, and that is a considered departure from the convention in
  * `currentUser()`, which deliberately never selects it. That rule exists to keep
@@ -59,6 +67,10 @@ export type ExportTask = Task & {
 export type ExportAccount = {
   id: string;
   provider: string;
+  /** The provider's own stable subject for this person. Not useful to an
+   *  importer — the OAuth flow re-derives it — but it is an identifier held
+   *  ABOUT them, which is what Art. 15 asks for. */
+  providerSub: string;
   handle: string | null;
   /** #252 — the name the person chose for themselves. Personal data they
    *  supplied, so Art. 15/20 covers it exactly as it covers the address below;
@@ -66,9 +78,108 @@ export type ExportAccount = {
   displayName: string | null;
   email: string | null;
   role: string;
+  /** `active` or `revoked`. A flag the app sets about them rather than one they
+   *  chose, which is the reason it was missed and not a reason to withhold it. */
+  status: string;
   aiPolicy: string;
   aiQuota: number;
+  /** `null` means "whatever this instance is configured to use". The KEY that
+   *  may accompany it (`llmKeyEnc`) is the withheld column; naming a provider is
+   *  a configuration choice the person made, not a credential. */
+  llmProvider: string | null;
   createdAt: Date;
+  lastSeenAt: Date;
+  /** When access was withdrawn, or `null` if it never was. */
+  revokedAt: Date | null;
+  /** Written by `freezeAccount` and read by nothing today — which is exactly why
+   *  a reader is entitled to see it rather than infer a purge from it. /privacy's
+   *  retention section says the same thing in words. */
+  purgeAfter: Date | null;
+};
+
+/**
+ * The invitation that made this account possible — one `Allowlist` row.
+ *
+ * **The strongest of the four records this file added**, and the reason the set
+ * was worth exporting rather than merely disclosing: `note` is free text that
+ * *another person wrote about the reader*. /privacy discloses it as collected, so
+ * it is plainly their personal data, and an archive that withheld it while the
+ * page admitted holding it was handing over less than the reader is owed.
+ *
+ * Read by `claimedById`, which is `@unique` — one row, addressed by the id the
+ * session already verified. `identity` is deliberately NOT the key: it is
+ * whatever the owner typed, it is not unique across providers on its own, and
+ * keying on it would be a lookup by user-supplied string instead of by a
+ * verified id.
+ *
+ * `id` and `claimedById` are omitted as carrying nothing: the first is an
+ * internal cuid and the second repeats `account.id`, which is in the same file.
+ */
+export type ExportInvitation = {
+  provider: string;
+  /** The username, email or subject that was entered to invite them. */
+  identity: string;
+  /** The private note whoever invited them wrote. Free text ABOUT the reader,
+   *  which is why this one is not bookkeeping. `null` if none was written. */
+  note: string | null;
+  /** Whether claiming this invitation made them the instance owner. */
+  isOwnerSeed: boolean;
+  invitedAt: Date;
+  claimedAt: Date | null;
+};
+
+/**
+ * The fair-use meter — one `UserAiUsage` row, as STORED.
+ *
+ * The stored row rather than `peekUserAiUsage`'s computed view, deliberately: the
+ * view reports a lapsed window as zero used, which is the right answer for the
+ * Settings panel and the wrong one for an export, whose job is to reproduce what
+ * is in the database. `count` here is therefore the raw counter, and
+ * `windowStartedAt` is what says whether it still applies.
+ */
+export type ExportAiUsage = {
+  count: number;
+  windowStartedAt: Date;
+  updatedAt: Date;
+};
+
+/**
+ * The calendar subscription's audit timestamps — a `CalendarFeed` row **minus its
+ * token**.
+ *
+ * The token is withheld, and it is the third credential rather than a fourth
+ * piece of bookkeeping: possession of it IS read access to the reader's scheduled
+ * work (`prisma/schema.prisma` argues that at length), so putting it in a file
+ * they might forward is the same mistake as exporting `llmKeyEnc`. Withholding it
+ * costs them nothing — Settings shows the URL and can re-copy it, and this
+ * archive is not the route by which anybody recovers a feed.
+ *
+ * `getOwnFeedTimestamps` never selects the column, so the token is absent by
+ * construction rather than by a serialiser remembering to drop it.
+ */
+export type ExportCalendarFeed = {
+  createdAt: Date;
+  /** `null` means the token has never been regenerated. */
+  rotatedAt: Date | null;
+};
+
+/**
+ * The records the app keeps ABOUT the account, as distinct from the content in
+ * the workspace.
+ *
+ * All three were held and unexported until this change, and none of them was
+ * visible to `__tests__/model-coverage.test.ts`, because that guard's predicate
+ * was `workspaceId` and these three hang off `User`. That is not a coincidence —
+ * it is the whole mechanism by which they were forgotten, so the predicate was
+ * widened in the same commit that made the export satisfy it.
+ *
+ * Every field is `null` for a guest sandbox, which has no account for them to
+ * hang off.
+ */
+export type ExportAccountRecords = {
+  invitation: ExportInvitation | null;
+  aiUsage: ExportAiUsage | null;
+  calendarFeed: ExportCalendarFeed | null;
 };
 
 /**
@@ -105,11 +216,20 @@ export type ExportSnapshot = {
     /** `user` or `guest` — a guest sandbox is exportable, and its expiry is why. */
     kind: string;
     createdAt: Date;
+    /** Touched by `currentWorkspaceId()` on every request. Added alongside
+     *  `ExportAccount.lastSeenAt` rather than left behind it: the schema has two
+     *  last-seen columns, and exporting one while withholding the other is the
+     *  partial-list defect this change exists to remove. `Workspace.userId` stays
+     *  out as a pure foreign key that repeats `account.id`. */
+    lastSeenAt: Date;
     expiresAt: Date | null;
   };
   /** `null` for a guest sandbox: it has no account attached, which is the point
    *  of it (see `/privacy`). */
   account: ExportAccount | null;
+  /** The three account-scoped records — invitation, AI meter, calendar feed
+   *  timestamps. All `null` for a guest sandbox. */
+  accountRecords: ExportAccountRecords;
   /** `null` when the workspace has never had a settings row written. Reading
    *  must not create one — `getSettings()` does, so the export does not use it. */
   settings: Settings | null;

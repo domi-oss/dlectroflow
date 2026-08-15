@@ -16,6 +16,23 @@ import type { ExportSnapshot, ExportTask } from "./types";
  * would make an old reader wrong: a renamed or removed field, a retyped value, a
  * moved nesting level.
  *
+ * **The four account records did NOT bump it, and the reasoning is worth keeping
+ * because it is the obvious thing to query.** `accountRecords` is a new top-level
+ * key and `account` gained six fields, but nothing was renamed, removed, retyped
+ * or moved, so no reader that ignores unknown fields is made wrong — the rule
+ * above applies to a new object exactly as it applies to a new column.
+ *
+ * The one genuine wrinkle, stated rather than glossed: a `schemaVersion: 1` file
+ * written BEFORE that change has no `accountRecords` key at all, and one written
+ * after has the key with possibly-null members, so a reader cannot tell "old
+ * export, records unknown" from "new export, this account has none". That is a
+ * real ambiguity and it is accepted rather than missed, for two reasons — there
+ * is no importer yet (`readme.ts` says so in as many words), so nothing today
+ * consumes the distinction; and bumping for an addition would contradict the
+ * documented rule directly above, which is itself a decision. If an importer is
+ * ever built, it should treat an absent `accountRecords` as unknown rather than
+ * empty, and THAT is the moment this constant earns a bump.
+ *
  * ## Rows are spread, not mapped field by field
  *
  * `{ ...task }` rather than a hand-written list of every column, deliberately: a
@@ -97,6 +114,16 @@ export function exportJson(snapshot: ExportSnapshot): string {
     exportedAt: snapshot.exportedAt,
     workspace: snapshot.workspace,
     account: snapshot.account,
+    /**
+     * The invitation (`note` included), the AI meter and the calendar feed's
+     * timestamps. Next to `account` because that is what they are about, and
+     * all three are `null` for a guest sandbox.
+     *
+     * The feed's `token` is NOT here and cannot be: `getOwnFeedTimestamps` never
+     * selects the column, so the credential is absent by construction rather
+     * than by this serialiser dropping a field.
+     */
+    accountRecords: snapshot.accountRecords,
     /** Metadata only — the credential table is excluded entirely (README.md). */
     integrations: snapshot.integrations,
     settings: snapshot.settings,

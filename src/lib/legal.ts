@@ -64,6 +64,93 @@ export const SOURCE_REPO_URL =
  * direction: the text cannot move without someone deciding about this date.
  *
  *
+ * Bumped for the legal-accuracy sweep: ten measured drifts between /privacy and
+ * what the code does, corrected in one commit. It moves the date on any one of
+ * them; the reason to record them together is that they are one publication
+ * event and the fingerprint gate re-records for a text state no single fix
+ * rendered alone. /terms is untouched and its hash below is unchanged, which is
+ * the evidence the two documents are disjoint here.
+ *
+ * The four that would each have moved it on their own:
+ *
+ *   1. A CHANGED LEGAL BASIS. The page claimed "explicit consent — Article
+ *      9(2)(a) UK GDPR" permitted holding health details typed into a note.
+ *      Nothing in src/ asks for that consent — no gate, no acknowledgement, no
+ *      warning — so there was no consent to be explicit about. The claim is
+ *      withdrawn rather than mechanised: the page now says it is not calling it
+ *      consent and why. Retracting a claimed lawful basis is substance in the
+ *      un-reassuring direction, which is the direction that must never ship
+ *      quietly.
+ *   2. A NEW DISCLOSURE OF WHAT LEAVES. `Task.notes` is selected by
+ *      `breakdown-context.ts` and quoted verbatim into the LLM prompt by
+ *      `buildNoteBlock` (#179, 2026-08-08) — while the page said the context
+ *      "contains no free text". The same note is written into a scheduled
+ *      Google Task's `notes` field by `encodeReclaim`, so it reaches a
+ *      recipient the page described as receiving only a title and a due date.
+ *      Two egress paths a reader was told did not exist.
+ *   3. A CHANGED RETENTION STATEMENT. The page said a freeze "marks its content
+ *      to be removed 30 days later". `freezeAccount` writes `User.purgeAfter`
+ *      and nothing reads it, so no removal is scheduled. A reader waiting for a
+ *      job that does not run is the failure this correction exists to stop, and
+ *      the page had it both ways in consecutive sentences.
+ *   4. NEW CATEGORIES OF STORED CONTENT: notes on tasks, steps and captures (up
+ *      to 2,000 characters each), `User.displayName`, `FocusPlaylist.name` and
+ *      `BreakdownTurn.message`. Art. 13(1)(c) disclosures, and the last was
+ *      already named in the portability bullet as "the coaching conversations"
+ *      while never being disclosed as stored — the page describing a thing it
+ *      had not admitted to holding.
+ *
+ * A FIFTH substantive change shares this date, and it is the only one in the sweep
+ * that changes what the app DOES rather than what the page says about it. The
+ * export now includes the four account records /privacy had been describing as
+ * withheld: the `Allowlist` invitation row — its private note included — the
+ * `UserAiUsage` count, the `CalendarFeed` timestamps, and six columns of `User`.
+ *
+ * The page was ACCURATE about the omission; the export was the thing that was
+ * wrong. Given the choice between disclosing the gap more precisely and closing
+ * it, the owner chose to close it, because the invitation note is free text
+ * somebody else wrote about the reader and answering an Art. 15 request for it
+ * "on request, by hand" is a worse discharge of the right than putting it in the
+ * file. So the copy and the code moved in the same commit and the page now
+ * describes the new behaviour.
+ *
+ * It moves this date on its own twice over: a widened scope for a right the reader
+ * exercises (Art. 15/20, reassuring direction) AND the withdrawal of a published
+ * statement that things were deliberately left out (un-reassuring direction, the
+ * one that must never ship quietly). What is now published is the narrower and
+ * checkable claim — the only things held back are three KEYS, the third being the
+ * calendar feed's address, which had never been named as one because the whole row
+ * used to be absent.
+ *
+ * Also corrected, and worth its own line because the temptation is to drop the
+ * subject entirely: "nothing infers anything about your health, your mind, or how
+ * you are doing" was overstated, because `DayRollup.narrative` is an LLM-written,
+ * STORED, second-person text about the reader's day.
+ *
+ * Precisely what happened to it, since this file exists to be precise and an
+ * earlier draft of this very paragraph described its own edit wrongly TWICE: the
+ * ABSOLUTE clause was removed and replaced with a NARROWER one — "nothing here
+ * asks you how you are" — and the roll-up exception was then stated as new prose.
+ * That is a rewrite plus an addition, not the original sentence "gaining an
+ * exception".
+ *
+ * The second wrong description was this quote itself, which carried the draft's
+ * "...or records why you use it" suffix after review had removed it from the page
+ * as a repeat of the bold lead-in. A docblock quoting text the page no longer
+ * renders is the same defect one layer up, and it is the reason to quote sparingly
+ * and check the quote against the render rather than against the previous draft.
+ *
+ * What was kept rather than deleted is the
+ * SUBJECT: the paragraph still makes an affirmative claim about health data
+ * instead of going silent, because the verified part is worth stating — no health,
+ * mood, energy, sleep, medication or symptom column exists in any model, and there
+ * is no questionnaire surface.
+ *
+ * Note the narrative is NOT opt-in: `roundup-card.tsx` triggers it at the reader's
+ * workday end and `roundupEmailEnabled` gates only the email, so wording it as a
+ * setting the reader switches on would understate it.
+ *
+ *
  * Bumped for #199: /privacy names a NEW CATEGORY OF STORED CONTENT — a shopping
  * list, its items, their ticked state and whether each has been moved to "saved
  * for later". A new kind of personal data being stored is an Art. 13(1)(c)
@@ -150,7 +237,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-08";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-15";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

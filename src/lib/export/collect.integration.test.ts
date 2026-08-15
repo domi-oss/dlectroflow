@@ -29,6 +29,20 @@ import type { ExportSnapshot } from "./types";
  * "another workspace's export contains no trace of the first workspace's
  * content" reporting the leaked strings.
  *
+ * **The invitation pair was verified the same way, and the result changed what
+ * had to be written.** Replacing `allowlist.findUnique({ where: { claimedById:
+ * userId } })` with `allowlist.findFirst({ where: {} })` — a genuinely unscoped
+ * read of a table holding a private note about every invited person — failed
+ * exactly ONE of the two tests: "and the invitation scoping is symmetric". The
+ * other direction PASSED, because `findFirst` with no filter returned the first
+ * row in the table, which happened to be that account's own.
+ *
+ * So a single-direction test would have reported green on a completely unscoped
+ * read. The symmetry is not thoroughness here, it is the entire mechanism, and
+ * that generalises to any `findFirst`-shaped leak: whichever account's row sorts
+ * first gets a correct answer by luck. The same reasoning is why the
+ * workspace-content checks above are also written in both directions.
+ *
  * Needs the real Postgres (CI wires up a service DB and runs `prisma migrate
  * deploy` first; locally `config/vitest.config.ts` forwards DATABASE_URL from
  * `.env` — only that one variable, by design: #84).
@@ -262,10 +276,27 @@ describe("the account block is the exporting account's own", () => {
   let userA = "";
   let userB = "";
 
-  beforeAll(async () => {
+  /** A's calendar feed token. A CREDENTIAL — possession of it is read access to
+   *  their scheduled work — so the archive must not contain it anywhere. */
+  const A_FEED_TOKEN = `${"a".repeat(20)}-aardvark-feed-capability-token`;
+
+  async function wipeAccountRecords() {
+    // `Allowlist.claimedBy` is `onDelete: SetNull`, so deleting the users leaves
+    // orphaned invitation rows behind and the next run's `findUnique` on
+    // `claimedById` would still be clean but the unique `(provider, identity)`
+    // insert would fail. Deleted by identity prefix for that reason.
+    await prisma.allowlist.deleteMany({
+      where: { identity: { startsWith: SUB_PREFIX } },
+    });
+    // These two cascade from User, but the suite has to be re-runnable after a
+    // failed run left rows behind — same reasoning as `wipe()` above.
     await prisma.user.deleteMany({
       where: { providerSub: { startsWith: SUB_PREFIX } },
     });
+  }
+
+  beforeAll(async () => {
+    await wipeAccountRecords();
     const a = await prisma.user.create({
       data: {
         provider: "gitlab",
@@ -290,15 +321,43 @@ describe("the account block is the exporting account's own", () => {
         { id: `${WS_B}-u`, kind: "user", userId: b.id },
       ],
     });
+
+    // ── The account-scoped records, for BOTH accounts ────────────────────────
+    //
+    // Both, because `Allowlist` is the one table here that the scoping harness
+    // cannot police — it links to `User` through `claimedById` rather than a
+    // `userId` column, so `scanUserScope` never sees the read at all. The only
+    // evidence the new query is scoped is a second account's row sitting in the
+    // same table with a distinctive note in it.
+    await prisma.allowlist.createMany({
+      data: [
+        {
+          provider: "gitlab",
+          identity: `${SUB_PREFIX}a`,
+          note: "aardvark-private-invitation-note",
+          claimedById: a.id,
+          claimedAt: new Date(),
+        },
+        {
+          provider: "gitlab",
+          identity: `${SUB_PREFIX}b`,
+          note: "badger-private-invitation-note",
+          claimedById: b.id,
+          claimedAt: new Date(),
+        },
+      ],
+    });
+    await prisma.userAiUsage.create({ data: { userId: a.id, count: 4 } });
+    await prisma.calendarFeed.create({
+      data: { userId: a.id, token: A_FEED_TOKEN },
+    });
   });
 
   afterAll(async () => {
     await prisma.workspace.deleteMany({
       where: { id: { in: [`${WS_A}-u`, `${WS_B}-u`] } },
     });
-    await prisma.user.deleteMany({
-      where: { providerSub: { startsWith: SUB_PREFIX } },
-    });
+    await wipeAccountRecords();
   });
 
   it("names the exporting account and no other", async () => {
@@ -328,5 +387,127 @@ describe("the account block is the exporting account's own", () => {
     );
     expect(archive).not.toContain("ciphertext-that-must-never-be-exported");
     expect(archive).not.toContain("llmKeyEnc");
+  });
+
+  // ── The four account records, against a real database ─────────────────────
+
+  it("carries the account's own invitation note, and not the other account's", async () => {
+    // The reason this test exists rather than only the unit ones: `Allowlist` is
+    // read by `claimedById`, and that is a key `scoping.harness.test.ts` cannot
+    // police — it keys on a `userId` COLUMN, which this table does not have. So
+    // the ONLY evidence the read is scoped is a second account's invitation
+    // sitting in the same table and staying out of this archive.
+    const snapshot = await collectExport({
+      workspaceId: `${WS_A}-u`,
+      userId: userA,
+    });
+    // The control first: the note really is in this archive, so the negative
+    // assertion below cannot pass because nothing was read at all.
+    expect(snapshot.accountRecords.invitation?.note).toBe(
+      "aardvark-private-invitation-note",
+    );
+    const archive = renderedArchive(snapshot);
+    expect(archive).toContain("aardvark-private-invitation-note");
+    expect(
+      archive,
+      "another account's invitation note reached this account's export",
+    ).not.toContain("badger-private-invitation-note");
+  });
+
+  it("and the invitation scoping is symmetric", async () => {
+    const archive = renderedArchive(
+      await collectExport({ workspaceId: `${WS_B}-u`, userId: userB }),
+    );
+    expect(archive).toContain("badger-private-invitation-note");
+    expect(archive).not.toContain("aardvark-private-invitation-note");
+  });
+
+  it("carries the AI usage counter and the feed timestamps, but NEVER the feed token", async () => {
+    const snapshot = await collectExport({
+      workspaceId: `${WS_A}-u`,
+      userId: userA,
+    });
+    // Controls: both rows were read, so the token assertion is about the export
+    // and not about an empty snapshot.
+    expect(snapshot.accountRecords.aiUsage?.count).toBe(4);
+    expect(snapshot.accountRecords.calendarFeed?.createdAt).toBeInstanceOf(
+      Date,
+    );
+    expect(snapshot.accountRecords.calendarFeed?.rotatedAt).toBeNull();
+
+    // The token is the third credential. Unlike the OAuth tokens and the LLM key
+    // it is stored in PLAINTEXT, so there is not even a cipher between an archive
+    // and a working read capability on the reader's scheduled work — which is why
+    // `getOwnFeedTimestamps` never selects the column rather than leaving it to a
+    // serialiser to drop.
+    // The VALUE, not the word: the archive's README explains that OAuth tokens
+    // are excluded, so asserting the string "token" is absent would fail on the
+    // documentation of the very property being tested. `json.test.ts` covers the
+    // key-name half against the parsed document, where prose cannot interfere.
+    const archive = renderedArchive(snapshot);
+    expect(
+      archive,
+      "the calendar feed's capability token reached the export",
+    ).not.toContain(A_FEED_TOKEN);
+  });
+
+  it("gives a guest sandbox null account records rather than another account's", async () => {
+    // A guest has no `userId`, and every one of these reads is behind that check.
+    // The rows exist in the tables, so this is a real assertion about the branch
+    // and not about an empty database.
+    const snapshot = await collectExport({
+      workspaceId: `${WS_A}-u`,
+      userId: null,
+    });
+    expect(snapshot.accountRecords).toEqual({
+      invitation: null,
+      aiUsage: null,
+      calendarFeed: null,
+    });
+    expect(snapshot.account).toBeNull();
+    const archive = renderedArchive(snapshot);
+    expect(archive).not.toContain("aardvark-private-invitation-note");
+    expect(archive).not.toContain(A_FEED_TOKEN);
+  });
+
+  it("exports the account columns this sweep added, with their values", async () => {
+    // `model-coverage.test.ts` asserts the SELECT lists them; this asserts the
+    // values arrive, against a row where each one is set to something visible. The
+    // two are not the same claim — a select can name a column that a later mapping
+    // drops.
+    //
+    // Named for the six columns it actually checks. It used to say "every User
+    // column the schema has", which was a completeness claim over a hand-written
+    // list — the defect this MR exists to remove, in one of its own new tests. It
+    // caught a dropped `lastSeenAt` because that column is on the list and was
+    // blind to a dropped `provider` because it is not. Every column IS covered,
+    // from `Prisma.dmmf`, by `model-coverage.test.ts`; that is the guard with the
+    // completeness obligation, and this one is deliberately a value spot-check.
+    const revokedAt = new Date("2026-08-10T09:00:00.000Z");
+    await prisma.user.update({
+      where: { id: userB },
+      data: {
+        status: "revoked",
+        revokedAt,
+        purgeAfter: new Date("2026-09-09T09:00:00.000Z"),
+        llmProvider: "anthropic",
+        displayName: "Badger",
+      },
+    });
+    const snapshot = await collectExport({
+      workspaceId: `${WS_B}-u`,
+      userId: userB,
+    });
+    expect(snapshot.account?.providerSub).toBe(`${SUB_PREFIX}b`);
+    expect(snapshot.account?.status).toBe("revoked");
+    expect(snapshot.account?.revokedAt?.toISOString()).toBe(
+      revokedAt.toISOString(),
+    );
+    expect(snapshot.account?.purgeAfter).toBeInstanceOf(Date);
+    expect(snapshot.account?.llmProvider).toBe("anthropic");
+    expect(snapshot.account?.lastSeenAt).toBeInstanceOf(Date);
+    // And the workspace's own last-seen, which is the second of the two columns
+    // with that name and was omitted while the account's was being added.
+    expect(snapshot.workspace.lastSeenAt).toBeInstanceOf(Date);
   });
 });

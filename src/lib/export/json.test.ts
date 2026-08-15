@@ -200,6 +200,121 @@ describe("export.json — the round-trippable tier", () => {
     expect(parsed.account.aiQuota).toBe(50);
   });
 
+  // ── The four records that were held and unexported ────────────────────────
+  //
+  // `__tests__/model-coverage.test.ts` is the structural half — it fails when a
+  // model is forgotten. This is the value half, in the same pairing #185 already
+  // has: the guard proves the table is not forgotten, these prove the rows
+  // actually arrive.
+
+  it("carries the account flags that used to be dropped from the User select", () => {
+    // All four were in the database and absent from the export while /privacy
+    // disclosed holding them. Asserted per COLUMN rather than as one "account
+    // flags are there" test, because the defect twice took the form of a partial
+    // list that read as a complete one.
+    expect(parsed.account.status).toBe("active");
+    expect(parsed.account.lastSeenAt).toBe("2026-08-03T09:29:00.000Z");
+    expect(parsed.account.revokedAt).toBeNull();
+    expect(parsed.account.providerSub).toBe("gitlab-sub-778201");
+    // Found while fixing the four above: the same shape of omission, so they are
+    // pinned the same way rather than left to be discovered a third time.
+    expect(parsed.account.llmProvider).toBeNull();
+    expect("purgeAfter" in parsed.account).toBe(true);
+    expect(parsed.account.purgeAfter).toBeNull();
+    // `in` rather than a value comparison for the nullables, for the reason the
+    // clientKey test above spells out: JSON.stringify drops `undefined` and keeps
+    // `null`, so a field that never reached the archive and a field that arrived
+    // as an explicit null both read `undefined` once parsed.
+    expect("revokedAt" in parsed.account).toBe(true);
+  });
+
+  it("carries the workspace's own lastSeenAt, not just the account's", () => {
+    // The schema has two last-seen columns and exporting one while withholding
+    // the other is the partial-list defect this change removes.
+    expect(parsed.workspace.lastSeenAt).toBe("2026-08-03T09:29:00.000Z");
+  });
+
+  it("carries the invitation record, INCLUDING the note written about the reader", () => {
+    // The strongest of the four, and the reason the set was worth exporting
+    // rather than disclosing and withholding: this is free text ANOTHER PERSON
+    // wrote about the data subject. /privacy discloses collecting it, so an
+    // archive without it hands over less than the reader is entitled to.
+    expect(parsed.accountRecords.invitation.note).toBe(
+      "met at the ADHD meetup, wants the shopping list beta",
+    );
+    expect(parsed.accountRecords.invitation.identity).toBe("sam");
+    expect(parsed.accountRecords.invitation.isOwnerSeed).toBe(false);
+    expect(parsed.accountRecords.invitation.invitedAt).toBe(
+      "2026-05-28T14:00:00.000Z",
+    );
+    expect(parsed.accountRecords.invitation.claimedAt).toBe(
+      "2026-06-01T07:00:00.000Z",
+    );
+    // The note reaches the rendered bytes, not merely a parsed field — the same
+    // "is it in there at all" form the omission assertions use, so a serialiser
+    // that stringified it as "[object Object]" could not pass.
+    expect(exportJson(snapshot)).toContain("met at the ADHD meetup");
+  });
+
+  it("carries the AI usage counter as STORED, not as the Settings panel view", () => {
+    // `peekUserAiUsage` reports a lapsed window as 0 used, which is right for the
+    // panel and wrong here: an export reproduces what is in the database.
+    expect(parsed.accountRecords.aiUsage.count).toBe(7);
+    expect(parsed.accountRecords.aiUsage.windowStartedAt).toBe(
+      "2026-08-03T06:00:00.000Z",
+    );
+    expect(parsed.accountRecords.aiUsage.updatedAt).toBe(
+      "2026-08-03T08:45:00.000Z",
+    );
+  });
+
+  it("carries the calendar feed's timestamps and NOT its token", () => {
+    expect(parsed.accountRecords.calendarFeed.createdAt).toBe(
+      "2026-07-20T11:00:00.000Z",
+    );
+    expect(parsed.accountRecords.calendarFeed.rotatedAt).toBeNull();
+    // The token is the third credential, not a fourth piece of bookkeeping:
+    // possession of it IS read access to the reader's scheduled work, so a copy
+    // in a file they might forward is the same mistake as exporting llmKeyEnc.
+    // `ExportCalendarFeed` has no such field, so this is a tripwire for a future
+    // widening rather than a check on today's code — which is exactly what the
+    // `enc|token|secret` key tripwire below could not be relied on for alone,
+    // since a token carried under a friendlier field name would slip past it.
+    expect(everyKey(parsed)).not.toContain("token");
+    expect(everyKey(parsed.accountRecords)).toEqual([
+      "invitation",
+      "provider",
+      "identity",
+      "note",
+      "isOwnerSeed",
+      "invitedAt",
+      "claimedAt",
+      "aiUsage",
+      "count",
+      "windowStartedAt",
+      "updatedAt",
+      "calendarFeed",
+      "createdAt",
+      "rotatedAt",
+    ]);
+  });
+
+  it("renders every account record as null for a guest sandbox", () => {
+    // A guest has no account for these to hang off, and each serialiser has to
+    // render that rather than throwing on a missing nested object.
+    const guest = makeSnapshot({
+      account: null,
+      accountRecords: { invitation: null, aiUsage: null, calendarFeed: null },
+    });
+    const document = JSON.parse(exportJson(guest));
+    expect(document.account).toBeNull();
+    expect(document.accountRecords).toEqual({
+      invitation: null,
+      aiUsage: null,
+      calendarFeed: null,
+    });
+  });
+
   it("carries integration METADATA and no tokens", () => {
     expect(parsed.integrations.googleTasks).toEqual({
       configured: true,
@@ -240,6 +355,12 @@ describe("export.json — the round-trippable tier", () => {
     expect(empty.shoppingItems).toEqual([]);
     expect(empty.gamification.streak).toBeNull();
     expect(empty.gamification.badges).toEqual([]);
+    // The invitation PREDATES first sign-in — it is what allowed the account to
+    // exist — so an account with nothing in it still has one, while the two rows
+    // that only appear once the features are used are genuinely absent.
+    expect(empty.accountRecords.invitation.identity).toBe("newcomer");
+    expect(empty.accountRecords.aiUsage).toBeNull();
+    expect(empty.accountRecords.calendarFeed).toBeNull();
   });
 
   it("is deterministic — the same snapshot serialises to the same bytes", () => {

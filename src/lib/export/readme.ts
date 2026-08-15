@@ -90,11 +90,22 @@ export function exportReadme(snapshot: ExportSnapshot): string {
     '- **An importer.** There is no "restore from export" button yet. `export.json` is the file designed for it — it is lossless and versioned — but today getting the data back in means a script.',
     "- **Streaks, badges, points, daily rollups and sparks are in `export.json` only**, not in `tasks.md` or the CSVs. They are calculated from your activity rather than typed by you, and they do not port anywhere.",
     "- **`estimateHistory` and the Google task identifiers are in `export.json` only.** The first is a list inside one field, which does not belong in a spreadsheet cell; the second identifies rows inside a Google account and means nothing outside it.",
+    "- **The address of your calendar subscription feed**, if you have one. That URL is not a record of anything — it is a **key**. Anyone holding it can read your scheduled work without signing in, which is what makes a calendar app able to fetch it, so a copy sitting in a file you might forward to somebody is the one thing in here that could be used against you. When the feed was created, and when you last regenerated it, ARE in `export.json`. The URL itself you can copy any time from **Settings → Integrations → Calendar subscription**.",
+    "",
+
+    "## What IS in here that you might not expect",
+    "",
+    "dlectroflow also holds a handful of records *about* your account rather than things you typed into it, and all of them are in `export.json` under `accountRecords` and `account`:",
+    "",
+    "- **Your invitation record** — the username or email address that was entered to invite you, when the invitation was created and claimed, and **any private note whoever invited you wrote on it**. That note is somebody else's words about you, which is exactly why it is here rather than something you have to ask for.",
+    "- **Your AI usage count** and the window it is measured over.",
+    "- **When your calendar subscription feed was created**, and when it was last regenerated. (Not the address — see above.)",
+    "- **Your account state**: whether it is **active or revoked**, when it was **last seen**, **when access was withdrawn** if it ever was, and the **account id your sign-in provider issued** for you — as distinct from your username and the provider's name, which are in there too.",
     "",
 
     "## Getting a copy of anything else",
     "",
-    "This is everything dlectroflow holds about your account that is yours. If you think something is missing, or you want it in another format, the Privacy Policy at `/privacy` says how to ask and how long the answer takes.",
+    "Everything you wrote in dlectroflow is in here, and so is everything it holds about your account, apart from the three keys named above. If you think something is missing, or you want it in another format, the Privacy Policy at `/privacy` says how to ask and how long the answer takes.",
   ]
     .join("\n")
     .trimEnd()
