@@ -750,6 +750,31 @@ export async function engagementDaysNowEmpty(
  *     `ten_steps_day`, and for the same reason: it is what makes the answer a
  *     reversal rather than a guess.
  *
+ * ── ⚠️ The one KNOWN limit that errs the OTHER way (raised in review on !352) ─
+ *
+ * The recompute walks history with the workspace's **current**
+ * `Settings.workingDays`, because that is the only working week the schema stores.
+ * A person who has since CHANGED their working week is therefore re-measured
+ * against a calendar that was not in force when the run was built — and if the
+ * change ADDED a working day, a past instance of that day now reads as a gap the
+ * ledger cannot fill, so the run comes back shorter than it really was and a badge
+ * that WAS earned can be revoked. Removing a working day is harmless in the other
+ * direction (fewer days must carry a credit).
+ *
+ * Reachable by ordinary use: change the working week in Settings, then delete a
+ * completed to-do. Stated here rather than silently accepted, because unlike every
+ * gate above this one errs toward taking something real away.
+ *
+ * **Not fixed here, and the cheap fix was measured and rejected.** Refusing
+ * whenever `Settings.updatedAt` falls inside the run would be sound and one
+ * condition long, but `@updatedAt` fires on ANY settings write, so for anyone who
+ * adjusts a preference mid-run it disables revocation entirely — it gates the
+ * feature off rather than guarding it. The precise fix is to record the working
+ * week that a run was actually measured with, which is a column, a migration and a
+ * write on the engagement path: a different change from this one, and a product
+ * decision about how much revocation reach to trade, so it is reported for an
+ * explicit call rather than taken in a review round.
+ *
  * ── `Streak.current` is lowered, never raised ───────────────────────────────
  *
  * A delete may take a streak day away and must never grant one. If the recompute
@@ -825,11 +850,22 @@ export async function revokeUnqualifiedStreakBadges(
     ymd(new Date()),
   );
 
-  // gates 2 and 3
-  if (run.truncated || !runIsFullyLedgered(run.runStart, streak.ledgerFrom)) {
+  // gates 2 and 3. `runStart === null` is tested here as well as inside
+  // `runIsFullyLedgered`, which is redundant at runtime and deliberate at the type
+  // level: it is what narrows `run.runStart` to `string` for `parseYmd` below.
+  // Raised in review on !352 — the previous form was `parseYmd(run.runStart as
+  // string)`, and that cast was only true because of the ORDER of the conditions
+  // in this `if`. Reordering them, or `runIsFullyLedgered` ever accepting a null
+  // run, would have turned it into a lie that the compiler had been told to stop
+  // checking.
+  if (
+    run.truncated ||
+    run.runStart === null ||
+    !runIsFullyLedgered(run.runStart, streak.ledgerFrom)
+  ) {
     return [];
   }
-  const runStartsAt = parseYmd(run.runStart as string);
+  const runStartsAt = parseYmd(run.runStart);
 
   if (run.current < streak.current) {
     await db.streak.update({
