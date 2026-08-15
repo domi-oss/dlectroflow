@@ -1566,6 +1566,29 @@ export const STRINGS = {
   // ✓ is a functional glyph (allowed in plain).
   "appearance.heading": { plain: "Appearance", playful: "🎨 Appearance" },
   "appearance.theme": { plain: "Theme", playful: "Theme" },
+  // ── #85 — the theme setting is three-state, and `system` is the default. ──
+  // The intro is the sentence that answers the request this came from ("dark
+  // mode automatic with time of day"): the platforms already do it on a
+  // schedule, so following them IS the automatic behaviour and there is no
+  // in-app scheduler to look for.
+  //
+  // Both voices are IDENTICAL, matching the tick-colour and typeface option
+  // labels beside them, and #103's finding applies with extra force here: a
+  // ☀️/🌙 pair in these labels renders differently on every platform and its
+  // advance width is unpredictable, which is exactly why the theme control lost
+  // its emoji in the first place.
+  "appearance.themeIntro": {
+    plain:
+      "Follow my system matches your device's appearance, including any automatic day/night schedule it has. Light and Dark override it.",
+    playful:
+      "Follow my system matches your device's appearance, including any automatic day/night schedule it has. Light and Dark override it.",
+  },
+  "appearance.themeSystem": {
+    plain: "Follow my system",
+    playful: "Follow my system",
+  },
+  "appearance.themeLight": { plain: "Light", playful: "Light" },
+  "appearance.themeDark": { plain: "Dark", playful: "Dark" },
   "appearance.completionIntro": {
     plain: "How finished to-dos and steps look across the app.",
     playful: "How your checked-off bites look across the app.",
