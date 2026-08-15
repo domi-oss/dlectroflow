@@ -56,6 +56,13 @@ vi.mock("@/lib/workspace", () => ({
   MissingWorkspaceError: class extends Error {},
 }));
 vi.mock("@/lib/rewards", () => ({
+  touchStreakOnEngagement: vi.fn().mockResolvedValue(null),
+  // #233 — "this item credited no day", so the streak revocation below is
+  // handed an empty set and is a no-op. A file asking about the ledger sets
+  // these up; every other file asserts the untouched-streak path.
+  engagementDaysOfItem: vi.fn().mockResolvedValue([]),
+  engagementDaysNowEmpty: vi.fn().mockResolvedValue([]),
+  revokeUnqualifiedStreakBadges: vi.fn().mockResolvedValue([]),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
   logReward: vi.fn().mockResolvedValue(undefined),

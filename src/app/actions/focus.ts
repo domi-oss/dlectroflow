@@ -21,6 +21,7 @@ import { isGuestWorkspace } from "@/lib/workspace-kind";
 import {
   awardBadge,
   logReward,
+  itemIdForTask,
   rewardStepDone,
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
@@ -245,7 +246,12 @@ export async function completeStep(stepId: string) {
 
   await completeGoogleTaskForStep(step);
   await prisma.step.update({ where: { id: stepId }, data: { done: true } });
-  await rewardStepDone(workspaceId);
+  // #233 — the streak credit is attributed to the inbox item behind this step's
+  // task, so deleting that item withdraws it. `null` for a task with no item.
+  await rewardStepDone(
+    workspaceId,
+    await itemIdForTask(workspaceId, step.taskId),
+  );
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
   if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
@@ -524,7 +530,11 @@ export async function completeFocus(
   }
 
   // Points + streak + badges (dashboard reads these).
-  const streak = await rewardStepDone(workspaceId);
+  // #233 — same attribution as `completeStep`; see `itemIdForTask`.
+  const streak = await rewardStepDone(
+    workspaceId,
+    await itemIdForTask(workspaceId, step.taskId),
+  );
   await logReward(workspaceId, RewardType.SessionFinished);
 
   const next = await prisma.step.findFirst({

@@ -36,6 +36,7 @@ vi.mock("@/lib/rewards", () => ({
 }));
 
 import { writeCapture } from "./capture-write";
+import { EngagementKind } from "@/lib/constants";
 
 /** The row the winner of an `ON CONFLICT DO NOTHING` gets back. */
 const wrote = () =>
@@ -158,9 +159,19 @@ describe("writeCapture", () => {
     });
   });
 
-  it("counts a capture as one engagement", async () => {
+  it("counts a capture as one engagement, attributed to the row it wrote", async () => {
     await writeCapture({ workspaceId: "ws-1", text: "buy milk" });
-    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith("ws-1");
+    // #233 — `itemId` is the whole mechanism, not a detail: it is what lets the
+    // engagement ledger withdraw this streak credit if the capture is later
+    // deleted. Asserting only the workspace would pass for a credit written with
+    // no attribution, which is silently permanent and un-revocable.
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(
+      "ws-1",
+      {
+        kind: EngagementKind.Capture,
+        itemId: "item-1",
+      },
+    );
   });
 
   it("does NOT advance the streak for a capture that was not written", async () => {
@@ -219,7 +230,13 @@ describe("writeCapture — a streak touch that fails AFTER the row landed", () =
     ).resolves.toBe("created");
     // Also proves the queued rejection was CONSUMED. An unconsumed `Once` shifts
     // every later test in this file by one, which presents as unrelated failures.
-    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith("ws-1");
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(
+      "ws-1",
+      {
+        kind: EngagementKind.Capture,
+        itemId: "item-1",
+      },
+    );
   });
 
   it("does not write the row a second time trying to recover the credit", async () => {

@@ -56,6 +56,11 @@ const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(
       $queryRaw: vi.fn().mockResolvedValue([]),
       streak: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
       streakRecord: { create: vi.fn().mockResolvedValue({}) },
+      // #233 — the engagement ledger row is written FIRST inside this same
+      // transaction, so `tx` has to carry it. That ordering is deliberate and is
+      // asserted below: a ledger BEHIND the counter is the one direction that
+      // could revoke a badge somebody still qualifies for.
+      engagementDay: { create: vi.fn().mockResolvedValue({}) },
     };
     const prismaMock = {
       badge: {
@@ -72,6 +77,9 @@ const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(
         count: vi.fn().mockResolvedValue(0),
       },
       brainDumpItem: { count: vi.fn().mockResolvedValue(0) },
+      // The non-working-day arm writes its ledger row outside the transaction,
+      // because there is no streak change for it to be atomic with.
+      engagementDay: { create: vi.fn().mockResolvedValue({}) },
       $transaction: vi.fn(),
     };
     prismaMock.$transaction.mockImplementation((arg: unknown) =>

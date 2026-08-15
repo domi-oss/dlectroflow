@@ -8,9 +8,15 @@ import {
   TaskStatus,
   RewardType,
   BadgeKey,
+  EngagementKind,
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
-import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
+import {
+  logReward,
+  awardBadge,
+  itemIdForTask,
+  touchStreakOnEngagement,
+} from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
@@ -212,7 +218,14 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
   // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
   // streak at most once per working day.
-  await touchStreakOnEngagement(workspaceId);
+  //
+  // #233 — attributed to the inbox item behind this task, so deleting that item
+  // withdraws the credit. `null` when the task has none (a manually created one),
+  // which makes the credit permanent; see `EngagementKind`.
+  await touchStreakOnEngagement(workspaceId, {
+    kind: EngagementKind.BreakdownConfirmed,
+    itemId: await itemIdForTask(workspaceId, taskId),
+  });
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/");

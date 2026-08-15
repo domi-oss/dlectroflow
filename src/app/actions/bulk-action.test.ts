@@ -73,6 +73,14 @@ vi.mock("@/lib/workspace", () => ({
   MissingWorkspaceError: class extends Error {},
 }));
 vi.mock("@/lib/rewards", () => ({
+  // #233 — this file deletes items through the bulk action, so it reaches the
+  // engagement ledger. "Credited no day" is the right default here: the streak
+  // revocation is handed an empty set and is a no-op, which keeps this file's
+  // question (the IDOR filter) the only thing it asserts.
+  engagementDaysOfItem: vi.fn().mockResolvedValue([]),
+  engagementDaysNowEmpty: vi.fn().mockResolvedValue([]),
+  revokeUnqualifiedStreakBadges: vi.fn().mockResolvedValue([]),
+  touchStreakOnEngagement: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
   logReward: vi.fn().mockResolvedValue(undefined),

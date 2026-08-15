@@ -59,6 +59,11 @@ vi.mock("@/lib/google", () => ({
   patchGoogleTask: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/rewards", () => ({
+  // #233 — the ledger attributes a streak credit to the inbox item behind a
+  // task. `null` is the ordinary answer for a task with no item, and is what
+  // makes a credit permanent, so it is the right default for a file not asking
+  // about attribution.
+  itemIdForTask: vi.fn().mockResolvedValue(null),
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(true),
   rewardStepDone: vi.fn().mockResolvedValue(null),
@@ -73,7 +78,7 @@ import {
   awardBadge,
   rewardStepDone,
 } from "@/lib/rewards";
-import { BadgeKey } from "@/lib/constants";
+import { BadgeKey, EngagementKind } from "@/lib/constants";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,7 +98,14 @@ describe("streak engagement — the three qualifying actions", () => {
     expect(prismaMock.brainDumpItem.createManyAndReturn).toHaveBeenCalledTimes(
       1,
     );
-    expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner");
+    // #233 — the credit is ATTRIBUTED to the row just written, not merely
+    // recorded. `itemId` is what makes it revocable when that capture is
+    // deleted, so asserting only the workspace would pass for a credit that is
+    // silently permanent.
+    expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner", {
+      kind: EngagementKind.Capture,
+      itemId: "item-1",
+    });
   });
 
   it("an empty capture does NOT advance the streak", async () => {
@@ -108,7 +120,14 @@ describe("streak engagement — the three qualifying actions", () => {
       parentEmoji: "🚀",
       steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }],
     });
-    expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner");
+    // #233 — `itemIdForTask` is stubbed to `null` in this file's rewards mock,
+    // which is the right shape for a task with no inbox item behind it. What
+    // this asserts is that the KIND reaches the ledger and that the attribution
+    // is passed through rather than dropped.
+    expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner", {
+      kind: EngagementKind.BreakdownConfirmed,
+      itemId: null,
+    });
   });
 
   it("focus-step completion (completeStep) advances the streak via rewardStepDone", async () => {
@@ -126,7 +145,9 @@ describe("streak engagement — the three qualifying actions", () => {
     });
     const { completeStep } = await import("./focus");
     await completeStep("s1");
-    expect(rewardStepDone).toHaveBeenCalledWith("owner");
+    // #233 — the item id travels as the second argument, so a step completion's
+    // streak credit can be withdrawn with the to-do it belonged to.
+    expect(rewardStepDone).toHaveBeenCalledWith("owner", null);
   });
 });
 

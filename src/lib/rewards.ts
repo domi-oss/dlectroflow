@@ -4,32 +4,32 @@ import {
   RewardType,
   RewardPoints,
   BadgeKey,
+  EngagementKind,
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
+  type EngagementKind as EngagementKindT,
 } from "@/lib/constants";
 import { inboxZeroQueueWhere } from "@/lib/inbox-zero-queue";
 import { getSettings, getStreak } from "@/lib/db";
+// #233 — one derivation of "what day is it", shared with the recompute. These
+// four were private to this file; they moved rather than being copied, because
+// the ledger's `day` column and `Streak.lastActiveWorkday` are compared as
+// strings and two derivations differing by an hour would make a streak silently
+// unrecomputable. See that module's docblock.
+import {
+  isoWeekday,
+  parseWorkingDays,
+  parseYmd,
+  recomputeRun,
+  runIsFullyLedgered,
+  ymd,
+} from "@/lib/engagement-ledger";
 
 // ── helpers ────────────────────────────────────────────────────────────────
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-}
 function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
-}
-function isoWeekday(d: Date): number {
-  const wd = d.getDay(); // 0=Sun..6=Sat
-  return wd === 0 ? 7 : wd; // 1=Mon..7=Sun
-}
-function parseWorkingDays(csv: string): number[] {
-  return csv
-    .split(",")
-    .map((s) => parseInt(s.trim(), 10))
-    .filter((n) => n >= 1 && n <= 7);
 }
 
 // ── points ───────────────────────────────────────────────────────────────
@@ -129,14 +129,58 @@ export async function maybeAwardTenStepsDay(
  * by completing a step directly. Logs StepDone, extends the streak, and awards
  * the ten-steps-in-a-day badge. Does NOT log SessionFinished (that is the focus
  * timer's own bonus).
+ *
+ * `itemId` is the `BrainDumpItem` this step's work belongs to, resolved by the
+ * caller with {@link itemIdForTask} — it is what the engagement ledger attributes
+ * the streak credit to (#233). `null` is legitimate and means "this step's task
+ * has no inbox item behind it", which makes the credit permanent; see
+ * {@link EngagementKind}.
  */
 export async function rewardStepDone(
   workspaceId: string,
+  itemId: string | null = null,
 ): Promise<StreakUpdate | null> {
   await logReward(workspaceId, RewardType.StepDone);
-  const streak = await touchStreakOnEngagement(workspaceId); // completion is a qualifying engagement
+  // A completion is a qualifying engagement.
+  const streak = await touchStreakOnEngagement(workspaceId, {
+    kind: EngagementKind.StepDone,
+    itemId,
+  });
   await maybeAwardTenStepsDay(workspaceId);
   return streak;
+}
+
+/**
+ * The `BrainDumpItem` a `Task`'s work belongs to, for the engagement ledger to
+ * attribute a credit to (#233). `null` when the task has no inbox item behind it.
+ *
+ * ── Why the callers resolve this rather than the ledger ─────────────────────
+ *
+ * Three of the four engagement call sites hold a `taskId` and not an item id
+ * (`completeStep`, `finishSession`, `confirmBreakdown`), and one holds the item
+ * directly (`completeItem`, `writeCapture`). Putting the lookup here rather than
+ * inside `touchStreakOnEngagement` keeps the `workspaceId` filter in the CALL's
+ * own arguments, which is what `scoping.harness.test.ts` requires and what a
+ * `where`-taking helper would hide — the same rule `reverseLatestReward` writes
+ * out twice rather than sharing.
+ *
+ * `findFirst` and not `findMany`: the schema permits several items per task and no
+ * code path creates a second one (the note at `deleteBrainDumpItem`'s Task cleanup
+ * says so and re-proves it). If one ever exists, attributing the credit to the
+ * oldest is the same choice the delete makes, and the worst case is a credit that
+ * outlives one of two items — conservative, because an over-attached credit
+ * prevents a revocation and never causes one.
+ */
+export async function itemIdForTask(
+  workspaceId: string,
+  taskId: string,
+): Promise<string | null> {
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { taskId, workspaceId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return item?.id ?? null;
 }
 
 /**
@@ -410,17 +454,24 @@ export async function reverseItemCompletionRewards(
  *    completed to-do's deletion cannot un-break-down, un-schedule or un-focus
  *    anything, and it cannot *add* to the needs-triage queue, so none of their
  *    conditions can move in the direction that would un-qualify them.
- *  * `streak_5`, `comeback`, `beat_best_streak` — **not recomputable, and this
- *    is a real gap rather than a judgement that they should stand.** A streak
- *    day is earned by *any* qualifying engagement (`touchStreakOnEngagement`: a
- *    capture, a breakdown-confirm, a step or a task completion), and `Streak`
- *    holds only `current` and `lastActiveWorkday` — no per-day ledger of what
- *    supplied each day. So "would this day still have counted without the
- *    deleted item" has no answer in the schema, and neither reversing nor
- *    keeping can be shown correct. Keeping is the conservative half: it errs
- *    toward a badge the user did earn rather than removing one they did. Closing
- *    it properly needs a per-day engagement record, which is a migration and its
- *    own decision.
+ *  * `streak_5`, `comeback`, `beat_best_streak` — **moved out of this function
+ *    entirely by #233, not left unhandled.** They are now
+ *    {@link revokeUnqualifiedStreakBadges}'s, and they are separate because they
+ *    are gated on a different fact: this function's two badges are decided by
+ *    what the REVERSAL took back, and the streak's three by which ledger days the
+ *    delete EMPTIED. Those are different questions with different answers — a
+ *    delete can reverse a payout without emptying any day (the item's other
+ *    engagements, or another item, still credit it) and can empty a day without
+ *    reversing anything.
+ *
+ *    What that section used to say is worth keeping on the record, because it is
+ *    the reason the other function exists: *"a streak day is earned by any
+ *    qualifying engagement and `Streak` holds only `current` and
+ *    `lastActiveWorkday` — no per-day ledger of what supplied each day, so
+ *    'would this day still have counted without the deleted item' has no answer
+ *    in the schema."* `EngagementDay` is that ledger. Two of the three are now
+ *    recomputable; `comeback` is still kept, and the note there says why that is
+ *    now a decision about what the badge MEANS rather than a limit of the schema.
  *
  * Returns the keys it revoked, so a caller can be tested on the arithmetic and
  * so "nothing to revoke" is a normal answer rather than an error — the same
@@ -548,6 +599,243 @@ async function reverseLatestReward(
 }
 
 // ── streak ───────────────────────────────────────────────────────────────
+
+/**
+ * Record one qualifying engagement in the per-day ledger (#233).
+ *
+ * A plain `create`, and deliberately not an upsert or a `skipDuplicates`: two step
+ * completions of one item on one day are two rows, which is harmless because every
+ * reader asks "does this day hold at least one row". `logReward` next door has the
+ * same property for the same reason, and a unique key over a NULLable `itemId`
+ * would not dedupe the backfill's rows anyway (Postgres treats NULLs as distinct).
+ *
+ * `itemId` names the `BrainDumpItem` whose continued existence is the EVIDENCE for
+ * the credit, and the row cascades with it. `null` means the evidence is not an
+ * item, which makes the credit permanent — see {@link EngagementKind} and the
+ * model's docblock for why that is the conservative direction.
+ */
+async function recordEngagement(
+  workspaceId: string,
+  day: string,
+  engagement: { kind: EngagementKindT; itemId?: string | null },
+  db: Prisma.TransactionClient = prisma,
+): Promise<void> {
+  await db.engagementDay.create({
+    data: {
+      workspaceId,
+      day,
+      kind: engagement.kind,
+      itemId: engagement.itemId ?? null,
+    },
+  });
+}
+
+/**
+ * The ledger days one `BrainDumpItem` is the evidence for, read BEFORE it is
+ * deleted (#233).
+ *
+ * Read first because the rows cascade with the item, so after the delete there is
+ * nothing left to ask. Pair it with {@link engagementDaysNowEmpty} after the
+ * delete: the difference between the two is the set of days that lost their last
+ * credit, which is the only input streak-badge revocation needs.
+ */
+export async function engagementDaysOfItem(
+  workspaceId: string,
+  itemId: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<string[]> {
+  const rows = await db.engagementDay.findMany({
+    where: { itemId, workspaceId },
+    select: { day: true },
+    distinct: ["day"],
+  });
+  return rows.map((r) => r.day);
+}
+
+/**
+ * Which of `days` now hold NO engagement credit at all — i.e. which days stopped
+ * counting toward the streak (#233).
+ *
+ * One query rather than one per day, and `distinct` rather than a `groupBy`
+ * count: the question is membership, not arithmetic.
+ */
+export async function engagementDaysNowEmpty(
+  workspaceId: string,
+  days: readonly string[],
+  db: Prisma.TransactionClient = prisma,
+): Promise<string[]> {
+  if (days.length === 0) return [];
+  const surviving = await db.engagementDay.findMany({
+    where: { workspaceId, day: { in: [...days] } },
+    select: { day: true },
+    distinct: ["day"],
+  });
+  const kept = new Set(surviving.map((r) => r.day));
+  return days.filter((d) => !kept.has(d));
+}
+
+/**
+ * Recompute the streak from the ledger and revoke the streak badges whose
+ * condition no longer holds — the residual `#251` recorded and could not close
+ * (#233).
+ *
+ * Called only by `deleteBrainDumpItem`, and only with the days its delete actually
+ * emptied. A delete is the one action that destroys the evidence a streak day
+ * rested on; an UNDO is not, and `reverseStepCompletionRewards`' rule note says
+ * why at length — the engagement genuinely happened and does not un-happen, which
+ * is the same argument that keeps `session_finished`.
+ *
+ * ── It refuses to act far more often than it acts, and that is correct ──────
+ *
+ * Every gate below is a reason to KEEP a badge, because the failure modes are not
+ * symmetric: keeping a badge whose work is gone is a cosmetic overstatement, and
+ * removing one the person earned is taking away something real. `#251` chose the
+ * conservative half deliberately and this function does not reverse that choice —
+ * it narrows the set of cases where the conservative answer is the only available
+ * one.
+ *
+ *  1. **No day was emptied** — the delete removed credits from days that still
+ *     hold others, so the streak did not move and nothing can be un-qualified.
+ *  2. **The recomputed run is not fully ledgered** — see
+ *     {@link runIsFullyLedgered}. Rows before `Streak.ledgerFrom` are best-effort
+ *     archaeology from surviving `RewardEvent` and `BrainDumpItem` rows, and a
+ *     reward row that was later reversed leaves no trace of the engagement it
+ *     recorded. So a run beginning before that instant may be shorter than the
+ *     real one, and acting on it would revoke on evidence nobody collected. **On
+ *     a database that has just run the backfill this is the answer for every
+ *     workspace**, and stays the answer until a run begins after the migration —
+ *     which is the honest state of affairs, not a defect.
+ *  3. **The run was truncated** — `current` is a floor rather than the answer.
+ *  4. **The badge predates the run** — `earnedAt` before the run's first day means
+ *     an EARLIER run earned it. That run's length is filed in `StreakRecord`,
+ *     which this cannot recompute (see the `comeback` note below), so it stands.
+ *     This is the same `earnedAt` gate `revokeUnqualifiedBadges` already uses for
+ *     `ten_steps_day`, and for the same reason: it is what makes the answer a
+ *     reversal rather than a guess.
+ *
+ * ── `Streak.current` is lowered, never raised ───────────────────────────────
+ *
+ * A delete may take a streak day away and must never grant one. If the recompute
+ * comes back HIGHER than the stored counter, that is a pre-existing disagreement
+ * (a ledger row written where the counter's own transaction then failed, say) and
+ * repairing it is not a delete's business — so the update is gated on
+ * `run.current < streak.current`.
+ *
+ * ── The three badges, and why one of them still cannot move ─────────────────
+ *
+ *  * **`streak_5`** — qualifies while some run reached five working days. The
+ *     current run's length is now recomputable, so a delete that drops it under
+ *     five revokes. A `streak_5` earned by an earlier run is kept under gate 4.
+ *  * **`beat_best_streak`** — awarded when the current run exceeded the best
+ *     `StreakRecord`. Both sides of that comparison survive a delete: the records
+ *     are untouched, and the run is recomputed. So the condition is directly
+ *     recheckable.
+ *  * **`comeback`** — **kept, and now for a stated reason rather than for want of
+ *     a ledger.** It records that a streak ENDED and another began, and a
+ *     `StreakRecord` row is the trace of that event. A delete cannot remove one,
+ *     so the badge's evidence survives every delete by construction. Revoking it
+ *     would mean proving no reset ever happened, which needs the whole streak
+ *     history re-derived — and `StreakRecord` writes `startedAt` and `endedAt`
+ *     both as `now()` at reset time, so its rows cannot be placed on a calendar at
+ *     all. That is what a future change would have to fix; it is not something
+ *     this ledger can supply on its own.
+ */
+export async function revokeUnqualifiedStreakBadges(
+  workspaceId: string,
+  daysLost: readonly string[],
+  db: Prisma.TransactionClient = prisma,
+): Promise<BadgeKeyT[]> {
+  if (daysLost.length === 0) return []; // gate 1
+
+  // The same row lock `touchStreakOnEngagement` takes, for the same reason: this
+  // reads the counter, decides, and writes it. Taken AFTER the ledger rows are
+  // already gone (the cascade ran with the item delete), so the lock order is
+  // EngagementDay-then-Streak — identical to the engagement path's, which is what
+  // stops the two deadlocking against each other.
+  await db.$queryRaw`SELECT 1 FROM "Streak" WHERE "workspaceId" = ${workspaceId} FOR UPDATE`;
+
+  const streak = await db.streak.findUnique({
+    where: { workspaceId },
+    select: { current: true, ledgerFrom: true },
+  });
+  if (!streak) return []; // no streak row: nothing was ever credited
+
+  const settings = await db.settings.findUnique({
+    where: { workspaceId },
+    select: { workingDays: true },
+  });
+  // Falling back to the schema default rather than returning: a workspace can
+  // legitimately have no Settings row yet, and the default IS its working week.
+  const workingDays = parseWorkingDays(settings?.workingDays ?? "1,2,3,4,5");
+
+  const dayRows = await db.engagementDay.findMany({
+    where: { workspaceId },
+    select: { day: true },
+    distinct: ["day"],
+  });
+  const run = recomputeRun(
+    new Set(dayRows.map((r) => r.day)),
+    workingDays,
+    ymd(new Date()),
+  );
+
+  // gates 2 and 3
+  if (run.truncated || !runIsFullyLedgered(run.runStart, streak.ledgerFrom)) {
+    return [];
+  }
+  const runStartsAt = parseYmd(run.runStart as string);
+
+  if (run.current < streak.current) {
+    await db.streak.update({
+      where: { workspaceId },
+      data: {
+        current: run.current,
+        lastActiveWorkday: run.lastActiveWorkday,
+      },
+    });
+  }
+
+  const revoked: BadgeKeyT[] = [];
+  /** Drop one badge if it is held AND this run is what earned it (gate 4).
+   *  `deleteMany` for the reason {@link reverseLatestReward} gives: a concurrent
+   *  revocation must resolve to `count: 0`, not to a P2025 that rolls the
+   *  caller's transaction back over work somebody else already did. */
+  const revokeIfEarnedByThisRun = async (key: BadgeKeyT) => {
+    const badge = await db.badge.findUnique({
+      where: { workspaceId_key: { workspaceId, key } },
+      select: { earnedAt: true },
+    });
+    if (!badge || badge.earnedAt < runStartsAt) return;
+    const { count } = await db.badge.deleteMany({
+      where: { workspaceId, key },
+    });
+    if (count > 0) revoked.push(key);
+  };
+
+  // The same threshold `touchStreakOnEngagement` awards on (`current >= 5`), read
+  // the other way round and written against it rather than as its own constant so
+  // the two cannot drift apart silently — the convention
+  // `revokeUnqualifiedBadges` already keeps for `ten_steps_day`.
+  if (run.current < 5) await revokeIfEarnedByThisRun(BadgeKey.Streak5);
+
+  // `beat_best_streak`'s award condition is `best > 0 && current > best`. Both
+  // halves are re-read: with no records at all the badge cannot have been earned
+  // by that comparison, so there is nothing to recheck and it is left alone.
+  const best = await db.streakRecord.aggregate({
+    _max: { length: true },
+    where: { workspaceId },
+  });
+  const bestLength = best._max.length ?? 0;
+  if (bestLength > 0 && run.current <= bestLength) {
+    await revokeIfEarnedByThisRun(BadgeKey.BeatBestStreak);
+  }
+
+  // `comeback` is deliberately absent — see the docblock. Its evidence is a
+  // `StreakRecord` row, which no delete can remove.
+
+  return revoked;
+}
+
 export type StreakUpdate = {
   current: number;
   freshStart: boolean; // restarted after a reset
@@ -564,13 +852,27 @@ export type StreakUpdate = {
  */
 export async function touchStreakOnEngagement(
   workspaceId: string,
+  engagement?: { kind: EngagementKindT; itemId?: string | null },
 ): Promise<StreakUpdate | null> {
   const settings = await getSettings(workspaceId);
   const workingDays = parseWorkingDays(settings.workingDays);
   const now = new Date();
-  if (!workingDays.includes(isoWeekday(now))) return null; // non-working day: skip
-
   const today = ymd(now);
+
+  // Ensure the Streak row exists (race-safe) before we lock it in the txn. Also
+  // before the ledger write below, because a Streak row created LATER would be
+  // stamped with a `ledgerFrom` after a credit the ledger already holds — which
+  // would make that credit's day read as covered when it is not.
+  await getStreak(workspaceId);
+
+  if (!workingDays.includes(isoWeekday(now))) {
+    // #233 — a non-working day still gets its ledger row. The ledger is a log of
+    // what happened, not a view of what counted; `recomputeRun` is what applies
+    // the working-day rule, and it ignores this row exactly as the streak does.
+    // Recording it keeps the ledger honest if the working week is ever changed.
+    if (engagement) await recordEngagement(workspaceId, today, engagement);
+    return null; // non-working day: skip
+  }
 
   // Most recent working day strictly before today (pure — no DB access).
   const prev = new Date(now);
@@ -583,9 +885,6 @@ export async function touchStreakOnEngagement(
     }
   }
 
-  // Ensure the Streak row exists (race-safe) before we lock it in the txn.
-  await getStreak(workspaceId);
-
   // Read-decide-write in one interactive transaction. The leading
   // `SELECT … FOR UPDATE` serialises concurrent first-completions-of-the-day
   // for this workspace: a second caller blocks until the first commits, then
@@ -593,6 +892,24 @@ export async function touchStreakOnEngagement(
   // advances at most once and at most one StreakRecord is filed on a reset,
   // instead of the previous read→compute→write TOCTOU that could double both.
   const result = await prisma.$transaction(async (tx) => {
+    // #233 — the ledger row goes FIRST, and inside this transaction, and both
+    // halves of that are load-bearing.
+    //
+    // **Inside**, so the row and the counter cannot disagree: either both land or
+    // neither does. **First**, so that if they ever DO disagree the error is in
+    // the safe direction. A ledger AHEAD of the counter recomputes to a longer
+    // run, and `revokeUnqualifiedStreakBadges` never raises `current`, so nothing
+    // happens. A ledger BEHIND the counter recomputes to a SHORTER run, and that
+    // is the input that revokes a badge somebody still qualifies for.
+    //
+    // It is not the contended row, so it does not disturb the serialisation the
+    // `FOR UPDATE` below provides: two same-day callers both insert (new rows
+    // conflict with nothing) and then one blocks on the Streak lock, exactly as
+    // before. Lock ORDER is EngagementDay-then-Streak here, which is the same
+    // order `deleteBrainDumpItem` takes when its cascade removes rows and it then
+    // recomputes — inverting it in one writer is how a deadlock gets built.
+    if (engagement) await recordEngagement(workspaceId, today, engagement, tx);
+
     await tx.$queryRaw`SELECT 1 FROM "Streak" WHERE "workspaceId" = ${workspaceId} FOR UPDATE`;
     const streak = await tx.streak.findUnique({ where: { workspaceId } });
     if (!streak) {

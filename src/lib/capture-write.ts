@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { splitInlineNote } from "@/lib/braindump-note-syntax";
 import { normalizeTaskNote } from "@/lib/task-notes";
 import { touchStreakOnEngagement } from "@/lib/rewards";
+import { EngagementKind } from "@/lib/constants";
 
 /**
  * #175 — the ONE brain-dump capture write.
@@ -261,7 +262,13 @@ export async function writeCapture({
   // reasoning, the residual and the two alternatives are in this function's
   // docblock under "The streak touch is BEST-EFFORT".
   try {
-    await touchStreakOnEngagement(workspaceId);
+    // #233 — attributed to the row just written, so deleting that capture
+    // withdraws the streak credit it supplied. `created.id` and not the
+    // `clientKey`: the ledger cascades on the item's primary key.
+    await touchStreakOnEngagement(workspaceId, {
+      kind: EngagementKind.Capture,
+      itemId: created.id,
+    });
   } catch (error) {
     logCaptureBookkeepingFailure(workspaceId, error);
   }

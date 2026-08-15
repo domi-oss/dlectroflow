@@ -7,15 +7,19 @@ import {
   maybeAwardTenStepsDay,
   logReward,
   awardBadge,
-  touchStreakOnCompletion,
+  touchStreakOnEngagement,
   reverseItemCompletionRewards,
   revokeUnqualifiedBadges,
+  revokeUnqualifiedStreakBadges,
+  engagementDaysOfItem,
+  engagementDaysNowEmpty,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskStatus,
   RewardType,
   BadgeKey,
+  EngagementKind,
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { countsTowardInboxZero } from "@/lib/inbox-zero-queue";
@@ -339,6 +343,18 @@ export async function deleteBrainDumpItem(id: string) {
       data: { completedAt: null },
     }));
 
+    // #233 — the days this item's engagement credited, read BEFORE the delete
+    // because `EngagementDay` cascades with it and there would be nothing left to
+    // ask. Read inside the transaction and after the claim above, so it sees the
+    // row set the delete is actually about to destroy.
+    //
+    // Read unconditionally rather than only for a completed row: a capture is a
+    // qualifying engagement too, so an UNTRIAGED item deleted from the inbox can
+    // also be the last thing crediting a day. Gating this on `tookCompletion`
+    // would have made the whole mechanism invisible on the most ordinary delete in
+    // the app.
+    const creditedDays = await engagementDaysOfItem(workspaceId, id, tx);
+
     const { count } = await tx.brainDumpItem.deleteMany({
       where: { id, workspaceId },
     });
@@ -445,6 +461,32 @@ export async function deleteBrainDumpItem(id: string) {
     // is the early-out.
     if (reversed.stepDone > 0 || reversed.taskComplete)
       await revokeUnqualifiedBadges(workspaceId, reversed, tx);
+
+    // #233 — the streak half, and it is gated on a DIFFERENT fact from the two
+    // badges above, which is why it is a second call rather than another branch
+    // inside that function.
+    //
+    // Those two are decided by what the REVERSAL took back; the streak's are
+    // decided by which ledger days this delete EMPTIED. The two answers come
+    // apart in both directions: a delete can reverse a payout while every day it
+    // credited still holds another item's credit (nothing to revoke), and it can
+    // empty a day without reversing a single point — deleting the untriaged
+    // capture that was the day's only engagement does exactly that.
+    //
+    // The cascade has already run with the `deleteMany` above, so this asks which
+    // of the days that item credited now hold nothing at all. Inside the
+    // transaction for the reason every other write here is: a revocation that
+    // committed independently would survive a rollback that put the to-do back.
+    //
+    // Lock order is `BrainDumpItem` → `EngagementDay` (the cascade) → `Streak`
+    // (the `FOR UPDATE` inside the call). `touchStreakOnEngagement` takes the last
+    // two in the same order and never the first, so the two cannot deadlock; the
+    // note at `completeItem`'s payout block records the other half of that.
+    await revokeUnqualifiedStreakBadges(
+      workspaceId,
+      await engagementDaysNowEmpty(workspaceId, creditedDays, tx),
+      tx,
+    );
     // #251 review — the budget, on a transaction the repo's own gate cannot see.
     //
     // Every sibling writer that takes this same `BrainDumpItem` row lock is given
@@ -1014,18 +1056,34 @@ export async function completeItem(id: string) {
   // un-completed until something else happened to refresh it.
   if (closed) {
     // Outside the transaction, exactly as before this fix. These are reads and
-    // appends against `RewardEvent`, `Badge` and `Streak`, none of which the
-    // local writes depend on — and `touchStreakOnCompletion` opens its OWN
-    // interactive transaction with a `SELECT … FOR UPDATE` on `Streak`
-    // (`rewards.ts:596`, proved against real Postgres in
+    // appends against `RewardEvent`, `Badge`, `Streak` and — since #233 —
+    // `EngagementDay`, none of which the local writes depend on. And
+    // `touchStreakOnEngagement` opens its OWN interactive transaction with a
+    // `SELECT … FOR UPDATE` on `Streak` (proved against real Postgres in
     // `rewards.integration.test.ts`), which must not be nested inside this one
     // while it holds a `BrainDumpItem` lock. What makes them safe now is not a
     // transaction, it is `closed`.
+    //
+    // ⚠️ #233 — being OUTSIDE the transaction is also what keeps the lock order
+    // acyclic. This function's transaction holds the `BrainDumpItem` row lock;
+    // `touchStreakOnEngagement` takes `EngagementDay` then `Streak`, and
+    // `deleteBrainDumpItem` takes `BrainDumpItem` then `EngagementDay` then
+    // `Streak`. Nothing ever holds `Streak` and then reaches for a
+    // `BrainDumpItem`, which is what a deadlock would need. Moving this call
+    // inside the transaction above would create exactly that cycle.
     for (const _step of closed.steps)
       await logReward(workspaceId, RewardType.StepDone);
     if (task) await maybeAwardTenStepsDay(workspaceId);
     await logReward(workspaceId, RewardType.TaskComplete);
-    await touchStreakOnCompletion(workspaceId);
+    // #233 — attributed to the to-do being completed, so deleting it withdraws
+    // the streak credit this completion supplied. `touchStreakOnEngagement`
+    // rather than the deprecated `touchStreakOnCompletion` alias, because the
+    // alias takes no engagement argument and a credit with no `itemId` would be
+    // permanent — silently un-revocable, which is the defect this closes.
+    await touchStreakOnEngagement(workspaceId, {
+      kind: EngagementKind.TaskComplete,
+      itemId: id,
+    });
     await awardBadge(workspaceId, BadgeKey.TaskComplete);
     await maybeAwardInboxZero(workspaceId);
 

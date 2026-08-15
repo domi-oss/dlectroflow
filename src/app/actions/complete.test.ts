@@ -93,6 +93,12 @@ vi.mock("@/lib/workspace", () => ({
 }));
 // keep reward side-effects simple + observable
 vi.mock("@/lib/rewards", () => ({
+  touchStreakOnEngagement: vi.fn().mockResolvedValue(null),
+  // #233 — the ledger attributes a streak credit to the inbox item behind a
+  // task. `null` is the ordinary answer for a task with no item, and is what
+  // makes a credit permanent, so it is the right default for a file not asking
+  // about attribution.
+  itemIdForTask: vi.fn().mockResolvedValue(null),
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(true),
   rewardStepDone: vi.fn().mockResolvedValue(null),
@@ -1260,7 +1266,13 @@ describe("completeStep", () => {
       where: { id: "s1" },
       data: { done: true },
     });
-    expect(rewards.rewardStepDone).toHaveBeenCalledWith("owner");
+    // #233 — the second argument is the inbox item the step's work belongs to,
+    // resolved by `itemIdForTask` (stubbed `null` here). It is what lets the
+    // engagement ledger withdraw this credit if that to-do is deleted, so it is
+    // asserted rather than left to `toHaveBeenCalledWith("owner")`, which would
+    // have passed for a credit that is silently permanent.
+    expect(rewards.rewardStepDone).toHaveBeenCalledWith("owner", null);
+    expect(rewards.itemIdForTask).toHaveBeenCalledWith("owner", "t1");
     expect(rewards.logReward).not.toHaveBeenCalledWith(
       "owner",
       "session_finished",
