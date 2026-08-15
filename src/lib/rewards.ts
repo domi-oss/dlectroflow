@@ -129,6 +129,36 @@ export async function maybeAwardTenStepsDay(
  * by completing a step directly. Logs StepDone, extends the streak, and awards
  * the ten-steps-in-a-day badge. Does NOT log SessionFinished (that is the focus
  * timer's own bonus).
+ *
+ * ## ⚠️ A DELIBERATE EXCEPTION to the one-call-per-consequence rule
+ *
+ * Most multi-payout post-commit work in this app is split into one `bestEffort`
+ * call per consequence. The rule, and the callee test that decides it, are on
+ * `bestEffort` (`src/lib/best-effort.ts`) — **this function is one of the two that
+ * legitimately stay bundled** (the other is `touchStreakOnEngagement` below, which
+ * this function also calls), and it is flagged here rather than only behind that
+ * pointer so a bundled block is never read as an oversight.
+ *
+ * Note it is reached under **two** tags — `step_done_bookkeeping_failed` and
+ * `focus_step_reward_failed` — because `completeStep` and `completeFocus` both wrap
+ * it. One exception, two tags; an earlier version of the union marked only one of
+ * them, which is what made an "only one exception" count wrong.
+ *
+ * The local fact that earns the exception: `maybeAwardTenStepsDay` does
+ * `rewardEvent.count({ type: StepDone })`, counting the row `logReward` writes two
+ * lines above. Split those two and the count is short by one on the tenth step of
+ * the day, so the badge is silently not awarded — **wrong rather than merely
+ * missing**, which is worse than what splitting fixes.
+ *
+ * **The residual, stated rather than implied.** `touchStreakOnEngagement` sits
+ * between them and IS independent (it reads `Settings` and `Streak` only), so if it
+ * rejects, `maybeAwardTenStepsDay` does not run. Reordering does not remove that —
+ * it only moves which consequence is cancelled, because `await` sequencing is what
+ * carries the dependency. Removing it entirely would mean per-payout swallows
+ * *inside* a reward primitive, which `best-effort.ts` rejects by design: the
+ * swallow belongs to the caller that committed the write. Both callers already wrap
+ * this whole function, so a fault here is logged and cannot report the write as
+ * failed; what is lost is at most the remainder of one step's payout.
  */
 export async function rewardStepDone(
   workspaceId: string,
@@ -561,6 +591,30 @@ export type StreakUpdate = {
  * are skipped (don't break it). Missing a working day resets to 1 and files the
  * ended streak into the Top-3 records. Advances at most once per working day —
  * the leading `SELECT … FOR UPDATE` serialises same-day callers.
+ *
+ * ## ⚠️ A DELIBERATE EXCEPTION to the one-call-per-consequence rule
+ *
+ * The second of the two, alongside `rewardStepDone` above; the rule and its callee
+ * test are on `bestEffort` (`src/lib/best-effort.ts`). This function is **five**
+ * consequences, not one: the `StreakRecord` insert and the `Streak` update inside
+ * its transaction, then up to three streak badges (Comeback, Streak5,
+ * BeatBestStreak).
+ *
+ * The local fact that earns the exception: the `streakRecord.aggregate` below reads
+ * the `StreakRecord` row this function's own transaction may have just written on a
+ * reset, so the BeatBestStreak comparison cannot be separated from the write it
+ * measures without reading a stale best.
+ *
+ * **The residual, stated rather than implied.** Comeback and Streak5 are ordinary
+ * independent inserts, so if Comeback rejects, Streak5 and BeatBestStreak do not
+ * run. That is the same bounded residual `rewardStepDone` carries and it has the
+ * same answer: removing it would mean per-payout swallows inside a reward
+ * primitive, which `best-effort.ts` rejects by design — the swallow belongs to the
+ * caller that committed the write. `awardBadge` is idempotent, so any later
+ * qualifying engagement re-attempts every badge missed here.
+ *
+ * Reached under `breakdown_streak_touch_failed` directly, and transitively via
+ * `rewardStepDone` under two more tags.
  */
 export async function touchStreakOnEngagement(
   workspaceId: string,

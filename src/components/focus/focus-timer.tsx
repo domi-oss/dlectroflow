@@ -1421,6 +1421,22 @@ export function FocusTimer({
 
   // ── End screens ────────────────────────────────────────────────────────────
   if (phase === "done") {
+    // The one-line summary, assembled rather than interpolated (#257, `!339`).
+    // `points` is now what actually banked instead of a hardcoded 15, so 0 is a
+    // real value here — a payout that failed after the step committed is
+    // swallowed, not thrown — and "+0 points" under a 🎉 is both untrue and
+    // deflating. The Google half is independent of the rewards and still owed,
+    // so it cannot be dropped along with them, and joining only the parts that
+    // apply keeps the "·" from dangling in front of it.
+    //
+    // Not a failure notice, deliberately: the step is done and the row is
+    // committed. The points line is simply not owed.
+    const summary = [
+      result && result.points > 0 ? `+${result.points} points` : null,
+      result?.googleSynced ? "marked complete in Google Tasks ✅" : null,
+    ]
+      .filter((part): part is string => part !== null)
+      .join(" · ");
     return (
       <div className="space-y-5 text-center">
         {stepHeading}
@@ -1445,13 +1461,8 @@ export function FocusTimer({
             🎉
           </div>
           <p className="text-lg font-medium">{doneMsg}</p>
-          {result && (
-            <p className="text-muted-foreground text-sm">
-              +{result.points} points
-              {result.googleSynced
-                ? " · marked complete in Google Tasks ✅"
-                : ""}
-            </p>
+          {summary !== "" && (
+            <p className="text-muted-foreground text-sm">{summary}</p>
           )}
           {result?.streak ? (
             <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
