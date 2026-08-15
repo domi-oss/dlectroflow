@@ -186,9 +186,17 @@ test("#103 a preloaded dark theme comes up labelled 'Switch to light mode'", asy
   await expectThemeApplied(page, "dark");
 });
 
-// The other call site deliberately did NOT change: a bare icon in a settings
-// row would be worse than the label it replaced.
-test("#103 Settings > Appearance keeps the theme control's words", async ({
+// The other call site deliberately did NOT go icon-only: a bare icon in a
+// settings row would be worse than the label it replaced.
+//
+// ⚠️ #85 changed the CONTROL there without changing that decision. The setting
+// became three-state (`system` is now the default, and a two-state button cannot
+// express it — once pressed, you were pinned to an explicit theme for good), so
+// Settings > Appearance renders a radiogroup. What #103 was protecting is intact
+// and is what this test asserts: the words are still visible, they are still the
+// accessible names, nothing overrides them with an aria-label, and the bar has no
+// visible words at all.
+test("#103/#85 Settings > Appearance keeps the theme control's words", async ({
   page,
 }) => {
   await page.setViewportSize(DESKTOP);
@@ -196,14 +204,25 @@ test("#103 Settings > Appearance keeps the theme control's words", async ({
   await waitForShell(page);
   await expandSection(page, "settings-appearance");
 
-  // Named exactly "Dark mode" — i.e. by its VISIBLE words, with no aria-label
-  // overriding them (WCAG 2.5.3). `exact` is load-bearing: Playwright's default
-  // accessible-name matching is a case-insensitive SUBSTRING, which also matches
-  // the header's "Switch to dark mode". With the whole-string match this locator
-  // resolves to the Appearance row and only the Appearance row, so one hit
-  // proves both that the words survived here and that they are gone from the bar.
-  const row = page.getByRole("button", { name: "Dark mode", exact: true });
-  await expect(row).toHaveCount(1);
-  await expect(row).toBeVisible();
-  await expect(row).toContainText("Dark mode");
+  const group = page.getByRole("group", { name: "Theme" });
+  await expect(group).toBeVisible();
+
+  for (const label of ["Follow my system", "Light", "Dark"]) {
+    // `exact` is load-bearing: Playwright's default accessible-name matching is
+    // a case-insensitive SUBSTRING, so a loose "Dark" would also match the
+    // header's "Switch to dark mode" and the whole point is to tell the two
+    // call sites apart.
+    const option = group.getByRole("radio", { name: label, exact: true });
+    await expect(option).toHaveCount(1);
+    await expect(option).toBeVisible();
+    // The name comes from the visible label, not from an aria-label that would
+    // break WCAG 2.5.3 (Label in Name) for voice-control users.
+    await expect(option).not.toHaveAttribute("aria-label", /./);
+  }
+
+  // The counterpart claim the old single-locator version got for free: those
+  // words exist HERE and nowhere in the bar.
+  await expect(
+    page.locator("header").getByRole("button", { name: "Dark", exact: true }),
+  ).toHaveCount(0);
 });
