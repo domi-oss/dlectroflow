@@ -277,6 +277,69 @@ describe("remappedLogLevelFor", () => {
       expect(remappedLogLevelFor("anything", value)).toBeNull();
     }
   });
+
+  /**
+   * Duo review, and it was right to single this out: `!/…/` was implemented and
+   * unproven, in the one branch whose own code comment calls it the worst possible
+   * failure here. A negated entry EXCLUDES what it matches, so reading one as a
+   * promotion would report the #243 fix as in place while the message it was
+   * supposed to surface stayed at `debug` — the guard would be the thing lying.
+   *
+   * Both directions are asserted, because only asserting the positive one passes
+   * just as happily if the negation is dropped entirely.
+   */
+  it("treats a leading ! as Renovate does — the match EXCLUDES", () => {
+    const negated = [
+      {
+        matchMessage: "!/^Automerge on PR creation failed/",
+        newLogLevel: "warn",
+      },
+    ];
+    expect(
+      remappedLogLevelFor("Branch created", negated),
+      "a negated pattern matches everything it does NOT describe",
+    ).toBe("warn");
+    expect(
+      remappedLogLevelFor(
+        "Automerge on PR creation failed. Retrying 2",
+        negated,
+      ),
+      "the one message this entry excludes must not come back promoted",
+    ).toBeNull();
+  });
+
+  it("reads a negated pattern as an evaluatable form, not an unreadable one", () => {
+    // `!/…/` is regex form, so it must not be reported as something this module
+    // cannot parse — otherwise the real-config assertion would fail for the wrong
+    // reason and the negation would never be looked at.
+    expect(
+      unevaluatableMatchMessages([
+        { matchMessage: "!/^Automerge on PR creation failed/" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("honours the trailing i as case-insensitive", () => {
+    // Same class of gap as the negation: `endsWith("i")` was implemented and
+    // never exercised.
+    expect(
+      remappedLogLevelFor("automerge on pr creation failed", [
+        {
+          matchMessage: "/^Automerge on PR creation failed/i",
+          newLogLevel: "warn",
+        },
+      ]),
+    ).toBe("warn");
+    expect(
+      remappedLogLevelFor("automerge on pr creation failed", [
+        {
+          matchMessage: "/^Automerge on PR creation failed/",
+          newLogLevel: "warn",
+        },
+      ]),
+      "without the flag the same pattern must stay case-sensitive",
+    ).toBeNull();
+  });
 });
 
 /**
