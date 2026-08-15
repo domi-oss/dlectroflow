@@ -422,7 +422,30 @@ export function useCaptureQueue(workspaceId: string): CaptureQueueApi {
     const store = currentStore();
     const saved: string[] = [];
     if (!store) return { saved };
-    for (const capture of readQueue(store)) {
+    // ⚠️ **The keys are the plan; every ENTRY is re-read against live storage.**
+    //
+    // `await fetch` below yields for as long as a network round-trip, so a
+    // snapshot taken once is stale for every entry after the first — and the
+    // window is not a narrow one: the two-step confirm is *"a human pause of
+    // exactly the length a flush trigger needs"*, which is this module's own
+    // reason for re-checking inside `discard`.
+    //
+    // `claimed` bridges a discard's `await` and `inFlightKeys` bridges a POST, but
+    // a discard that has **completed** holds neither — and its entry is still in
+    // the snapshot. Flushing it POSTs words the user destroyed, and a never-saved
+    // capture has no `200` duplicate to absorb it, so the row is *created*: the
+    // "silent save after an explicit refusal" that `discard`'s mirror-first
+    // ordering exists to prevent, arriving from the flush side. Single tab, one
+    // press — **not** the two-tab residual recorded above as `#267`.
+    //
+    // Re-reading the whole entry rather than testing presence is deliberate: it
+    // also picks up a `blockedBy` a concurrent pass or the mirror carve-out wrote
+    // while this one waited, so a terminal mark is honoured on the first entry
+    // that learns it instead of one pass later.
+    for (const key of readQueue(store).map((c) => c.clientKey)) {
+      const capture = readQueue(store).find((c) => c.clientKey === key);
+      // Discarded, expired or already saved while this pass was mid-flight.
+      if (capture === undefined) continue;
       if (capture.workspaceId !== workspaceId) continue;
       // A terminal entry is skipped rather than flushed: a 403 that can never
       // clear must not be re-POSTed on every trigger for the life of the profile.

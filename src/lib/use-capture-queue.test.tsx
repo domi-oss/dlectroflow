@@ -496,9 +496,23 @@ describe("useCaptureQueue — Discard re-checks at resolution (#175)", () => {
     });
   });
 
-  it("skips a claimed entry and still drains the rest of the pass", async () => {
+  /**
+   * ⚠️ **Renamed, because the old name described a path this case cannot reach.**
+   *
+   * It was `"skips a claimed entry and still drains the rest of the pass"`, and
+   * the entry it discards is **in flight** — so `discard` returns
+   * `refused-in-flight` at the guard *above* the claim and `claimed` is never
+   * populated at all. Measured by mutation during the substitute review of
+   * `!348`: deleting `if (claimed.current.has(...)) continue;` from `flush` left
+   * this file and the strip's green, 59 of 59. What it really proves is the
+   * refusal arm, which is worth proving and is what it now says.
+   *
+   * The claim itself only exists while `deleteMirrored` is suspended, so its test
+   * needs that mock and lives in `use-capture-queue.discard-recovery.test.tsx`.
+   */
+  it("does not let a REFUSED discard stop the pass draining the rest", async () => {
     // Per-entry, matching the worker's rule: an implementation that aborted the
-    // whole pass would satisfy "no POST for the claimed entry" while
+    // whole pass would satisfy "no POST for the refused entry" while
     // reintroducing the head-of-line failure this design refuses. Counting POSTs
     // is the assertion.
     seed([
@@ -536,6 +550,128 @@ describe("useCaptureQueue — Discard re-checks at resolution (#175)", () => {
       );
       expect(keys).toContain("b");
     });
+  });
+});
+
+/**
+ * A pass reads the queue once and then awaits per entry, so **every later entry
+ * is acted on from a snapshot that is one network round-trip old.**
+ *
+ * `claimed` bridges a discard's own `await`, and `inFlightKeys` bridges a POST —
+ * but a discard that has *completed* holds neither, and the entry it removed is
+ * still in the snapshot the pass is walking. Found by the substitute review of
+ * `!348`, on the surface Duo's round reported as 60% truncated.
+ *
+ * ⚠️ **This is the single-tab case, and it is not `#267`.** That one needs the
+ * inbox open twice; this needs one tab and one press, because the two-step
+ * confirm is *"a human pause of exactly the length a flush trigger needs"* — this
+ * module's own words for why the confirm-resolution re-check exists. The re-check
+ * fires and correctly permits the discard; it is the *flush* that then re-POSTs
+ * it. And a never-saved capture has no `200` duplicate to absorb the re-POST, so
+ * the row is **created**: the words the user destroyed arrive in their inbox.
+ */
+describe("useCaptureQueue — a pass acts on live state, not its snapshot (#175)", () => {
+  /** Seeds two entries and gates `a`'s POST open until the returned fn is called. */
+  async function passStalledOnFirst(): Promise<() => void> {
+    seed([
+      capture({ clientKey: "a", text: "first" }),
+      capture({ clientKey: "b", text: "second" }),
+    ]);
+    let release: (() => void) | null = null;
+    const started = vi.fn();
+    fetchMock.mockImplementation(
+      async (_url: string, init: { body: string }) => {
+        if (JSON.parse(init.body).clientKey === "a") {
+          started();
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return jsonReply(201);
+      },
+    );
+    render(<Host />);
+    // The overlap itself, asserted rather than assumed: `a`'s POST is genuinely
+    // outstanding, so the pass really is suspended mid-loop with `b` still ahead
+    // of it. Without this the case could pass by never having raced at all.
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    return () => release?.();
+  }
+
+  function postedKeys(): string[] {
+    return fetchMock.mock.calls.map(
+      (c) => JSON.parse((c[1] as { body: string }).body).clientKey as string,
+    );
+  }
+
+  /**
+   * The non-vacuous control, and it earns its place: the case below asserts that
+   * `b` was NOT posted, which a harness whose pass died after the first entry
+   * would also satisfy — and that regression is the head-of-line failure this
+   * design refuses. So prove the pass does reach `b` when nothing removed it.
+   */
+  it("does reach the second entry once the first resolves", async () => {
+    const release = await passStalledOnFirst();
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(postedKeys()).toContain("b"));
+    await waitFor(() => expect(readQueue(window.localStorage)).toEqual([]));
+  });
+
+  it("does not POST an entry discarded while the pass was mid-flight", async () => {
+    const release = await passStalledOnFirst();
+
+    // An ordinary, permitted Discard: `b` has no POST outstanding, so the strip
+    // opens its confirm and the hook's re-check finds it queued and removes it.
+    await act(async () => {
+      expect(await latest!.discard(["b"])).toBe("discarded");
+    });
+    expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+      "a",
+    ]);
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+
+    // `a` saving is what tells us the pass got past the gate and looked at `b`.
+    await waitFor(() => expect(readQueue(window.localStorage)).toEqual([]));
+    expect(postedKeys()).not.toContain("b");
+    expect(postedKeys()).toEqual(["a"]);
+  });
+
+  it("respects a mark another pass wrote while this one was mid-flight", async () => {
+    // The same stale-snapshot read, in the direction that wastes a request rather
+    // than losing words — and it is the cheap proof that the fix re-reads the
+    // ENTRY and not merely its presence.
+    const release = await passStalledOnFirst();
+
+    await act(async () => {
+      const stored = readQueue(window.localStorage).map((c) =>
+        c.clientKey === "b" ? { ...c, blockedBy: "account-revoked" } : c,
+      );
+      seed(stored as QueuedCapture[]);
+      window.dispatchEvent(new Event(CAPTURE_QUEUE_EVENT));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+        "b",
+      ]),
+    );
+    expect(postedKeys()).not.toContain("b");
   });
 });
 

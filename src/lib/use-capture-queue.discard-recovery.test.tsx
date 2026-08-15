@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useEffect } from "react";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useCaptureQueue, type CaptureQueueApi } from "@/lib/use-capture-queue";
 import { CAPTURE_QUEUE_STORAGE_KEY, readQueue } from "@/lib/capture-queue";
@@ -213,5 +213,112 @@ describe("useCaptureQueue — a Discard is not undone by the re-enqueue (#175)",
       await discarding;
     });
     expect(readQueue(window.localStorage)).toEqual([]);
+  });
+});
+
+/**
+ * `flush`'s own use of the claim, which nothing else could reach.
+ *
+ * ⚠️ **`use-capture-queue.test.tsx` carried a case NAMED for this that never
+ * populated `claimed` at all** — the entry it discards is in flight, so `discard`
+ * returns `refused-in-flight` at the guard above the claim. Measured by mutation
+ * during the substitute review of `!348`: deleting `if (claimed.current.has(...))
+ * continue;` from `flush` left that file and the strip's green, **59 of 59**. The
+ * claim exists only while `deleteMirrored` is suspended, which is what this file
+ * mocks and why the test belongs here. That case is now named for the refusal arm
+ * it really proves.
+ */
+describe("useCaptureQueue — flush skips a CLAIMED entry (#175)", () => {
+  function seedTwo(): void {
+    window.localStorage.setItem(
+      CAPTURE_QUEUE_STORAGE_KEY,
+      JSON.stringify([
+        { clientKey: "a", text: "first", workspaceId: LIVE, capturedAt: 1_000 },
+        {
+          clientKey: "b",
+          text: "second",
+          workspaceId: LIVE,
+          capturedAt: 1_000,
+        },
+      ]),
+    );
+  }
+
+  function postedSince(from: number): string[] {
+    const mock = globalThis.fetch as unknown as {
+      mock: { calls: [string, { body: string }][] };
+    };
+    return mock.mock.calls
+      .slice(from)
+      .map((c) => JSON.parse(c[1].body).clientKey as string);
+  }
+
+  function callCount(): number {
+    return (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock
+      .calls.length;
+  }
+
+  /**
+   * Both entries queued, and `a`'s discard suspended inside `deleteMirrored`.
+   *
+   * ⚠️ Returns the pending promise **wrapped**. Returning it bare from an `async`
+   * function adopts it, so the helper would await the very discard it is meant to
+   * leave suspended and every case here would time out.
+   */
+  async function claimHeldOnA(): Promise<{ discarding: Promise<unknown> }> {
+    seedTwo();
+    render(<Host />);
+    // The mount flush attempts both and fetch rejects, so both stay queued.
+    await waitFor(() => expect(callCount()).toBe(2));
+    await waitFor(() => expect(latest?.flushing).toBe(false));
+
+    let discarding: Promise<unknown> | null = null;
+    await act(async () => {
+      discarding = latest!.discard(["a"]);
+      await Promise.resolve();
+    });
+    // The overlap itself: the claim is live precisely because the mirror delete
+    // has not resolved. Without this the case could pass having never raced.
+    expect(deleteCalls).toEqual([["a"]]);
+    expect(readQueue(window.localStorage).map((c) => c.clientKey)).toEqual([
+      "a",
+      "b",
+    ]);
+    return { discarding: discarding! };
+  }
+
+  it("does not POST an entry whose discard holds the claim", async () => {
+    const { discarding } = await claimHeldOnA();
+
+    const from = callCount();
+    await act(async () => {
+      await latest!.flush();
+    });
+
+    expect(postedSince(from)).not.toContain("a");
+
+    await act(async () => {
+      for (const release of pendingDeletes) release();
+      await discarding;
+    });
+  });
+
+  it("still drains the rest of the pass past the claimed entry", async () => {
+    // The non-vacuous half, and the one that stops the fix being "abort the
+    // pass": that would satisfy the case above while reintroducing the
+    // head-of-line failure this design refuses.
+    const { discarding } = await claimHeldOnA();
+
+    const from = callCount();
+    await act(async () => {
+      await latest!.flush();
+    });
+
+    expect(postedSince(from)).toEqual(["b"]);
+
+    await act(async () => {
+      for (const release of pendingDeletes) release();
+      await discarding;
+    });
   });
 });
