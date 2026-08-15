@@ -258,6 +258,22 @@ describe("HelpPage", () => {
     expect(text).toMatch(/OpenDyslexic/);
     // Reminders: the section's real heading, not the word "reminders" alone.
     expect(text).toMatch(/Notifications/);
+    // Duo review, !356 — the section's LEAD sentence has to name what the section
+    // covers. It listed three of five after this MR added the Appearance and
+    // Integrations paragraphs below it, so a reader skimming only the summary would
+    // never learn the typeface options are in here. That is the same
+    // "section does not say what it covers" gap this MR exists to close, so it is
+    // asserted on the first sentence specifically rather than on the section text.
+    const lead = section!.querySelector("p")!.textContent ?? "";
+    for (const covered of [
+      /voice/i,
+      /freshness/i,
+      /notifications/i,
+      /appearance/i,
+      /integrations/i,
+    ]) {
+      expect(lead).toMatch(covered);
+    }
     // …and the precondition, which is the reachable failure here.
     expect(text).toMatch(/permission/i);
   });

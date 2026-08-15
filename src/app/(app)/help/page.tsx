@@ -382,8 +382,9 @@ export default async function HelpPage({
         <SectionHeading id="help-voice-settings" voice={voice} />
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
-          snack-themed voice, set your freshness thresholds, and choose your
-          notifications on the{" "}
+          snack-themed voice, set your freshness thresholds, choose your{" "}
+          <strong>notifications</strong>, adjust the <strong>appearance</strong>
+          , and connect your <strong>integrations</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
