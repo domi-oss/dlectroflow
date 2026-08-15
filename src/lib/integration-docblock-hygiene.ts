@@ -27,19 +27,26 @@
  * went. A substring check would red the pipeline on the two sites that are
  * already correct.
  *
- * So the unit of judgement is the LINE, and the question is whether that line
- * disavows the recipe rather than handing it over. Line-scoped on purpose:
- * deciding it per docblock would let one negation anywhere in a file wave
+ * So the scan unit is the LINE, and within a line **each occurrence of the
+ * recipe is judged separately**: an occurrence is left alone only if it is quoted
+ * as a code span and the line disavows the recipe. Scoped to the line on purpose
+ * — deciding it per docblock would let one negation anywhere in a file wave
  * through a prescription further down, which is the drift this exists to catch.
+ * The exact rule and its limits live on {@link prescribesEnvSourcing}.
  *
  * ── What this is, and is not ────────────────────────────────────────────────
  * The **control** is `config/vitest.config.ts`'s one-variable forwarding. This is
  * a hygiene check protecting the *documentation* from telling people to defeat
- * that control, and it is not an adversarial boundary: a line carrying a
- * negation about something else while still prescribing the recipe is exempted
- * (asserted in the colocated test, so the limit is recorded rather than
- * discovered). What it stops is the accidental drift that actually happened —
- * twelve copies of a sentence, each recopied from the last.
+ * that control, and it is not an adversarial boundary. What it stops is the
+ * accidental drift that actually happened — twelve copies of a sentence, each
+ * recopied from the last, all twelve on a single line.
+ *
+ * Its three known limits are stated once, in {@link prescribesEnvSourcing}'s own
+ * docstring, and each is asserted in the colocated test. They are deliberately
+ * **not** restated here: an earlier draft of this paragraph described the
+ * pre-fix behaviour and cited a test that by then proved the opposite, which is
+ * the same defect this whole MR is about — a docblock a reader would trust,
+ * saying something the code does not do.
  *
  * Kept free of `fs` like every other hygiene module here: the caller reads the
  * files, this module parses, so the parsing can be exercised on synthetic input
@@ -106,20 +113,27 @@ function codeSpans(line: string): [number, number][] {
  * occurrence is exempt only if **that** occurrence sits inside a code span and
  * the line disavows the recipe; one bare occurrence condemns the line.
  *
- * ── Two known limits, both asserted in the colocated test ───────────────────
+ * ── Three known limits, each asserted in the colocated test ─────────────────
+ * This is the authoritative list. Nothing else in the file restates it, because
+ * a second copy is what let an earlier draft of the header describe behaviour
+ * the code had stopped having.
+ *
  * 1. The disavowal must sit on the same line as the command, so a warning that
  *    wraps the command onto a line of its own is flagged. The failure message
- *    says to keep them together.
- * 2. A recipe **split across several docblock lines** (`set -a` on one line,
+ *    says to keep them together, so the red pipeline names its own fix.
+ * 2. A mention that is quoted as a code span **and** disavowed **and** still
+ *    being prescribed is exempt — `Do not forget to run \`set -a; …\``. That
+ *    sentence has to be contorted on purpose.
+ * 3. A recipe **split across several docblock lines** (`set -a` on one line,
  *    `. ./.env` on the next) is not detected, because the scan unit is the line.
  *    Joining lines before matching would mean a second detection mode with its
  *    own quoting and disavowal semantics — a disavowal on the first line would
  *    otherwise exempt a prescription on the fourth, reintroducing exactly the
- *    hole above. #256 caps this guard at one assertion for that reason, so the
- *    gap is recorded here rather than closed. All twelve real occurrences wrote
- *    the recipe on one line.
+ *    hole this function's per-occurrence check closes. #256 caps this guard at
+ *    one assertion for that reason, so the gap is recorded rather than closed.
+ *    All twelve real occurrences wrote the recipe on one line.
  *
- * Both limits are the same trade: this is a drift guard, not an adversarial
+ * All three are the same trade: this is a drift guard, not an adversarial
  * boundary. The control is `config/vitest.config.ts`'s one-variable forwarding.
  */
 export function prescribesEnvSourcing(line: string): boolean {
