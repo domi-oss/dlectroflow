@@ -71,11 +71,41 @@ const DISAVOWED =
   /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|need)\s+not\b|\b(?:do|does|must|should)n['’]t\b/i;
 
 /**
+ * The recipe sitting inside a backtick code span, i.e. **quoted rather than
+ * handed over**.
+ *
+ * This is the second half of the exemption, and it is what stops a disavowal
+ * elsewhere in the sentence waving a prescription through — `!350`'s review
+ * raised exactly that (a line reading "You should not skip the DB setup; run:
+ * set -a; …" carries a disavowal phrase but still prescribes the command).
+ *
+ * Requiring the code span is a tighter answer than measuring the distance
+ * between the negation and the command, and a better one: a bounded distance is
+ * a number that has to be tuned against adversarial examples, whereas the code
+ * span is how this repo's prose already distinguishes a command being discussed
+ * from one being given. Every real warning in the tree quotes it; every
+ * prescription wrote it bare, as something to copy.
+ */
+const QUOTED_RECIPE = /`[^`]*set\s+-a\s*;\s*\.\s+\.\/\.env[^`]*`/;
+
+/**
  * True when `line` hands the reader the env-sourcing recipe as a thing to run,
  * as opposed to naming it in order to warn against it.
+ *
+ * A mention is exempt only when it is **both** quoted as a code span **and**
+ * disavowed on the same line. Both are required because either alone is
+ * reachable by an ordinary prescription: a bare command with an unrelated
+ * negation nearby, or a quoted command someone is telling you to run.
+ *
+ * The residual is documented and asserted in the colocated test: a line that
+ * quotes the recipe AND carries a disavowal phrase AND still prescribes it is
+ * exempt. That sentence has to be contorted on purpose, and this is a drift
+ * guard rather than an adversarial boundary — the control is
+ * `config/vitest.config.ts`'s one-variable forwarding, not this.
  */
 export function prescribesEnvSourcing(line: string): boolean {
-  return SOURCES_ENV_FILE.test(line) && !DISAVOWED.test(line);
+  if (!SOURCES_ENV_FILE.test(line)) return false;
+  return !(QUOTED_RECIPE.test(line) && DISAVOWED.test(line));
 }
 
 /** A prescription found in a file, as a 1-based line number and its text. */

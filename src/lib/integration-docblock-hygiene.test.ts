@@ -112,6 +112,38 @@ describe("integration-test docblock hygiene (#256)", () => {
       ).toBe(true);
     });
 
+    // `!350`'s review raised these two: a disavowal phrase anywhere on the line
+    // used to exempt it, so a line could prescribe the command and be skipped
+    // because of an unrelated negation. A missed violation is the dangerous
+    // direction for this guard, so both cases are pinned. The fix is that an
+    // exemption now needs the recipe QUOTED as a code span as well — which is
+    // how the repo's prose already separates a command being discussed from one
+    // being given, and needs no distance threshold to tune.
+    it.each([
+      // The reviewer's own example.
+      " * It is not entirely obvious why, but run: set -a; . ./.env; set +a; npm run test",
+      // A disavowal phrase from the list, negating something else entirely.
+      " * You should not skip the DB setup; run: set -a; . ./.env; set +a; npm test",
+      " * Never skip migrations first: set -a; . ./.env; set +a; npm run test",
+      // Quoted but not disavowed: someone telling you to run it.
+      " * Run `set -a; . ./.env; set +a; npm test` before the suite.",
+    ])("still flags %j", (line) => {
+      expect(prescribesEnvSourcing(line)).toBe(true);
+    });
+
+    it("exempts only a mention that is BOTH quoted and disavowed", () => {
+      // The residual, recorded rather than left to be discovered. A line has to
+      // quote the recipe AND carry a disavowal AND still be prescribing it,
+      // which takes a contorted sentence. This is a drift guard, not an
+      // adversarial boundary — the control is the config's one-variable
+      // forwarding, and the module docblock says so.
+      expect(
+        prescribesEnvSourcing(
+          " * Do not forget to run `set -a; . ./.env; set +a` first.",
+        ),
+      ).toBe(false);
+    });
+
     it("requires the disavowal on the same line as the recipe", () => {
       // Recorded rather than left to be discovered: this is the one shape a
       // reader could reasonably write and still fail. The sweep's failure
