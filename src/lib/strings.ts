@@ -75,12 +75,30 @@ export const STRINGS = {
   // self-hoster's voice override can reach, so pinning the pair is still worth
   // something, and deleting a key is the breaking half of the change.
   //
-  // This issue leaves FOUR keys in that state, not the three this comment used to
-  // claim: `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
-  // `task-steps.tsx` lost its `Edit step title` entry) and this one. Re-derive
-  // rather than trust the list — a key is orphaned when
+  // Re-derived by this comment's own recipe during the /help copy audit, which is
+  // what it asks for: **TEN** keys are in that state, not the four claimed here
+  // before (and not the three claimed before that). The four already named —
+  // `action.addTodo`, `action.editTitle`, `step.editTitle` (dropped when
+  // `task-steps.tsx` lost its `Edit step title` entry) and this one — plus six
+  // that were never listed: `action.confirmSteps`, `focus.complete`,
+  // `focus.pauseForNow`, `focus.hyper.turnOff`, `focus.launcher.intro` and
+  // `pill.toDo`. All ten are KEPT, on the same reasoning as above; only the count
+  // was wrong.
+  //
+  // Re-derive rather than trust the list — a key is orphaned when
   // `git grep -n '"<key>"' -- src e2e` matches only `strings.ts` and
   // `strings.test.ts`.
+  //
+  // ⚠️ That recipe over-reports, and the audit had to correct for it: it is
+  // literal-string-only, so a key reached by a COMPUTED lookup reads as orphaned
+  // while being live. `freshness.recent` is the one such key today — it is
+  // built from a template literal by `status-pill.tsx:49`, whose key is the tier
+  // interpolated after "freshness.", and a
+  // naive sweep would have deleted a label the inbox paints on every row. That
+  // template literal is the only non-literal `t()` call in the tree, and every
+  // `Record<_, StringKey>` map (`BUCKET_LABEL`, `THEME_LABEL`, `TYPEFACE_LABEL`,
+  // `BADGE_STRING_KEY`, `EJECT_MESSAGE`) spells its keys literally, so the recipe
+  // is sound everywhere else. Check for a new computed caller before trusting it.
   "action.moveTo": { plain: "Move to…", playful: "Move to…" },
 
   // v6 row redesign — short CTA on the visible buttons, full descriptive wording
