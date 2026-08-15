@@ -83,6 +83,11 @@ describe("integration-test docblock hygiene (#256)", () => {
       "You shouldn't run `set -a; . ./.env; set +a`.",
       "This doesn't need `set -a; . ./.env; set +a`.",
       "Don't run `set -a; . ./.env; set +a`.",
+      // `didn't` / `needn't`: the two the contraction group used to omit while
+      // the spelled-out group covered them (`!350` review). Both spellings of
+      // every auxiliary now come from one shared list.
+      "Earlier versions didn't need `set -a; . ./.env; set +a`.",
+      "You needn't run `set -a; . ./.env; set +a`.",
       "Never run `set -a; . ./.env; set +a`.",
       "We no longer use `set -a; . ./.env; set +a`.",
       "Avoid `set -a; . ./.env; set +a`.",

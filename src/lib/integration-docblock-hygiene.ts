@@ -77,9 +77,17 @@ const SOURCES_ENV_FILE = /set\s+-a\s*;\s*\.\s+\.\/\.env/g;
  * alternative has a case in the colocated test** — an alternative nothing
  * asserts is untested code, and it stops the next reader telling a deliberate
  * choice from a typo.
+ *
+ * The auxiliary verbs are listed **once** and take either spelling,
+ * `(?:\s+not|n['’]t)`, rather than as two parallel groups. `!350`'s review found
+ * those groups had drifted apart — the spelled-out one covered `did`/`need` and
+ * the contraction one did not, so a legitimate `You needn't run …` was flagged
+ * as a prescription. Sharing the verb list makes that particular drift
+ * unrepresentable instead of relying on someone keeping two lists in step, which
+ * is the same failure this MR is sweeping out of twelve docblocks.
  */
 const DISAVOWED =
-  /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|need)\s+not\b|\b(?:do|does|must|should)n['’]t\b/i;
+  /\bnever\b|\bavoid\b|\bno longer\b|\binstead of\b|\brather than\b|\bunnecessary\b|\bnot needed\b|\b(?:do|does|did|must|should|need)(?:\s+not|n['’]t)\b/i;
 
 /** A backtick code span. */
 const CODE_SPAN = /`[^`]*`/g;
