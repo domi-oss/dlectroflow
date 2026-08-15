@@ -3,7 +3,7 @@
 A layered set of prompts to run in **Claude Code** against this repo to raise the app
 to production quality. Adapted from Richard Seroter's "quality-focused prompts for the
 vibe coding addict" (four-layer *build a house* progression), rewritten for this stack:
-non-standard Next.js, Prisma, GitLab CI, Reclaim calendar integration, LLM-driven task
+non-standard Next.js, Prisma, GitLab CI, Google Tasks calendar integration, LLM-driven task
 breakdown, and an ADHD target audience.
 
 > Source: https://seroter.com/2025/07/07/quality-focused-prompts-for-the-vibe-coding-addict/
@@ -56,16 +56,19 @@ debt each cycle. This file **defers to** `docs/SECURITY.md` (security cadence) a
 
 ### Automation gaps (turn manual prompt work into CI)
 
-These are currently *not* automated and are cheap to add — doing so removes recurring
-manual toil from the buckets above:
+**All three of the gaps this section listed have since been closed**, and the
+prompts below have been corrected to match. Left here as the record of what was
+automated, because a prompt telling an agent to add a gate that already exists
+burns a whole run and comes back with a confident wrong finding:
 
-- **`.env.example` drift check** — a small CI job that diffs `process.env.*` usage against
-  `.env.example` keys and fails on drift (covers Layer 4 item 4).
-- **Mechanical a11y** — `@axe-core/playwright` (or axe in jsdom/vitest) on core routes as a
-  CI job (covers the WCAG-mechanical half of Layer 0, freeing the manual pass for
-  cognitive-load judgment).
-- **Format gate** — Prettier is **not** installed today; add it + `prettier --check` to the
-  `test_app` job (reconciles Layer 1 item 4 and Layer 4 item 2).
+- ~~**`.env.example` drift check**~~ — **done.** `scripts/check-env-drift.ts` +
+  `src/lib/env-drift.ts`, run as `npm run check:env` and folded into the
+  `test_app` job.
+- ~~**Mechanical a11y**~~ — **done.** `@axe-core/playwright` with nine specs under
+  `e2e/a11y/`, gating on new serious/critical violations against
+  `e2e/a11y/axe-baseline.json`. It rides `e2e_test` rather than taking its own job.
+- ~~**Format gate**~~ — **done.** Prettier is installed, configured at
+  `config/prettier.config.mjs`, and run as `npm run format:check`.
 - ~~**Scheduled pipelines** — a weekly #16 health/spend digest and a monthly run of the Duo
   `security-assessment.md` (it already files a tracked issue).~~ **Done.** The weekly
   digest is the `ops_digest` job on the base-image rescan schedule; the monthly
@@ -105,9 +108,9 @@ before judging any Next.js patterns, per `AGENTS.md`. Then: (1) find the top 5 c
 versions; (2) scan for hardcoded config/magic values that belong in env or a central
 config; (3) review `package.json` dependencies for redundant/duplicate libraries that could
 be consolidated (skip "outdated/deprecated" — Renovate + Dependency Scanning own that); (4)
-confirm the ESLint setup enforces what it should and flag gaps (note: Prettier is NOT
-installed — treat "add a `prettier --check` format gate" as a one-time finding, not an
-existing setup to audit); (5) assess whether `README.md` and `docs/` would get a new
+confirm the ESLint setup enforces what it should and flag gaps (note: Prettier IS
+installed and `npm run format:check` is a CI gate — audit the existing config at
+`config/prettier.config.mjs`, do not propose adding one); (5) assess whether `README.md` and `docs/` would get a new
 contributor running. Report first, patch only what I approve.
 ```
 
@@ -126,14 +129,14 @@ contributor running. Report first, patch only what I approve.
 Act as a paranoid security and reliability engineer. Cross-reference `docs/SECURITY.md` and
 `.gitlab/duo/prompts/security-assessment.md` and produce an actionable, prioritised work
 plan (not just prose) — focused on the four app-specific risks (defer generic posture to
-the monthly security-assessment): (1) the OAuth/token flow — how Google/Reclaim access &
+the monthly security-assessment): (1) the OAuth/token flow — how GitLab sign-in and Google Tasks access &
 refresh tokens are stored, scoped, refreshed, and revoked; flag anything at-rest in
 plaintext or logged (note: #21 P2 added AES-256-GCM `TOKEN_ENC_KEY` — verify it holds);
 (2) the LLM task-breakdown path — treat user brain-dump text as untrusted: prompt-injection
 exposure, PII leaving to the model provider, and missing rate/cost limits; (3) Prisma data
 isolation — can one user ever read another's tasks? check every query for a missing
 user/workspace-scope filter (highest severity on a live multi-user app); (4) error handling
-on DB, Reclaim, and LLM calls so a third-party outage degrades gracefully instead of
+on DB, Google Tasks, and LLM calls so a third-party outage degrades gracefully instead of
 crashing. Give me code-level fixes ranked by severity.
 ```
 
@@ -145,9 +148,9 @@ crashing. Give me code-level fixes ranked by severity.
 Act as an SRE preparing dlectroflow to run reliably on its live domain. Analyse for:
 (1) N+1 and slow Prisma queries, especially anything looping over tasks or calendar events
 — suggest single-query or batched rewrites; (2) blocking/expensive work in request paths
-(LLM calls, Reclaim sync) that should be async, queued, or cached; (3) structured logging —
+(LLM calls, Google Tasks sync) that should be async, queued, or cached; (3) structured logging —
 propose a JSON logging strategy with request/user IDs and convert a few key log points;
-(4) the 3 metrics that matter most for this app (e.g. LLM latency & error rate, Reclaim
+(4) the 3 metrics that matter most for this app (e.g. LLM latency & error rate, Google Tasks
 sync success rate, task-completion funnel) and where to instrument them — these become the
 inputs to the #16 weekly health/spend check; (5) horizontal-scaling blockers — any
 in-memory state (sessions, caches, locks, LLM rate-limit counters) that must move to the DB
@@ -164,8 +167,8 @@ Act as a DevOps engineer. This repo already has `.gitlab-ci.yml`, a multi-stage
 exists; do NOT scaffold GitHub Actions. Check: (1) `docker/Dockerfile` is genuinely lean and
 multi-stage with no dev deps or secrets in the final image; (2) `.gitlab-ci.yml` runs lint,
 `vitest`, a Prisma migration check, and a Docker build on every pipeline, and fails
-properly when any stage fails (note: there is no `format` step — Prettier isn't installed;
-flag adding `prettier --check` as a finding if wanted); (3) `docker/docker-compose.yml` spins up
+properly when any stage fails (note: the `format:check` step exists and Prettier is
+installed — audit it, do not propose adding it); (3) `docker/docker-compose.yml` spins up
 the full stack (app + Postgres) with one command for a new contributor; (4) `.env.example`
 lists every variable the app actually reads — diff it against real usage in the code (this
 is the canonical home for the `.env` drift check; best turned into a CI job); (5) Prisma

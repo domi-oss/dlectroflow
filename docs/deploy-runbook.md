@@ -559,9 +559,13 @@ Two triggers that are *not* a database leak also land on step 5:
    `DELETE FROM "GoogleAuth";` and reconnect via
    `https://work.dlectroflow.dev/api/google/oauth/start` — the canonical host, for
    the reason §8 gives.
-4. **Reclaim tokens** (only if a `ReclaimAuth` row exists — the write path is
-   unused): revoke dlectroflow in Reclaim's connected-apps settings, then
-   `DELETE FROM "ReclaimAuth";` — a fresh client re-registers on next connect.
+4. **Reclaim tokens — nothing to do, and do not run the old command.** The
+   `ReclaimAuth` table was dropped by the `20260719172453_drop_reclaim`
+   migration; it exists only in migration history. This step used to say
+   `DELETE FROM "ReclaimAuth";`, which now errors on a missing relation — in the
+   middle of an incident response, on a checklist meant to be worked top to
+   bottom without stopping to think. Reclaim consumes a Google Tasks list
+   downstream and holds no token here, so step 3 already covers it.
 5. **Calendar feed tokens** (#154) — **every one of them, not a sample.** These
    are plaintext, so unlike steps 3 and 4 there is nothing to decide: if the
    rows were in something that left your control, the tokens are disclosed.
