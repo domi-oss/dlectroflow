@@ -145,15 +145,30 @@ test.describe("#85 the OS colour scheme decides the first paint", () => {
 
   // The control for the test above: without it, "light on a light OS" is also
   // what a completely broken implementation returns, since light is what the app
-  // did unconditionally before this change. The pair is what distinguishes
-  // "follows the OS" from "still always light".
-  test("the two OS settings actually differ on the same route", async ({
+  // did unconditionally before this change.
+  //
+  // ⚠️ Comparing the two END STATES is not enough, and this comment used to claim
+  // it was ("the pair is what distinguishes 'follows the OS' from 'still always
+  // light'"). MEASURED: with the `matchMedia` clause deleted from
+  // THEME_BOOTSTRAP_SCRIPT — the exact #85 defect restored, `<head>` back to
+  // `k=p==="dark"` — this test PASSED, and so did nine of the other ten in this
+  // file. `ThemeSync` re-adds the class on mount, so the end state is identical
+  // and only the ARRIVAL TIME differs; the mutation log on that build read
+  // `[{dark:false,readyState:"loading"},{dark:true,readyState:"complete"}]`,
+  // which is the one-frame flash this issue is about.
+  //
+  // So this asserts WHEN as well as WHETHER: on the dark device the class must
+  // land before `<body>` is parsed, which nothing but the `<head>` script can do.
+  // That keeps a second route (/help) covered by a first-paint assertion rather
+  // than leaving the whole property resting on the single test above.
+  test("the two OS settings actually differ on the same route, and dark lands before <body>", async ({
     browser,
   }) => {
     const results: boolean[] = [];
     for (const scheme of ["light", "dark"] as const) {
       const context = await browser.newContext({ colorScheme: scheme });
       const page = await context.newPage();
+      await recordThemeMutations(page);
       await page.goto("/help");
       await waitForShell(page);
       results.push(
@@ -161,6 +176,21 @@ test.describe("#85 the OS colour scheme decides the first paint", () => {
           document.documentElement.classList.contains("dark"),
         ),
       );
+      if (scheme === "dark") {
+        const log = await readThemeLog(page);
+        const firstDark = log.find((entry) => entry.dark);
+        expect(
+          firstDark,
+          `nothing ever added the dark class on /help. Mutation log: ${JSON.stringify(log)}`,
+        ).toBeDefined();
+        expect(
+          firstDark!.bodyExists,
+          `on /help the dark class arrived only AFTER <body> existed (readyState ` +
+            `${firstDark!.readyState}), so the <head> script did not resolve the OS ` +
+            `and something later corrected it: the end state is right and the first ` +
+            `paint is not. Mutation log: ${JSON.stringify(log)}`,
+        ).toBe(false);
+      }
       await context.close();
     }
     expect(results).toEqual([false, true]);
