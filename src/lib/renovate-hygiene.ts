@@ -197,8 +197,7 @@ export function branchCreationWindows(
   return raw
     .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
-    .filter((entry) => entry !== "" && entry !== SCHEDULE_ANY_TIME)
-    .map((entry) => entry);
+    .filter((entry) => entry !== "" && entry !== SCHEDULE_ANY_TIME);
 }
 
 /** A cron field, as far as telling cron from Later-syntax prose requires. */
