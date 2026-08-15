@@ -170,7 +170,9 @@ thing in the left column, the pages are wrong until you fix them.
 | **Resend / round-up email** | Whether Resend is a live recipient and a US transfer | `src/lib/email.ts`; Privacy → *Who else is involved*, *Data that leaves the UK* |
 | **Sign-in providers** (GitLab only, `read_user`) | "GitLab is the only sign-in method", and what is stored from the provider | `src/lib/auth/providers.ts`; Privacy → *If you have an account* |
 | **What switching shopping-list mode off does** (#199 — `updateShoppingList` writes only `Settings.shoppingList`, so the `ShoppingItem` rows survive the switch) | The sentence saying the toggle "hides the list without deleting it". Making the switch destructive would make it wrong in the **un**reassuring direction — a reader told their list survives would lose it — which is the direction nobody discovers until it has happened to them. `src/app/actions/settings.shopping.test.ts` asserts the action writes nothing but that one column, so this row has a build failure behind it rather than only a reminder | `src/app/actions/settings.ts` → `updateShoppingList`; Privacy → *What I collect, and why* |
-| **New Prisma model holding personal data** | The *What I collect* list. An incomplete notice is the failure mode here | `prisma/schema.prisma`; Privacy → *What I collect, and why* |
+| **New Prisma model _or field_ holding personal data** | The *What I collect* list. An incomplete notice is the failure mode here. **A new FIELD counts, and this row said "model" until #252's `User.displayName` walked straight through it** — a column added to an existing model is exactly as much of an Art. 13(1)(c) disclosure as a new table, and it is the easier of the two to add without noticing. `FocusPlaylist.name` and `BreakdownTurn.message` went undisclosed the same way | `prisma/schema.prisma`; Privacy → *What I collect, and why* |
+| **A free-text column reaching the LLM prompt** | *What is sent* / *What is not sent* under Privacy → *Sending your text to an AI provider*. `src/lib/breakdown-context.ts` is an egress boundary whose `select` is otherwise numbers and flags, so the page has twice been able to say "no free text" while one column was being quoted verbatim into the prompt. **Widening that `select` to any text column is a new disclosure, not a prompt-quality tweak** — and the sentence to check is the negative one, because it is the one that reads as a guarantee | `src/lib/breakdown-context.ts` (the `select`), `src/lib/breakdown.ts` → `buildNoteBlock` / `MAX_NOTE_CONTEXT_CHARS`; Privacy → *Sending your text to an AI provider* |
+| **A free-text column reaching a scheduled Google Task or an `.ics` download** | Privacy → *Connecting Google Tasks* → *What it is used for*, which describes what the `notes` field carries. `buildScheduleNote` composes the task note, the step note, a prompt line and a focus URL, and `encodeReclaim` writes the result into the Google Task's `notes` — so a note typed here is **copied into the reader's Google Tasks list**. The subscription **feed** is deliberately different and carries titles and times only (`buildFeedIcs`); keep the two apart, because the page makes a promise about the feed that would become false if the note were ever added to it | `src/lib/scheduling/note.ts` → `buildScheduleNote`, `src/lib/scheduling/encode-reclaim.ts`, `src/app/actions/ics-schedule.ts`, `src/lib/calendar-feed.ts` → `buildFeedIcs`; Privacy → *Connecting Google Tasks*, *Who else is involved* |
 | **Controller identity** | `CONTROLLER_NAME` **and** the Google consent screen, which must match | `legal.ts`; both pages |
 | **The project ever charging for anything** (a paid tier, donations tied to features, any trade) | The non-commercial framing on both pages, the "not a sale / not a customer" clause, the liability rationale, CRA/UCTA trader status, and the ICO fee answer. See *Who the controller is* above — this reopens all of it | both pages; `docs/legal.md` |
 
@@ -180,7 +182,12 @@ Easy to miss when auditing "what leaves the box", because only the first is
 obvious:
 
 1. `src/app/api/breakdown/route.ts` — the breakdown itself (task title, current
-   proposed steps, your free-text guidance).
+   proposed steps, your free-text guidance, **and the note on the task being
+   broken down** — `Task.notes`, selected by `src/lib/breakdown-context.ts` and
+   rendered verbatim into the prompt by `buildNoteBlock`, clamped to
+   `MAX_NOTE_CONTEXT_CHARS` = 600 characters. Landed with #179; it is the one
+   free-text column this module selects, and it is easy to miss because the
+   `select` around it is otherwise all numbers and flags).
 2. `src/lib/rollup.ts` — the end-of-day narrative (up to 5 completed step texts,
    up to 3 carry-over texts). Signed-in accounts only.
 3. `src/app/actions/focus.ts` → `proposeNewEstimate` — one step's text plus its
@@ -404,8 +411,13 @@ reason is architectural rather than procedural:
 `GET /users/@me/lists`, which returns task-**list** names so the right list can
 be found to write into. No task is ever read back. There is therefore no
 Workspace user data held in the app that *could* be forwarded to a model.
-`src/lib/breakdown-context.ts` independently pins a `select` of numeric, enum,
-boolean and date columns and never selects `Step.text` or `BrainDumpItem.text`.
+`src/lib/breakdown-context.ts` independently pins a `select` that is otherwise
+numeric, enum, boolean and date, and never selects `Step.text` or
+`BrainDumpItem.text`. It does select one free-text column — `Task.notes`, for the
+single task being broken down (#179) — which is text the person typed **here**,
+not anything read from Google. The Limited Use conclusion above is unaffected: it
+rests on there being no Google data held in the app to forward, and one read of
+task-**list** names is still the only read the integration makes.
 
 Two consequences that save work if this comes round again:
 
@@ -466,7 +478,11 @@ behind them:
   safeguards (standard contractual clauses + the UK International Data Transfer
   Addendum) for Anthropic and Resend. Confirm the DPA is accepted on each account
   and keep a copy — a reader is entitled to ask to see the safeguards.
-- **Access-log retention.** The pages describe web-server access logs using the
-  "criteria" formulation rather than a fixed period, because the platform's log
-  retention is not set in this repo. If you pin it (GKE/Cloud Logging retention),
-  state the number instead — it is the stronger disclosure.
+- **Access-log retention.** The pages state a fixed period — **30 days** — rather
+  than the weaker "criteria" formulation, in three places on `/privacy` (*What is
+  not collected*, *Optional connections* on the feed token, and *How long I keep
+  it*). `scripts/check-log-retention.sh` defaults `LOG_RETENTION_DAYS=30` and the
+  `log-retention` hygiene test is what holds the two together. If the platform's
+  retention is ever changed, that number is wrong in three published places at
+  once, and a **shorter** window is wrong in the reassuring direction — see the
+  feed-token row above, which is the same failure.
