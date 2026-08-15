@@ -402,6 +402,51 @@ describe("streak-badge revocation on delete (#233, closing #251's residual)", ()
     expect(await badgeKeys(WS)).toEqual([]);
   });
 
+  it("keeps beat_best_streak after a NATURAL reset has filed the run that earned it", async () => {
+    // ⚠️ The reachable shape, and the one where the arithmetic alone gets it wrong.
+    //
+    // Beat your best with a run of 6, then miss a day. The reset files
+    // `StreakRecord(6)`, so `best` becomes 6 and `current` becomes 1 — and
+    // `current <= best` is now true, permanently, for a badge that is perfectly
+    // well earned. Every user who beats their best and then takes a day off lands
+    // here, so a delete on any later day would revoke it on arithmetic alone.
+    //
+    // Gate 4 is what saves it: `earnedAt` predates the CURRENT run's first day,
+    // because the badge was earned by the run that has since been filed. This is
+    // the `beat_best_streak` twin of the `streak_5` case above, and it is asserted
+    // separately because the two badges reach gate 4 through different conditions.
+    await seedWorkspace(WS, { current: 2, ledgerFromDaysAgo: 20 });
+    await prisma.streakRecord.create({
+      data: {
+        workspaceId: WS,
+        length: 6,
+        startedAt: midnightAgo(12),
+        endedAt: midnightAgo(6),
+      },
+    });
+    await itemCrediting(WS, "keeper", [dayAgo(1)]);
+    const doomed = await itemCrediting(WS, "doomed", [dayAgo(0)]);
+    await prisma.badge.create({
+      data: {
+        workspaceId: WS,
+        key: BadgeKey.BeatBestStreak,
+        // Earned during the run that is now filed as the 6-day record.
+        earnedAt: midnightAgo(6),
+      },
+    });
+
+    const { deleteBrainDumpItem } = await import("@/app/actions/braindump");
+    await deleteBrainDumpItem(doomed);
+
+    // The counter still comes down — that is a fact about the current run and the
+    // recompute for it is trusted…
+    expect(
+      (await prisma.streak.findUnique({ where: { workspaceId: WS } }))?.current,
+    ).toBe(1);
+    // …and `current (1) <= best (6)` is true, yet the badge stays.
+    expect(await badgeKeys(WS)).toEqual([BadgeKey.BeatBestStreak]);
+  });
+
   it("keeps beat_best_streak while the recomputed run STILL beats the best record", async () => {
     // The control for the case above. Without it, a rule that revoked
     // unconditionally would look identical.
