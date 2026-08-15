@@ -26,10 +26,14 @@ describe("section registries (#72)", () => {
     // signed-in-only Account section, 9 after #35 Phase B's owner-only People
     // section).
     expect(SETTINGS_SECTIONS.length).toBe(11);
-    // 7 since #129/#153 added Help's "Your data" section — export and
-    // self-deletion are rights a reader arrives looking for, so they are a named
-    // section rather than a line inside another one.
-    expect(HELP_SECTIONS.length).toBe(7);
+    // 9 since the copy audit added "Where things end up" (Library + Activity) and
+    // "Shopping list" — three of the app menu's seven destinations were
+    // undocumented, and shopping-list mode is additionally OFF by default, so its
+    // switch is the only thing that reveals the feature exists at all.
+    // (7 after #129/#153 added "Your data" — export and self-deletion are rights a
+    // reader arrives looking for, so they are a named section rather than a line
+    // inside another one.)
+    expect(HELP_SECTIONS.length).toBe(9);
   });
 
   it("resolves a settings label through the app voice — one source for nav + <h2>", () => {

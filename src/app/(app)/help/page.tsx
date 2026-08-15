@@ -133,13 +133,25 @@ export default async function HelpPage({
           chips; nothing is discarded until you actually start, and you can back
           out with <strong>Keep my paused session</strong>.
         </p>
+        {/* #89 — the pacer is RING-STYLE ONLY, and this paragraph used to read as
+            though every session had it ("From the moment you start, the ring is
+            also a slow breathing pacer … there is nothing to switch on").
+            `timer-visual.tsx` reaches the breathing markup only in its `ring`
+            branch — `digits`, `bar` and `mug` each return before it — so three of
+            the four styles never breathe, and `resolveTimerStyle(null, voice)`
+            resolves an unset style to `mug` on the playful voice. A reader who
+            picked Bar, or who never picked anything on the playful voice, was
+            being told about something their session cannot do. */}
         <p className="text-sm">
-          From the moment you start, the ring is also a slow breathing pacer:
-          four seconds growing, six seconds settling back. It runs for the whole
-          session — through a pause and out the other side — and stops when time
-          is up. Follow it if you want something to steady yourself against,
-          ignore it the rest of the time; it never moves the clock or the
-          buttons, and there is nothing to switch on. If your system asks for
+          The <strong>Ring</strong> timer style doubles as a slow breathing
+          pacer: from the moment you start, four seconds growing, six seconds
+          settling back. It runs for the whole session — through a pause and out
+          the other side — and stops when time is up. Follow it if you want
+          something to steady yourself against, ignore it the rest of the time;
+          it never moves the clock or the buttons, and it needs no setting of
+          its own. The other three timer styles do not breathe, so if you want
+          it, pick <strong>Ring</strong> under{" "}
+          <strong>Focus timer → Timer style</strong>. If your system asks for
           reduced motion, the ring simply holds still.
         </p>
         {/* #142 — the app navigates ON ITS OWN five seconds after a step is
@@ -234,16 +246,127 @@ export default async function HelpPage({
         </p>
       </section>
 
+      {/* The getting-started list above ends by promising the reader they will
+          "earn points toward your streak" — a payoff whose address this page never
+          gave. Library and Activity are two of the app menu's seven destinations
+          and neither was named anywhere here.
+
+          Both are linked by their MENU labels rather than their routes, because
+          those are the words on screen: `/dashboard` renders `nav.dashboard` →
+          "Activity", so a reader sent to look for "Dashboard" finds nothing. */}
+      <section className="space-y-2">
+        <SectionHeading id="help-where-things-go" voice={voice} />
+        <p className="text-sm">
+          Once something leaves the inbox it lives in{" "}
+          <Link href="/library" className="underline">
+            Library
+          </Link>
+          , under four tabs: <strong>Single-task</strong> and{" "}
+          <strong>Multi-step</strong> for work in progress,{" "}
+          <strong>Saved for later</strong> for anything parked (its freshness
+          clock is paused until it wakes), and <strong>Done</strong> for
+          finished work. The inbox keeps a short preview of what you completed
+          today; <strong>Done</strong> is the full list. Opening a multi-step
+          row expands its steps in place, so you can carry on without leaving
+          the page.
+        </p>
+        <p className="text-sm">
+          <Link href="/dashboard" className="underline">
+            Activity
+          </Link>{" "}
+          is where the points and streaks land: what you earned today, your
+          current streak, your best streaks, and <strong>badges</strong> that
+          fill in as you reach them. It also holds the{" "}
+          <strong>end-of-day round-up</strong> — a short recap of the day
+          written for you when your workday ends, which you can also trigger
+          early to see what it looks like. The round-up&rsquo;s own settings
+          (when your workday ends, and whether to email it) are on that page
+          rather than in Settings.
+        </p>
+      </section>
+
+      {/* #199 — shopping-list mode. `Settings.shoppingList` is `@default(false)`
+          and `/shopping` answers `notFound()` while it is off, so this section has
+          to lead with the switch: the feature is not merely undocumented without
+          it, it is unreachable. Its own section rather than a line inside
+          "Voice & settings", matching why `settings-shopping` is its own section —
+          a feature switch filed under a heading that does not name it is a feature
+          nobody finds. */}
+      <section className="space-y-2">
+        <SectionHeading id="help-shopping-list" voice={voice} />
+        <p className="text-sm">
+          <strong>Off until you turn it on.</strong> Tick{" "}
+          <strong>Show the shopping list</strong> under{" "}
+          <strong>Shopping list</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page and a <strong>Shopping list</strong> entry appears in the menu,
+          alongside a trolley button in the top bar. Turning it back off hides
+          the list <strong>without deleting it</strong> — everything is still
+          there if you switch it on again.
+        </p>
+        <p className="text-sm">
+          It is deliberately a plain list, not a kind of task: no estimates, no
+          steps, nothing lands in your calendar, and ticking something off does
+          not touch your streak. Add a line, tick it, rename it, or move it to{" "}
+          <strong>Saved for later</strong> for things you buy occasionally —
+          nothing comes back from there on its own, you pull it up when you want
+          it. While the list has anything on it the inbox shows a one-line
+          reminder of how many items are waiting, which you can dismiss.
+        </p>
+      </section>
+
       <section className="space-y-2">
         <SectionHeading id="help-voice-settings" voice={voice} />
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
-          snack-themed voice, set your freshness thresholds, and manage
-          reminders on the{" "}
+          snack-themed voice, set your freshness thresholds, and choose your
+          notifications on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
           page.
+        </p>
+        {/* #40 — the Typeface radios include two legibility aids, and this page
+            offered nothing to the reader most likely to be looking for them.
+            Someone who cannot comfortably read the app is exactly who opens a help
+            page, so the two faces are named: the NAME is the search term. */}
+        <p className="text-sm">
+          <strong>Appearance</strong> covers light and dark mode, how completed
+          items are struck through and ticked, and the <strong>typeface</strong>{" "}
+          the whole app uses. Two of the four choices are there to make reading
+          easier — <strong>Atkinson Hyperlegible</strong> and{" "}
+          <strong>OpenDyslexic</strong> — so if the default is hard going, that
+          is the setting to try first.
+        </p>
+        {/* The section is called `Notifications`, not "reminders", and every toggle
+            in it is inert until the browser grants permission. A user can tick all
+            three, be told nothing, and receive nothing — so the precondition is
+            stated here rather than left to be inferred from silence. */}
+        <p className="text-sm">
+          <strong>Notifications</strong> is where the round-up, aging reminders
+          and the daily review nudge are switched on or off, and where the
+          nudge&rsquo;s time is set. They are desktop notifications, so{" "}
+          <strong>your browser has to grant permission first</strong> — until it
+          does, the switches save but nothing arrives. The page offers you that
+          permission prompt when it can.
+        </p>
+        {/* Two integrations existed and neither was mentioned. The feed URL is a
+            bearer capability — anyone holding it reads the feed unauthenticated —
+            and this page documents data rights two sections down, so the caveat
+            `calendar-feed.tsx` puts on screen is carried here too rather than being
+            met only after the URL has been pasted somewhere. */}
+        <p className="text-sm">
+          <strong>Integrations</strong> holds two, and both are yours alone
+          rather than the instance&rsquo;s: connect{" "}
+          <strong>Google Tasks</strong> to schedule your steps into your own
+          account, and create a <strong>calendar feed</strong> your calendar app
+          can subscribe to. Treat that feed&rsquo;s address like a password —
+          anyone who has it can read your step titles and times{" "}
+          <strong>without signing in</strong>, so regenerate it if it gets out.
+          You can turn either off again, and a single task can be added to a
+          calendar as a one-off file without connecting anything.
         </p>
         {/* #252 — the header used to greet people by their provider username,
             which is nobody's name. Says where the field is, and that it changes

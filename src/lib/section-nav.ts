@@ -78,6 +78,22 @@ export const HELP_SECTIONS = [
   { id: "help-inbox-freshness", heading: { text: "The inbox & freshness" } },
   { id: "help-task-breakdown", heading: { text: "Task breakdown" } },
   { id: "help-focus-session", heading: { text: "The focus session" } },
+  // The app menu carries seven destinations and this page documented three of
+  // them. These two close that gap, in the menu's own order (Library, Shopping
+  // list, Activity — content destinations, before the settings-shaped sections):
+  //
+  //  * `help-where-things-go` covers Library and Activity together, because they
+  //    answer one question between them — "my work left the inbox, where is it
+  //    now, and where did the points go". Placed straight after the focus session
+  //    so the page follows the loop to its end rather than stopping at the timer.
+  //  * `help-shopping-list` is its own section rather than a line inside
+  //    "Voice & settings", for the same reason `settings-shopping` is
+  //    (SETTINGS_SECTIONS above): it is a FEATURE switch that adds a destination,
+  //    and a feature filed under a heading that does not name it is a feature
+  //    nobody finds. It is also the one section here describing something that is
+  //    OFF until switched on, which is a fact that needs room to be stated.
+  { id: "help-where-things-go", heading: { text: "Where things end up" } },
+  { id: "help-shopping-list", heading: { text: "Shopping list" } },
   { id: "help-voice-settings", heading: { text: "Voice & settings" } },
   // #129 / #153 — export and self-deletion. After "Voice & settings" because
   // both controls live under Account on the same Settings page that section

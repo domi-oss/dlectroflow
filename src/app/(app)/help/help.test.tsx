@@ -39,6 +39,8 @@ describe("HelpPage", () => {
       /The inbox & freshness/i,
       /Task breakdown/i,
       /The focus session/i,
+      /Where things end up/i,
+      /Shopping list/i,
       /Voice & settings/i,
       /Your data/i,
       /Guests & AI limits/i,
@@ -93,6 +95,139 @@ describe("HelpPage", () => {
     expect(text).toMatch(/reduced motion/i);
     // #65 — the player's pause button can drive the session, if asked to.
     expect(text).toMatch(/Pause music and timer together/i);
+  });
+
+  // The pacer is RING-STYLE ONLY, and this page used to describe it as
+  // unconditional ("From the moment you start, the ring is also a slow breathing
+  // pacer … there is nothing to switch on"). It is not: `timer-visual.tsx` reaches
+  // the breathing markup only in its `ring` branch — `digits`, `bar` and `mug`
+  // each return before it — so three of the four timer styles never breathe.
+  //
+  // `resolveTimerStyle(null, voice)` is what makes that reachable rather than
+  // theoretical: an account that has never opened Timer style resolves to `mug`
+  // on the playful voice and only `ring` on plain, so for a whole voice the
+  // documented default behaviour was the one thing that could not happen. And a
+  // plain-voice reader who simply picks Bar is told their session breathes for its
+  // whole length with nothing to switch on.
+  it("names the Ring timer style as the breathing pacer's precondition", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    // The style is named, and named as the thing that turns the pacer on.
+    expect(text).toMatch(/Ring/);
+    expect(text).toMatch(/Timer style/i);
+    // And the reader is told the other styles do not have it, because "the ring
+    // breathes" alone reads as a description of every session.
+    expect(text).toMatch(
+      /other (?:three )?timer styles do not breathe|only the Ring/i,
+    );
+    // The retired unconditional phrasing must be gone, not merely softened.
+    expect(text).not.toMatch(/there is nothing to switch on/i);
+  });
+
+  // The app menu carries seven destinations; this page documented three of them
+  // (Inbox, Focus, Settings) and never named Library or Activity — even though its
+  // own getting-started list promises the reader they will "earn points toward
+  // your streak", which is a payoff with no stated address.
+  //
+  // Asserted on the MENU labels (`nav.everything` → `Library`, `nav.dashboard` →
+  // `Activity`), not on the route paths: `/dashboard` renders the word "Activity"
+  // and a reader hunting for "Dashboard" finds nothing.
+  it("names the Library and Activity destinations, by their menu labels", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Where things end up/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/Library/);
+    expect(text).toMatch(/Activity/);
+    // Library's four tabs are the reason the section exists: "where did my
+    // finished work go" is the question, and `Done` is the tab that answers it.
+    expect(text).toMatch(/Done/);
+    expect(text).toMatch(/Saved for later/i);
+    // Activity is where the points and the streak the loop promises actually live.
+    expect(text).toMatch(/streak/i);
+    expect(text).toMatch(/badge/i);
+    const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("/library");
+    expect(hrefs).toContain("/dashboard");
+  });
+
+  // #199 — shopping-list mode is `Settings.shoppingList`, `@default(false)`, and
+  // `/shopping` answers `notFound()` while it is off. This page had never heard of
+  // it, which is the worse of the two failures the brief distinguishes: a gated
+  // feature described without its switch is misleading, but one omitted entirely
+  // is undiscoverable, and the switch is the only thing that reveals it.
+  it("documents shopping-list mode as off until switched on (#199)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Shopping list/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    // The switch, by the label it actually carries in Settings.
+    expect(text).toMatch(/Show the shopping list/i);
+    // That it is off until you do that — the whole point of documenting it.
+    expect(text).toMatch(/off (?:by default|until|to start)/i);
+    // What the mode is FOR, in the terms its own intro uses: not tasks.
+    expect(text).toMatch(/no estimates|not tasks|does not touch your streak/i);
+    // And the reassurance the Settings hint gives, because a feature switch reads
+    // as destructive: turning it off hides the list rather than deleting it.
+    expect(text).toMatch(/without deleting|does not delete|hides the list/i);
+    const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("/settings?from=help");
+  });
+
+  // "Voice & settings" named three of Settings' eleven sections. The two that
+  // matter most to a reader who came to /help for help are both absent:
+  //
+  //  - #40's Typeface radios, which is where Atkinson Hyperlegible and
+  //    OpenDyslexic live. Someone who cannot comfortably read the app is exactly
+  //    who opens the help page, and it offered them nothing.
+  //  - the real name of the reminders section (`Notifications`) and the fact that
+  //    every toggle in it is inert without the browser's permission — a user can
+  //    tick all three, be told nothing, and receive nothing.
+  it("documents the typeface a11y setting and the Notifications permission gate", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Voice & settings/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    // The section that owns the typefaces, and the two aids by name — the names
+    // are what someone who needs them is searching for.
+    expect(text).toMatch(/Appearance/);
+    expect(text).toMatch(/Atkinson Hyperlegible/);
+    expect(text).toMatch(/OpenDyslexic/);
+    // Reminders: the section's real heading, not the word "reminders" alone.
+    expect(text).toMatch(/Notifications/);
+    // …and the precondition, which is the reachable failure here.
+    expect(text).toMatch(/permission/i);
+  });
+
+  // Two integrations exist and neither was mentioned: per-user Google Tasks
+  // scheduling, and a calendar-subscription URL that is a BEARER CAPABILITY —
+  // anyone holding it reads the feed without signing in. The page documents
+  // export and deletion as data rights; a link that hands out step titles and
+  // times to whoever has the URL belongs in the same breath.
+  it("documents the Google and calendar-feed integrations, and the URL's risk", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Voice & settings/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/Integrations/);
+    expect(text).toMatch(/Google Tasks/);
+    expect(text).toMatch(/calendar feed|calendar subscription/i);
+    // The caveat `calendar-feed.tsx` puts on screen, carried here rather than
+    // left to be met only after the URL has been copied somewhere.
+    expect(text).toMatch(/without signing in|like a password/i);
   });
 
   // #142 — the app now NAVIGATES ON ITS OWN five seconds after a step is
