@@ -1,6 +1,10 @@
 # dlectroflow — Deployment Runbook (GKE Autopilot + GitLab)
 
-All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dev**.
+All infra lives in GCP region **europe-west2**. This cluster is served on two
+hostnames: **`work.dlectroflow.dev`**, the canonical one and the only origin a
+sign-in can complete on, and the apex **`dlectroflow.dev`**. §7 has the split, and
+it matters for §8 — an auth path checked against the apex answers with a redirect
+to the canonical host rather than with what you were looking for.
 
 ## 0. Prerequisites
 - `gcloud` authed to the target project; `kubectl`, `helm` installed.
@@ -181,18 +185,33 @@ Adding a host is four coordinated changes, in this order:
 Rolling back is putting the old `host` back and redeploying.
 
 ## 8. Google OAuth redirect
-Add to the OAuth client's authorized redirect URIs (keep the local one too):
-- `https://dlectroflow.dev/api/google/oauth/callback`
+
+**The redirect URI carries the canonical host, not the apex.** The app builds it
+from `PUBLIC_ORIGIN`, which the chart derives as `https://{{ .Values.host }}`
+(`charts/dlectroflow/templates/deployment.yaml`) — so it is whatever §7 calls
+canonical, and it moves the day `host` moves. Add to the OAuth client's authorized
+redirect URIs (keep the local one too):
+- `https://work.dlectroflow.dev/api/google/oauth/callback`
 - `http://localhost:3000/api/google/oauth/callback`
 
 After the production deploy, confirm the app builds an **https** redirect URI behind
-ingress (Task 3 handles the forwarded-proto derivation):
+ingress (`requestOrigin` in `src/lib/origin.ts` derives it from the forwarded proto):
 ```bash
-curl -s -o /dev/null -D - "https://dlectroflow.dev/api/google/oauth/start" | grep -i '^location:'
+curl -s -o /dev/null -D - "https://work.dlectroflow.dev/api/google/oauth/start" | grep -i '^location:'
 ```
-The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dev%2F…`.
-If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check the
-ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
+The `Location:` URL's `redirect_uri=` must be
+`https%3A%2F%2Fwork.dlectroflow.dev%2F…`. If it shows `http%3A%2F%2F` or Google
+returns `redirect_uri_mismatch`, re-check the ingress `X-Forwarded-Proto` header
+and `requestOrigin`.
+
+> **Ask the canonical host, and not the apex — this check passes against the apex
+> without having tested anything.** Since #174 the sign-in journey
+> (`CANONICAL_ORIGIN_PREFIXES` in `src/lib/auth/gate.ts`, which includes
+> `/api/google/oauth/`) is redirected to `PUBLIC_ORIGIN` from every other hostname
+> by `canonicalOriginRedirect` (`src/lib/origin.ts`). So the apex answers this
+> request with a `Location:` pointing at the canonical host — a real header, on a
+> line the `grep` prints, containing no `redirect_uri=` at all. Nothing errors and
+> the output looks like output.
 
 ## 9. Deploy
 - Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (see the MR "View app" button).
@@ -521,7 +540,8 @@ Two triggers that are *not* a database leak also land on step 5:
 3. **Google tokens.** In [Google Account → Security → Third-party access],
    remove dlectroflow's grant (kills the refresh token server-side), then
    `DELETE FROM "GoogleAuth";` and reconnect via
-   `https://dlectroflow.dev/api/google/oauth/start`.
+   `https://work.dlectroflow.dev/api/google/oauth/start` — the canonical host, for
+   the reason §8 gives.
 4. **Reclaim tokens** (only if a `ReclaimAuth` row exists — the write path is
    unused): revoke dlectroflow in Reclaim's connected-apps settings, then
    `DELETE FROM "ReclaimAuth";` — a fresh client re-registers on next connect.
