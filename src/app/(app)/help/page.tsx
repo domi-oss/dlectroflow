@@ -280,23 +280,35 @@ export default async function HelpPage({
           destinations (`app-menu.test.tsx:53-63` pins that list) and neither was
           named anywhere here.
 
+          Library is described as a fuller VIEW, never as a destination work moves
+          to (Duo review round 4, !356). `libraryBuckets` (`bucket.ts:255-260`)
+          returns `base.singleTask`, `base.multiStep` and `base.savedLater` — the
+          same arrays `bucketItems` hands the inbox, which renders all five of its
+          lists on screen. Only `Done` differs, being uncapped where the inbox's
+          `Completed` is `slice(0, 10)`. Two drafts got this wrong in the same way:
+          "once something leaves the inbox it lives in Library" was wrong about all
+          four tabs, and conceding the overlap for `Saved for later` alone was wrong
+          about the other three. A reader who believes work moves house goes looking
+          for where it went.
+
           Both are linked by their MENU labels rather than their routes, because
           those are the words on screen: `/dashboard` renders `nav.dashboard` →
           "Activity", so a reader sent to look for "Dashboard" finds nothing. */}
       <section className="space-y-2">
         <SectionHeading id="help-where-things-go" voice={voice} />
         <p className="text-sm">
-          Once something leaves the inbox it lives in{" "}
           <Link href="/library" className="underline">
             Library
-          </Link>
-          , under four tabs: <strong>Single-task</strong> and{" "}
-          <strong>Multi-step</strong> for work in progress,{" "}
-          <strong>Saved for later</strong> for anything parked (which also stays
-          on the inbox page, in its own list), and <strong>Done</strong> for
-          finished work. The inbox keeps a short preview of your most recent
-          completions, with a count of how many you finished today;{" "}
-          <strong>Done</strong> is the full list. Opening a multi-step row
+          </Link>{" "}
+          gathers everything you have reviewed, under four tabs:{" "}
+          <strong>Single-task</strong> and <strong>Multi-step</strong> for work
+          in progress, <strong>Saved for later</strong> for anything parked, and{" "}
+          <strong>Done</strong> for finished work. Nothing has moved house —
+          these are the <strong>same lists</strong> the inbox page keeps below
+          its review queue, so you can work from either. The one difference is{" "}
+          <strong>Done</strong>: the inbox shows a short preview of your most
+          recent completions, with a count of how many you finished today, while{" "}
+          <strong>Done</strong> is the whole history. Opening a multi-step row
           expands its steps in place, so you can carry on without leaving the
           page.
         </p>

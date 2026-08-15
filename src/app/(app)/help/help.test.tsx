@@ -226,6 +226,24 @@ describe("HelpPage", () => {
     //    the list itself that way contradicts the badge above it.
     expect(text).not.toMatch(/clock is paused/i);
     expect(text).not.toMatch(/preview of what you completed today/i);
+    // Duo review round 4, !356 — and this one lands on the substitute review's own
+    // fix. Library is not somewhere work GOES; it is a fuller view of lists the
+    // inbox page already shows. `libraryBuckets` (`bucket.ts:255-260`) returns
+    // `base.singleTask`, `base.multiStep` and `base.savedLater` — literally the
+    // same arrays `bucketItems` hands the inbox — and the inbox renders all five
+    // of its lists on screen (`inbox-view.tsx:2768, 2906, 3366, 3602, 3873`). The
+    // ONLY difference is `Done`, which is uncapped where the inbox's `Completed`
+    // is `slice(0, 10)`.
+    //
+    // So "once something leaves the inbox it lives in Library" was wrong about all
+    // four tabs, and the first correction — conceding the overlap for `Saved for
+    // later` alone, with an "also" — was wrong about the other three. Both are the
+    // same defect: describing one surface as the destination of another.
+    expect(text).not.toMatch(/leaves the inbox/i);
+    expect(text).not.toMatch(/also stays on the inbox/i);
+    // The relationship stated positively, so a reader knows they can work from
+    // either surface rather than hunting for where an item went.
+    expect(text).toMatch(/same lists|both|either/i);
   });
 
   // #199 — shopping-list mode is `Settings.shoppingList`, `@default(false)`, and
