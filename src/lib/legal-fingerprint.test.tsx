@@ -105,7 +105,36 @@ const PUBLISHED = {
   // `terms` is untouched and its hash below is unchanged, which is the evidence
   // the two documents are genuinely disjoint here.
   //
-  // ── the 2026-08-08 state this replaced ──
+  // RE-DERIVED FROM THE MERGED TREE, and this is the second recorded time that
+  // mattered rather than a ritual — see the 2026-08-05 note further down for the
+  // first. #85 landed on `main` while this sweep was in flight and it edits the
+  // SAME page (the theme sentence, below Cookies), so the hash this branch
+  // recorded before merging described a text state that will never be published:
+  // this branch's ten corrections without #85's sentence. Neither side's hash is
+  // correct for the merge. The rule generalises — if `main` moves under a branch
+  // that touches a legal page, re-run this test after merging and paste the
+  // result, never carry the pre-merge value across.
+  //
+  // ── 2026-08-14, #85 — /privacy only, and classified COPY, so
+  // LEGAL_EFFECTIVE_DATE was deliberately NOT bumped; it stayed on 2026-08-08. ──
+  // The theme setting became three-state (follow my system / light / dark), so
+  // the sentence naming the stored value as a "light/dark theme choice" no
+  // longer described what can be in `df-theme`. Everything the paragraph
+  // DISCLOSES is unchanged: same key, same location (the browser's local
+  // storage), same category (a UI preference), same retention, same recipients
+  // (none), and the same promise that it never leaves the device. No new
+  // processing exists to disclose either — following the OS is a `matchMedia`
+  // read, which sends nothing anywhere.
+  //
+  // A first draft of that change also added a sentence asserting that reading
+  // the OS setting stores and transmits nothing. It was dropped rather than
+  // pinned: a claimed ABSENCE of processing is the one shape this file's own
+  // docblock records having had to retract (#154's "no log of when it was
+  // fetched", false on both deploy targets), and it earns nothing a reader does
+  // not already get from the sentence above it. That instinct is the same one
+  // the sweep above is correcting ten instances of, from the other end.
+  //
+  // ── the 2026-08-08 state those replaced ──
   // #199 — /privacy only. The stored-data list gains a shopping-list entry: a
   // new CATEGORY of stored content (Art. 13(1)(c)) plus the retention sentence
   // that comes with it, since a reader could otherwise infer that switching the
@@ -136,7 +165,9 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  privacy: "2063278887ce2768f5e100566812afc9cb94d59c218394621b3ea65138fc23ec",
+  privacy: "784c6e5b04ef5a82c34951ad5001a74d592232fc05473168b8d13317cba61ab3",
+  // Untouched by both #85 and this sweep, and unchanged — the evidence that
+  // neither change reaches both documents.
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 

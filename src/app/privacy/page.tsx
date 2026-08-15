@@ -1130,9 +1130,10 @@ export default function PrivacyPage() {
           cookie, no profiling cookie, and no third-party cookie of any kind.
         </p>
         <p>
-          Separately, your light/dark theme choice is stored in your
-          browser&rsquo;s own local storage under <code>df-theme</code>. It
-          never leaves your device and is never sent to the server.
+          Separately, your theme choice &mdash; follow my system, light or dark
+          &mdash; is stored in your browser&rsquo;s own local storage under{" "}
+          <code>df-theme</code>. It never leaves your device and is never sent
+          to the server.
         </p>
       </LegalSection>
 

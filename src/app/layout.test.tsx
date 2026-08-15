@@ -24,6 +24,22 @@ vi.mock("next/font/local", () => ({
 }));
 
 import RootLayout from "./layout";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/theme";
+
+/** Depth-first walk over a returned element tree. */
+function* walk(
+  node: unknown,
+): Generator<ReactElement<Record<string, unknown>>> {
+  if (Array.isArray(node)) {
+    for (const child of node) yield* walk(child);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const element = node as ReactElement<Record<string, unknown>>;
+  if (!("type" in element)) return;
+  yield element;
+  yield* walk((element.props as { children?: unknown })?.children);
+}
 
 describe("RootLayout", () => {
   it("carries every typeface CSS variable on the <html> element", () => {
@@ -46,5 +62,31 @@ describe("RootLayout", () => {
     ]) {
       expect(element.props.className).toContain(cssVar);
     }
+  });
+
+  // #85 — the theme bootstrap has to be THE tested string, not a paraphrase of
+  // it inlined here. theme.test.ts executes `THEME_BOOTSTRAP_SCRIPT` against
+  // every stored value × both OS settings; this asserts that the string the
+  // <head> actually ships is that same one. Without this pairing, either half
+  // could be correct while the app shipped the other.
+  it("inlines the tested theme bootstrap in <head>", () => {
+    const element = RootLayout({ children: <div>child</div> });
+
+    const scripts = [...walk(element)].filter((n) => n.type === "script");
+    expect(scripts).toHaveLength(1);
+    expect(
+      (scripts[0].props as { dangerouslySetInnerHTML?: { __html: string } })
+        .dangerouslySetInnerHTML?.__html,
+    ).toBe(THEME_BOOTSTRAP_SCRIPT);
+  });
+
+  // The bootstrap writes to <html> before React hydrates. Without this prop
+  // React reports a mismatch and — the #75 failure — can rebuild from the root,
+  // resetting the class list and silently dropping the theme.
+  it("suppresses hydration warnings on <html>, which the bootstrap needs", () => {
+    const element = RootLayout({ children: <div>child</div> }) as ReactElement<{
+      suppressHydrationWarning?: boolean;
+    }>;
+    expect(element.props.suppressHydrationWarning).toBe(true);
   });
 });
