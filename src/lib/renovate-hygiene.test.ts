@@ -12,6 +12,7 @@ import {
   packagesDeniedAutomerge,
   remappedLogLevelFor,
   unevaluatableMatchMessages,
+  unreadableAutomergePackageNames,
   type RenovateConfigShape,
 } from "./renovate-hygiene";
 
@@ -526,6 +527,219 @@ describe("effectiveAutomergeFor", () => {
       ]),
     ).toBe(null);
   });
+
+  it("matches a literal name case-insensitively, as Renovate's minimatch does", () => {
+    // Renovate builds its `matchPackageNames` predicate with
+    // `minimatch(pattern, { dot: true, nocase: true })`, so a literal entry is a
+    // case-INSENSITIVE comparison, not `===`. npm names are lowercase by spec but
+    // Go, Maven and NuGet names are not, so exact-case equality would read a
+    // real deny entry as absent.
+    expect(
+      effectiveAutomergeFor("Masterminds/Semver", [
+        BLANKET,
+        { matchPackageNames: ["masterminds/semver"], automerge: false },
+      ]),
+    ).toBe(false);
+  });
+
+  // ── Pattern entries: `matchPackageNames` is NOT exact-match-only ────────────
+  //
+  // Renovate resolves it through `matchRegexOrGlobList`, which accepts a bare
+  // `*`, a minimatch glob, a `/…/` or `!/…/` regex, and a leading `!` negation.
+  // This module reads LITERAL names only, so a pattern entry that carries an
+  // `automerge` boolean has to make the answer INDEFINITE rather than being
+  // silently skipped — skipping it is a false pass in the dangerous direction.
+  describe("a pattern entry that carries an automerge boolean", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["a prefix glob", "denied-*"],
+      ["a scope glob", "*-package"],
+      ["a bare wildcard", "*"],
+      ["a regex form", "/^denied-/"],
+      ["a case-insensitive regex form", "/^DENIED-/i"],
+      ["a negated regex form", "!/^other-/"],
+      ["a negated literal", "!other-package"],
+      ["a brace expansion", "{denied,other}-package"],
+      ["a character class", "denied-[pq]ackage"],
+      ["an extglob", "+(denied)-package"],
+      ["an empty string", ""],
+    ];
+
+    it.each(cases)(
+      "gives no answer when %s could re-enable automerge below the deny entry",
+      (_label, pattern) => {
+        // The dangerous shape: a correctly-ordered literal deny entry, then a
+        // pattern entry BELOW it that under real Renovate governs the same
+        // package and turns automerge back on. Read as inapplicable, the
+        // ordering invariant passes while the package merges unattended.
+        expect(
+          effectiveAutomergeFor(PKG, [
+            BLANKET,
+            DENY,
+            { matchPackageNames: [pattern], automerge: true },
+          ]),
+        ).toBe(null);
+      },
+    );
+
+    it.each(cases)(
+      "gives no answer when %s is itself the deny entry",
+      (_label, pattern) => {
+        expect(
+          effectiveAutomergeFor(PKG, [
+            BLANKET,
+            { matchPackageNames: [pattern], automerge: false },
+          ]),
+        ).toBe(null);
+      },
+    );
+
+    it("gives no answer when a pattern sits alongside a literal in one entry", () => {
+      expect(
+        effectiveAutomergeFor(PKG, [
+          BLANKET,
+          { matchPackageNames: [PKG, "other-*"], automerge: false },
+        ]),
+      ).toBe(null);
+    });
+
+    it("gives no answer for a non-string element", () => {
+      expect(
+        effectiveAutomergeFor(PKG, [
+          BLANKET,
+          { matchPackageNames: [PKG, 7], automerge: false },
+        ]),
+      ).toBe(null);
+    });
+
+    it("still reads a pattern entry that expresses no automerge opinion", () => {
+      // A grouping or allowedVersions rule contributes no `automerge` key, so
+      // Renovate merging it cannot change the resolved value whether it matches
+      // or not. Going indefinite here would red the suite for a harmless config
+      // edit, so the scope limit is drawn at rules that can actually decide.
+      expect(
+        effectiveAutomergeFor(PKG, [
+          BLANKET,
+          DENY,
+          { matchPackageNames: ["@types/*"], groupName: "types" },
+        ]),
+      ).toBe(false);
+    });
+  });
+});
+
+describe("unreadableAutomergePackageNames", () => {
+  it("reports nothing for a config with no rules", () => {
+    for (const rules of [undefined, [], null, 7, "rules", {}]) {
+      expect(unreadableAutomergePackageNames(rules)).toEqual([]);
+    }
+  });
+
+  it("reports nothing for the literal name shapes Renovate's datasources use", () => {
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: ["node"], automerge: true },
+        { matchPackageNames: ["@types/react-dom"], automerge: false },
+        {
+          matchPackageNames: ["github.com/Masterminds/semver"],
+          automerge: false,
+        },
+        {
+          matchPackageNames: ["org.apache.commons:commons-lang3"],
+          automerge: false,
+        },
+        {
+          matchPackageNames: ["registry.example.com/org/image"],
+          automerge: false,
+        },
+        { matchPackageNames: ["Some.NuGet.Package"], automerge: false },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports every pattern form Renovate accepts but this module cannot read", () => {
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: ["denied-*"], automerge: false },
+        { matchPackageNames: ["*"], automerge: true },
+        { matchPackageNames: ["/^denied-/"], automerge: false },
+        { matchPackageNames: ["!other"], automerge: false },
+        { matchPackageNames: ["{a,b}"], automerge: false },
+        { matchPackageNames: ["a[bc]"], automerge: false },
+        { matchPackageNames: ["+(a)"], automerge: false },
+        { matchPackageNames: ["a?"], automerge: false },
+        { matchPackageNames: ["#a"], automerge: false },
+      ]),
+    ).toEqual([
+      "denied-*",
+      "*",
+      "/^denied-/",
+      "!other",
+      "{a,b}",
+      "a[bc]",
+      "+(a)",
+      "a?",
+      "#a",
+    ]);
+  });
+
+  it("reports a non-string element as its String() form, and an empty string as empty", () => {
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: ["ok", 7, null, ""], automerge: false },
+      ]),
+    ).toEqual(["7", "null", ""]);
+  });
+
+  it("reports a pattern only once however many entries carry it", () => {
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: ["a-*"], automerge: false },
+        { matchPackageNames: ["a-*"], automerge: true },
+      ]),
+    ).toEqual(["a-*"]);
+  });
+
+  it("ignores a pattern on a rule that expresses no automerge opinion", () => {
+    // Same scope limit as `effectiveAutomergeFor`: a rule with no `automerge`
+    // boolean cannot change what the ordering invariant computes, so a glob
+    // there is not a problem this guard has an opinion about.
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: ["@types/*"], groupName: "types" },
+        { matchPackageNames: ["eslint*"], allowedVersions: "<10" },
+        { matchPackageNames: ["a-*"], automerge: "false" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("ignores a blanket automerge rule, which names no package at all", () => {
+    expect(unreadableAutomergePackageNames([{ automerge: true }])).toEqual([]);
+  });
+
+  it("reports a matchPackageNames that is not an array at all", () => {
+    // Renovate requires an array here, so a bare string is a config error — and
+    // it is also the shape that made the old `ruleCouldApply` skip the rule
+    // silently. Reported by its `String()` form, like `unevaluatableMatchMessages`
+    // does, which for a bare string is indistinguishable from a literal name; the
+    // fix is the brackets and the assertion message says so.
+    expect(
+      unreadableAutomergePackageNames([
+        { matchPackageNames: "denied-package", automerge: false },
+      ]),
+    ).toEqual(["denied-package"]);
+  });
+
+  it("tolerates malformed entries inside a real array", () => {
+    expect(
+      unreadableAutomergePackageNames([
+        null,
+        "x",
+        7,
+        ["nested"],
+        { matchPackageNames: ["a-*"], automerge: false },
+      ]),
+    ).toEqual(["a-*"]);
+  });
 });
 
 describe("packagesDeniedAutomerge", () => {
@@ -590,6 +804,22 @@ describe("packagesDeniedAutomerge", () => {
       ]),
     ).toEqual(["a"]);
   });
+
+  it("reports only literal names, never a pattern that is not one", () => {
+    // A glob, a regex form and a negation are not package names, so feeding them
+    // to `effectiveAutomergeFor` as if they were would test the wrong subject —
+    // the pattern string, which under Renovate is not what the rule governs.
+    // `unreadableAutomergePackageNames` is what reports these.
+    expect(
+      packagesDeniedAutomerge([
+        {
+          matchPackageNames: ["denied-*", "*", "/^x/", "!y", "{a,b}"],
+          automerge: false,
+        },
+        { matchPackageNames: ["real-package"], automerge: false },
+      ]),
+    ).toEqual(["real-package"]);
+  });
 });
 
 /**
@@ -643,6 +873,29 @@ describe("renovate.json's packageRules resolve as Renovate would merge them", ()
         "ordering invariant below has no baseline to override and this module's " +
         "fourth property needs rewriting, not relaxing.",
     ).toBe(true);
+  });
+
+  it("keeps every automerge rule's matchPackageNames to literal names", () => {
+    // The scope limit made mechanical rather than documented. This module reads
+    // literal names; Renovate also accepts `*`, minimatch globs, `/…/` regexes and
+    // `!` negations through `matchRegexOrGlobList`. A pattern on a rule that sets
+    // `automerge` changes which packages the ordering invariant below is actually
+    // about, and reading it as inapplicable would let that invariant pass over a
+    // config that automerges a denied package. Non-vacuous today: the file has ten
+    // `matchPackageNames` entries and every one is a literal name, so this passes
+    // by reading them, not by finding nothing to read.
+    expect(
+      unreadableAutomergePackageNames(config.packageRules),
+      "a `matchPackageNames` on a rule that sets `automerge` is not a literal " +
+        "package name. Renovate resolves that key through `matchRegexOrGlobList`, " +
+        "which accepts a bare `*`, a minimatch glob, a `/…/` regex and a leading " +
+        "`!`; this module reads literal names only, so it cannot tell which " +
+        "packages such an entry governs and the ordering invariant below stops " +
+        "meaning what it says. Write the name literally, or teach " +
+        "`renovate-hygiene.ts` the pattern form — do not delete this assertion. " +
+        "(A value that is not an array is reported here too; the fix for that is " +
+        "the brackets.)",
+    ).toEqual([]);
   });
 
   it("keeps every per-package deny entry below the blanket rule", () => {
