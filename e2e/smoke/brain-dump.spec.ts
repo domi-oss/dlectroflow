@@ -70,13 +70,25 @@ test("a capture made offline is held, then saves itself on reconnect", async ({
   await strip.getByRole("button", { name: /waiting to save/ }).click();
   await expect(strip).toContainText(label);
 
-  // And it survives the tab being destroyed, which is the promise `localStorage`
-  // is here for and the reason the design is not an in-memory guard: Chrome
-  // discards background tabs under memory pressure and fires no unload event.
-  await page.reload();
-  await expect(
-    page.getByRole("button", { name: /1 waiting to save/ }),
-  ).toBeVisible();
+  // Durable, which is the promise and the reason the design is not an in-memory
+  // guard: Chrome discards background tabs under memory pressure and a discarded
+  // tab fires no unload event, so there is no later moment to write. Asserted by
+  // reading the store, because that is the property — the words are on disk, not
+  // in a component's state.
+  //
+  // ⚠️ **Deliberately NOT `page.reload()` here.** An earlier version of this spec
+  // reloaded while offline to show the words surviving the tab, and it failed with
+  // `net::ERR_INTERNET_DISCONNECTED` — correctly. This is a server-rendered Next
+  // route and #175 puts an offline *reload* explicitly out of scope: "Only capture
+  // is insured." So that assertion was asserting a feature the design does not
+  // claim, and passing it would have needed route caching nobody has built. The
+  // reload below happens once the connection is back, where it tests something
+  // real: that the capture ended up on the server rather than merely leaving the
+  // strip.
+  const stored = await page.evaluate(() =>
+    JSON.parse(window.localStorage.getItem("df-capture-queue") ?? "[]"),
+  );
+  expect(stored.map((c: { text: string }) => c.text)).toEqual([label]);
 
   // `online` is an opportunistic hint, so coming back is enough — no press.
   await context.setOffline(false);
@@ -86,6 +98,12 @@ test("a capture made offline is held, then saves itself on reconnect", async ({
   // happened, which would read as the words having been destroyed.
   await expect(page.getByTestId("capture-queue-strip")).toHaveCount(0);
   await expect(needsReviewRow(page, label)).toBeVisible();
+
+  // And it is genuinely on the server, not just gone from the strip — the one
+  // thing a client-side assertion cannot distinguish.
+  await page.reload();
+  await expect(needsReviewRow(page, label)).toBeVisible();
+  await expect(page.getByTestId("capture-queue-strip")).toHaveCount(0);
 });
 
 /**
