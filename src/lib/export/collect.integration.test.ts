@@ -469,11 +469,19 @@ describe("the account block is the exporting account's own", () => {
     expect(archive).not.toContain(A_FEED_TOKEN);
   });
 
-  it("exports every User column the schema has, except the encrypted key", async () => {
+  it("exports the account columns this sweep added, with their values", async () => {
     // `model-coverage.test.ts` asserts the SELECT lists them; this asserts the
     // values arrive, against a row where each one is set to something visible. The
     // two are not the same claim — a select can name a column that a later mapping
     // drops.
+    //
+    // Named for the six columns it actually checks. It used to say "every User
+    // column the schema has", which was a completeness claim over a hand-written
+    // list — the defect this MR exists to remove, in one of its own new tests. It
+    // caught a dropped `lastSeenAt` because that column is on the list and was
+    // blind to a dropped `provider` because it is not. Every column IS covered,
+    // from `Prisma.dmmf`, by `model-coverage.test.ts`; that is the guard with the
+    // completeness obligation, and this one is deliberately a value spot-check.
     const revokedAt = new Date("2026-08-10T09:00:00.000Z");
     await prisma.user.update({
       where: { id: userB },
