@@ -458,6 +458,67 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **The Privacy Policy now matches what the code does, in ten places, and its
+  effective date moves to 15 August 2026.** Every correction runs the same way —
+  the page was more reassuring than the software — so they are worth reading as
+  one thing rather than a list of tweaks.
+
+  **What the AI provider is sent.** The page said the context accompanying a
+  breakdown "contains no free text". It has carried **the note on the task being
+  broken down** since 8 August, quoted into the request verbatim up to 600
+  characters. Now disclosed, alongside the fact that notes on your *other* tasks
+  are never sent — the distinction the code actually draws.
+
+  **What Google is sent.** Scheduling a step to Google Tasks writes a **notes
+  field** as well as a title and a due date, and any note you wrote on that task
+  or step is copied into it. The page described only the title and the date. The
+  calendar **subscription feed** is unaffected and still carries titles and times
+  only.
+
+  **What deleting your account does.** The page said a freeze "marks its content
+  to be removed 30 days later". Nothing removes it: the 30-day window is recorded
+  but no job reads it, so the deletion is a hand operation. The page now says so
+  for both routes — deleting your own account and having access revoked — and no
+  longer implies anything happens when the window is up. **No behaviour changed
+  here; the promise did.** If you want content gone, email and ask, and it will be
+  done.
+
+  **Health information in a free-text note.** The policy claimed *"explicit
+  consent — Article 9(2)(a) UK GDPR"* permitted holding it. Nothing ever asked
+  for that consent — there is no health field, no question that invites one, and
+  no acknowledgement anywhere — so the claim is **withdrawn rather than
+  mechanised**. A consent modal on a note box would be a dark pattern shaped like
+  compliance, and would make the app worse at the one thing it is for. The page
+  now states the true position: nothing here seeks health data, and whatever
+  arrives in a note is held only as an unavoidable part of doing what you asked
+  with the words you typed.
+
+  **Four kinds of stored content that were never disclosed**: notes on tasks,
+  steps and captures (up to 2,000 characters each), a display name if you set one,
+  focus playlists and their names, and the coaching conversations — the last
+  having been named in the Portability list while never being disclosed as stored.
+
+  **What the export leaves out.** It withheld more than the two credentials it
+  admitted to. Also absent, and now named on the page *and* in the archive's own
+  README: your invitation record and any note whoever invited you wrote on it,
+  your AI usage count, your calendar feed's timestamps, and the flags saying
+  whether the account is active and when it was last seen. Ask and any of it will
+  be sent by hand, the invitation note included, since it is about you.
+
+  **One sentence narrowed rather than removed.** "Nothing infers anything about
+  how you are doing" was overstated: with the end-of-day round-up, a short
+  narrative about your day is written from your own counts and stored. It is a
+  summary of what you did, shown only to you, and nothing acts on it — but a page
+  claiming nothing of the kind exists was wrong, so the sentence keeps its ground
+  and states the exception. The rest of that clause is unchanged and verified:
+  there is no health, mood, energy, sleep, medication or symptom field anywhere in
+  the schema, and no questionnaire.
+
+  Nothing an operator needs to do, no migration and no new environment variables.
+  `docs/legal.md`'s re-check table gained the two trigger rows that would have
+  caught the worst of these, and its "new Prisma **model**" row now covers a new
+  **field** — which is how three of them got in.
+
 - **The footer's Privacy, Terms and Source links now open in a new tab (#200).**
   That footer sits under every screen, the inbox included, and the old
   behaviour took you away from the page you were on. The reasoning written
