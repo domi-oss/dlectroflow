@@ -289,7 +289,34 @@ describe("buildNoteBlock (#179)", () => {
   });
 
   it("shares normalizeTaskNote's control-character sweep rather than a second one", () => {
-    const out = buildNoteBlock("call  the vet");
+    // Written as ESCAPES, never as raw bytes (#224). A raw NUL in this file made
+    // `file` classify it as `data`, Semgrep skipped the whole file, and every
+    // SAST run reported zero findings for it for weeks — absence of findings,
+    // not cleanliness. `source-encoding-hygiene.test.ts` is what stops the raw
+    // form coming back.
+    //
+    // The escape is byte-identical to the raw byte, and that is ASSERTED rather
+    // than assumed: this fixture's entire job is to hand control characters to
+    // the sanitiser, so a "fix" that changed which characters arrive would be a
+    // broken fix that still looked green. Two independent checks, because the
+    // whole point is not to take one construction's word for it.
+    const NOTE = "call\u0000 the\u0007 vet\u001b";
+    expect(NOTE).toBe(
+      "call" +
+        String.fromCharCode(0x00) +
+        " the" +
+        String.fromCharCode(0x07) +
+        " vet" +
+        String.fromCharCode(0x1b),
+    );
+    expect(NOTE).toHaveLength(15);
+    expect([
+      NOTE.charCodeAt(4),
+      NOTE.charCodeAt(9),
+      NOTE.charCodeAt(14),
+    ]).toEqual([0x00, 0x07, 0x1b]);
+
+    const out = buildNoteBlock(NOTE);
     expect(out).toContain("call the vet");
     expect(out).not.toMatch(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/);
   });
