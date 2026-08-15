@@ -207,11 +207,17 @@ describe("integration-test docblock hygiene (#256)", () => {
       ).toBe(false);
     });
 
-    // A line often carries more than one code span, and then the exemption
-    // depends on the regex finding the span that holds the recipe rather than
-    // the first span on the line. That it backtracks to do so is not obvious
-    // from reading the pattern, so it is pinned rather than assumed — the
-    // first of these is an entirely ordinary sentence to write.
+    // A line often carries more than one code span, so whether *this*
+    // occurrence is quoted cannot be read off the first span on the line.
+    // `codeSpans()` collects every span in one `matchAll`, and the quoted
+    // test is a linear containment check on the occurrence's index
+    // (`spans.some(...)`) — there is no backtracking anywhere in it. What
+    // `CODE_SPAN` alone does not show is that the check runs per occurrence
+    // against every span, not against the first or the nearest, so it is
+    // pinned here rather than assumed. (!350's review caught this comment
+    // describing backtracking the code never did — the same defect class
+    // this guard exists to prevent.) The first of these is an entirely
+    // ordinary sentence to write.
     it.each([
       [" * Unlike `npm test`, do NOT run `set -a; . ./.env; set +a`.", false],
       [" * `npm test` is enough; never use `set -a; . ./.env; set +a`.", false],
