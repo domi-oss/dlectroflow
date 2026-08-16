@@ -111,6 +111,43 @@ export async function awardBadge(
   return count > 0; // 0 = a concurrent award won the race; the badge exists
 }
 
+/**
+ * #265 — `completeItem`'s step payout: one `step_done` row per step this
+ * completion closed, then the ten-steps-in-a-day badge.
+ *
+ * ## ⚠️ A DELIBERATE EXCEPTION to the one-call-per-consequence rule
+ *
+ * Two consequences behind one `bestEffort` tag, and it exists as a named callee
+ * rather than as an inline block **because that is the shape the rule allows**:
+ * `best-effort.test.ts` forbids a block-bodied thunk outright, on the grounds that
+ * a thunk with two statements is two consequences under one tag. So a legitimate
+ * bundle has to live in a callee whose docblock argues for it — which is what
+ * `rewardStepDone` does, and this is its sibling.
+ *
+ * The dependency that forces it is the same one: `maybeAwardTenStepsDay` does
+ * `rewardEvent.count({ type: StepDone })`, counting the rows the loop above it has
+ * just written. Split them across two tags and the count is short by this
+ * completion's own steps, so on the tenth step of the day the badge is silently
+ * **not** awarded — wrong rather than merely missing, which is worse than what
+ * splitting fixes.
+ *
+ * `steps` is the number the completion's write actually changed, counted off
+ * `updateManyAndReturn` rather than off a pre-read snapshot (`!335`), so a second
+ * concurrent completion cannot make this pay twice.
+ *
+ * The caller gates this on the to-do HAVING a task: a stepless completion closed
+ * no steps, and calling `maybeAwardTenStepsDay` for it would decide the badge off
+ * other completions' rows, which is not this completion's business.
+ */
+export async function rewardCompletedSteps(
+  workspaceId: string,
+  steps: number,
+): Promise<void> {
+  for (let i = 0; i < steps; i++)
+    await logReward(workspaceId, RewardType.StepDone);
+  await maybeAwardTenStepsDay(workspaceId);
+}
+
 /** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
 export async function maybeAwardTenStepsDay(
   workspaceId: string,

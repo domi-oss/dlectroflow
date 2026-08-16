@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
   maybeAwardInboxZero,
-  maybeAwardTenStepsDay,
+  rewardCompletedSteps,
   logReward,
   awardBadge,
   touchStreakOnEngagement,
@@ -1072,10 +1072,45 @@ export async function completeItem(id: string) {
     // `Streak`. Nothing ever holds `Streak` and then reaches for a
     // `BrainDumpItem`, which is what a deadlock would need. Moving this call
     // inside the transaction above would create exactly that cycle.
-    for (const _step of closed.steps)
-      await logReward(workspaceId, RewardType.StepDone);
-    if (task) await maybeAwardTenStepsDay(workspaceId);
-    await logReward(workspaceId, RewardType.TaskComplete);
+    // #265 — every payout below is wrapped, because the completion has COMMITTED
+    // by the time any of them runs. The rule this file's module docblock records:
+    // the guard governs the write, and anything after it is a consequence of
+    // success that cannot un-write the row. A transient fault here used to throw
+    // out of the action, so the UI reported a completion that is in the database
+    // as failed — and because `revalidatePath` sits *below* this block, the throw
+    // stranded it too and the user's own tab went on rendering the to-do
+    // un-completed, corroborating the false failure.
+    //
+    // One `bestEffort` per consequence, so one failure cannot cancel the others
+    // and the log can tell them apart — except the first, which is bundled for a
+    // stated reason.
+    //
+    // ⚠️ Only `completeItem` is fixed here. The five other exported functions in
+    // this file with the same shape (`triageBrainDumpItem`, `requestBreakdown`,
+    // `snoozeBrainDumpItem`, `deleteBrainDumpItem`, `keepAsTask`) are #265's
+    // remaining legs and are deliberately untouched — including
+    // `deleteBrainDumpItem`, which #233 also edits. They are one same-file sweep,
+    // not five, and folding them in here would put an unrelated sweep inside a
+    // migration MR.
+    //
+    // **Bundled, and forced rather than sloppy:** `maybeAwardTenStepsDay` does
+    // `rewardEvent.count({ type: StepDone })`, counting the rows the loop above it
+    // has just written. Split them and the count is short by this completion's own
+    // steps, so on the tenth step of the day the badge is silently not awarded —
+    // wrong rather than merely missing. Same dependency `rewardStepDone`'s
+    // docblock records for its own bundle.
+    // Gated on the to-do having a task, which is behaviour-preserving: with no
+    // task `closed.steps` is empty, so the loop was already a no-op and
+    // `maybeAwardTenStepsDay` was already skipped by the same condition.
+    if (task)
+      await bestEffort(
+        "complete_item_step_payout_failed",
+        workspaceId,
+        async () => rewardCompletedSteps(workspaceId, closed.steps.length),
+      );
+    await bestEffort("complete_item_points_failed", workspaceId, async () =>
+      logReward(workspaceId, RewardType.TaskComplete),
+    );
     // #233 — attributed to the to-do being completed, so deleting it withdraws
     // the streak credit this completion supplied. `touchStreakOnEngagement`
     // rather than the deprecated `touchStreakOnCompletion` alias, because the
@@ -1103,8 +1138,15 @@ export async function completeItem(id: string) {
           itemId: id,
         }),
     );
-    await awardBadge(workspaceId, BadgeKey.TaskComplete);
-    await maybeAwardInboxZero(workspaceId);
+    await bestEffort("complete_item_badge_failed", workspaceId, async () =>
+      awardBadge(workspaceId, BadgeKey.TaskComplete),
+    );
+    // Independent of every payout above: `maybeAwardInboxZero` re-reads the
+    // needs-triage queue and decides for itself, so it neither reads nor is read
+    // by the reward rows this completion just wrote.
+    await bestEffort("complete_item_inbox_zero_failed", workspaceId, async () =>
+      maybeAwardInboxZero(workspaceId),
+    );
 
     // #195 + #209 — close every Google Task this to-do owns, at both grains.
     //

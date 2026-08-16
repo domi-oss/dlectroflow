@@ -83,6 +83,9 @@ vi.mock("@/lib/rewards", () => ({
   touchStreakOnEngagement: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
+  // #265 — see the note in `complete.test.ts`: the per-step quantity is asserted
+  // on the callee in `rewards.test.ts`, the count handed to it is asserted here.
+  rewardCompletedSteps: vi.fn().mockResolvedValue(undefined),
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(undefined),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
@@ -247,12 +250,8 @@ describe("bulkBrainDumpAction", () => {
       where: { id: "t1" },
       data: { status: "done" },
     });
-    const stepDone = (
-      rewards.logReward as unknown as ReturnType<typeof vi.fn>
-    ).mock.calls.filter((c) => c[1] === "step_done");
-    expect(stepDone).toHaveLength(2);
+    expect(rewards.rewardCompletedSteps).toHaveBeenCalledWith("ws1", 2);
     expect(rewards.logReward).toHaveBeenCalledWith("ws1", "task_complete");
-    expect(rewards.maybeAwardTenStepsDay).toHaveBeenCalledWith("ws1");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
     expect(res).toEqual({ count: 1 });
   });

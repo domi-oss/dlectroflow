@@ -329,7 +329,14 @@ describe("the deliberately-bundled exception list stays complete", () => {
     readFileSync(join(__dirname, p), "utf8").replace(/\r\n/g, "\n");
 
   /** Callees that are themselves a bundle — see their docblocks in `rewards.ts`. */
-  const BUNDLING = ["rewardStepDone", "touchStreakOnEngagement"];
+  const BUNDLING = [
+    "rewardStepDone",
+    "touchStreakOnEngagement",
+    // #265 — `completeItem`'s step payout: the `step_done` rows plus the
+    // ten-steps badge that counts them. Added here in the same commit as its
+    // wrapper, for the reason the note below gives.
+    "rewardCompletedSteps",
+  ];
 
   /** `bestEffort("tag", ws, () => …)`, capturing the tag and the thunk body. */
   const CALL_SITE =
@@ -461,8 +468,12 @@ describe("the deliberately-bundled exception list stays complete", () => {
     expect(sites.length).toBeGreaterThanOrEqual(3);
     // Four since #233: `completeItem`'s streak touch wraps
     // `touchStreakOnEngagement`, the same bundling callee as `confirmBreakdown`'s.
+    // Five since #265: `completeItem`'s step payout wraps `rewardCompletedSteps`,
+    // a new bundling callee. Re-derived from the guard's own output rather than
+    // from 4 + 1, which is what this file asks for elsewhere.
     expect(sites.map((s) => s.tag).sort()).toEqual([
       "breakdown_streak_touch_failed",
+      "complete_item_step_payout_failed",
       "complete_item_streak_touch_failed",
       "focus_step_reward_failed",
       "step_done_bookkeeping_failed",

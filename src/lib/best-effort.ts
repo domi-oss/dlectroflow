@@ -122,12 +122,38 @@ export type BookkeepingTag =
    * the #175 class exactly: a completion that succeeded, reported to the person as
    * failed.
    *
-   * Only this one call is wrapped, deliberately. The other post-commit awaits in
-   * `completeItem` (`logReward`, `awardBadge`, `maybeAwardInboxZero`) carry the
-   * same pre-existing gap, recorded in `braindump.ts`'s module docblock; sweeping
-   * them is separate work and not something #233 introduced.
+   * ⚠️ **Superseded note.** This used to say that only this call was wrapped and
+   * that `completeItem`'s other post-commit awaits carried the pre-existing gap.
+   * #265 closed that gap for this site — the four members below are it — so the
+   * asymmetry this paragraph described is gone. The five OTHER functions in
+   * `braindump.ts` still carry it and are a separate MR.
    */
   | "complete_item_streak_touch_failed"
+  /**
+   * `completeItem` — the per-step `step_done` points AND the ten-steps-in-a-day
+   * badge, under one tag (#265).
+   *
+   * ⚠️ **Deliberately bundled**, and it is the same dependency `rewardStepDone`'s
+   * docblock describes: `maybeAwardTenStepsDay` does
+   * `rewardEvent.count({ type: StepDone })`, counting the rows the loop above it
+   * has just written. Split them and the count is short by however many of this
+   * completion's steps landed, so on the tenth step of the day the badge is
+   * silently not awarded — **wrong rather than merely missing**, which is worse
+   * than what splitting would fix.
+   */
+  | "complete_item_step_payout_failed"
+  /** `completeItem` — the TaskComplete points, independent of the step payout. */
+  | "complete_item_points_failed"
+  /** `completeItem` — the once-ever TaskComplete badge. */
+  | "complete_item_badge_failed"
+  /**
+   * `completeItem` — the inbox-zero award, if this completion emptied the queue.
+   *
+   * Independent of every payout above it: `maybeAwardInboxZero` re-reads the
+   * needs-triage queue and decides for itself, so it neither reads nor is read by
+   * the reward rows this completion wrote.
+   */
+  | "complete_item_inbox_zero_failed"
   /**
    * `completeStep` — `rewardStepDone`: points, streak and ten-steps badge under
    * ONE tag.

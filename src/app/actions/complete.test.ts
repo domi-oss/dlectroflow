@@ -112,6 +112,11 @@ vi.mock("@/lib/rewards", () => ({
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
+  // #265 — the bundling callee `completeItem`'s step payout now goes through.
+  // The per-step QUANTITY it guarantees is asserted directly in
+  // `rewards.test.ts`; here the assertion is that the call site hands it the
+  // number the WRITE closed, which is the `!335` property this file is about.
+  rewardCompletedSteps: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/google", () => ({
   getValidAccessToken: vi.fn().mockResolvedValue(null),
@@ -121,6 +126,7 @@ import {
   logReward,
   awardBadge,
   maybeAwardTenStepsDay,
+  rewardCompletedSteps,
   maybeAwardInboxZero,
   touchStreakOnEngagement,
 } from "@/lib/rewards";
@@ -235,13 +241,12 @@ describe("completeItem", () => {
       where: { id: "t1" },
       data: { status: "done" },
     });
-    // 2 not-done steps → 2 StepDone + 1 TaskComplete
-    const stepDoneCalls = (
-      logReward as unknown as ReturnType<typeof vi.fn>
-    ).mock.calls.filter((c) => c[1] === "step_done");
-    expect(stepDoneCalls).toHaveLength(2);
+    // 2 not-done steps → the payout is handed 2, plus 1 TaskComplete. The
+    // per-step row count that 2 turns into is asserted on the callee itself in
+    // `rewards.test.ts` (#265); what matters here is that the number comes from
+    // the write's own result and not from the snapshot.
+    expect(rewardCompletedSteps).toHaveBeenCalledWith("owner", 2);
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
-    expect(maybeAwardTenStepsDay).toHaveBeenCalledWith("owner");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
@@ -281,6 +286,7 @@ describe("completeItem", () => {
 
     expect(logReward).not.toHaveBeenCalled();
     expect(awardBadge).not.toHaveBeenCalled();
+    expect(rewardCompletedSteps).not.toHaveBeenCalled();
     expect(maybeAwardTenStepsDay).not.toHaveBeenCalled();
     expect(maybeAwardInboxZero).not.toHaveBeenCalled();
     // Not even the local writes: the guard returns before them, so a loser can
@@ -447,10 +453,13 @@ describe("completeItem", () => {
     ]);
     const { completeItem } = await import("./braindump");
     await completeItem("i1");
-    const stepDoneCalls = (
-      logReward as unknown as ReturnType<typeof vi.fn>
-    ).mock.calls.filter((c) => c[1] === "step_done");
-    expect(stepDoneCalls).toHaveLength(2);
+    // TWO, not three: the number comes from what `updateManyAndReturn` reported
+    // it changed, never from the three-step snapshot read before the write. That
+    // is the whole property, and it survives the payout moving into a callee
+    // (#265) because the count is computed at the call site and handed over.
+    expect(rewardCompletedSteps).toHaveBeenCalledWith("owner", 2);
+    // The control that keeps it honest: the snapshot's figure must NOT appear.
+    expect(rewardCompletedSteps).not.toHaveBeenCalledWith("owner", 3);
   });
 });
 
