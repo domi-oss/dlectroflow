@@ -987,6 +987,42 @@ export async function revokeUnqualifiedStreakBadges(
   // run that had actually broken, granting a day nobody earned. Benign in this
   // module's direction of travel, and still the ledger and the counter
   // disagreeing, so it is repaired rather than documented.
+  //
+  // ── The branch where the run is LONGER than the counter (review on !361/!363)
+  //
+  // When `run.current > streak.current` — a ledger row landed and the counter's
+  // own transaction then failed — `lowerCounter` is false and `repairDate` fires,
+  // so the write lands with `current` held and the date corrected. Review reported
+  // that as a defect and proposed **skipping the write** in this branch. The
+  // under-count it describes is real; the proposed fix is measurably worse, and it
+  // was measured rather than argued.
+  //
+  // On a seed of ledger `dayAgo(2)`+`dayAgo(1)`, stored counter 1, stored date
+  // `dayAgo(2)`, where the true run is 3:
+  //
+  //   as it is (date repaired) : next engagement -> current 2, 0 StreakRecord
+  //   skip the write           : next engagement -> current 1, 1 StreakRecord
+  //
+  // Skipping leaves the date stale, so `touchStreakOnEngagement`'s
+  // `lastActiveWorkday === prevWorkingDay` check fails — and that is not a smaller
+  // increment, it is a **reset**: `current` drops to 1 AND a `StreakRecord` of
+  // length 1 is filed, which renders in the dashboard's Top-3 streaks. It trades a
+  // one-day under-count for a two-day one plus a visible bogus record.
+  //
+  // ⚠️ **Raising `current` to `run.current` is the only correct answer, and it is
+  // deliberately out of scope.** A function whose purpose is revoking unearned
+  // rewards must not award one, and the comment beside `touchStreakOnEngagement`
+  // relies on that invariant in as many words. The real fix is for the increment
+  // to derive the run from the ledger instead of adding one to the stored counter
+  // — which raises counters, so it is a product decision. Routed to #233.
+  //
+  // The residual, stated plainly rather than left to be found: while the counter
+  // is behind the ledger, the streak under-counts days genuinely earned. It errs
+  // **stingy, never generous** — it cannot grant a day nobody worked for, which is
+  // the direction every gate in this function errs toward. Pinned by
+  // `under-counts rather than resetting when the counter is behind the ledger`,
+  // which reds under all three alternatives: skipping, raising, and reverting the
+  // date to the counter's condition.
   const lowerCounter = run.current < streak.current;
   const repairDate = run.lastActiveWorkday !== streak.lastActiveWorkday;
   if (lowerCounter || repairDate) {

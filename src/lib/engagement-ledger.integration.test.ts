@@ -783,11 +783,97 @@ describe("the recompute never RAISES a streak (#233)", () => {
     expect(streak?.lastActiveWorkday).toBe(dayAgo(2));
   });
 
+  /**
+   * Review on `!363` reported this branch as a defect and proposed skipping the
+   * write entirely when the recomputed run is LONGER than the stored counter.
+   * **The under-count it describes is real. The proposed fix is measurably worse,
+   * on two axes, and this test is what holds that line.**
+   *
+   * The branch: a ledger row landed and the counter's own transaction then failed,
+   * so `run.current > streak.current` AND the ledger's last active day is later
+   * than the stored one. `lowerCounter` is false, `repairDate` is true, so the
+   * write lands with `current` unchanged and the date corrected.
+   *
+   * Measured end to end on this seed — ledger `dayAgo(2)`+`dayAgo(1)`, stored
+   * counter 1, stored date `dayAgo(2)`, truth 3:
+   *
+   * | variant                        | next engagement | StreakRecord rows |
+   * | ------------------------------ | --------------- | ----------------- |
+   * | as it is (date repaired)       | **2**           | **0**             |
+   * | skip the write (proposed)      | 1               | 1, length 1       |
+   *
+   * Skipping leaves the date stale, so `touchStreakOnEngagement`'s
+   * `lastActiveWorkday === prevWorkingDay` check fails, which is not a smaller
+   * increment but a **reset**: `current` goes to 1 and a `StreakRecord` of length
+   * 1 is filed — and that row renders in the dashboard's Top-3 streaks. So the
+   * proposal trades a one-day under-count for a two-day one plus a visible bogus
+   * record.
+   *
+   * ⚠️ **Raising `current` to `run.current` is the only thing that would be
+   * correct, and it is out of scope by design.** This function's purpose is
+   * revoking unearned rewards; letting it award one inverts that, and
+   * `touchStreakOnEngagement`'s own comment relies on the invariant in as many
+   * words ("`revokeUnqualifiedStreakBadges` never raises `current`"). The real fix
+   * is for the increment to derive from the ledger instead of from the stored
+   * counter, which raises counters and is a product decision — routed to #233
+   * rather than taken here.
+   *
+   * The residual, stated plainly: while the counter is behind the ledger the
+   * streak under-counts days genuinely earned. It errs **stingy, never generous**,
+   * which is the direction this module errs in everywhere.
+   */
+  it("under-counts rather than resetting when the counter is behind the ledger", async () => {
+    await seedWorkspace(WS, { current: 1, ledgerFromDaysAgo: 10 });
+    // Run = 2 (dayAgo(2)+dayAgo(1)) against a stored counter of 1, and the
+    // ledger's last active day is LATER than the stored one.
+    await itemCrediting(WS, "keeper", [dayAgo(2), dayAgo(1)]);
+    // Outside the run, so the delete passes gate 1 without disturbing it.
+    const doomed = await itemCrediting(WS, "doomed", [dayAgo(9)]);
+    await prisma.streak.update({
+      where: { workspaceId: WS },
+      data: { lastActiveWorkday: dayAgo(2) },
+    });
+
+    const { deleteBrainDumpItem } = await import("@/app/actions/braindump");
+    await deleteBrainDumpItem(doomed);
+
+    const after = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
+    // Never raised — the invariant — and the date IS corrected. Skipping the
+    // write would leave this at `dayAgo(2)`, which is the whole difference.
+    expect(after?.current).toBe(1);
+    expect(after?.lastActiveWorkday).toBe(dayAgo(1));
+
+    // The end-to-end half, which is what makes the trade-off concrete rather than
+    // theoretical: the next engagement CONTINUES from the low counter.
+    const { touchStreakOnEngagement } = await import("@/lib/rewards");
+    await touchStreakOnEngagement(WS, {
+      kind: EngagementKind.Capture,
+      itemId: null,
+    });
+    const end = await prisma.streak.findUnique({ where: { workspaceId: WS } });
+    // 2, not 1. Under-counting the true 3 by one day, rather than resetting.
+    expect(end?.current).toBe(2);
+    // And no reset was filed. This is the assertion that catches the proposed
+    // fix, because the reset it causes writes a length-1 row here that the
+    // dashboard's Top-3 streaks would then render.
+    expect(
+      await prisma.streakRecord.count({ where: { workspaceId: WS } }),
+    ).toBe(0);
+  });
+
   it("leaves a counter that is lower than the ledger alone", async () => {
     // Reachable when a ledger row landed and the counter's own transaction then
     // failed. A delete may take a streak day away and must never grant one, so
-    // the update is gated on `run.current < streak.current` — repairing the other
-    // direction is not a delete's business.
+    // `current` is `Math.min`-ed rather than replaced.
+    //
+    // ⚠️ This comment used to say the update was "gated on
+    // `run.current < streak.current`", which stopped being true when `5ffe2cf`
+    // split the date onto its own condition — `repairDate` fires here too, so the
+    // write DOES happen and only `current` is held. Corrected rather than left,
+    // because the stale version reads as an argument that this branch writes
+    // nothing.
     await seedWorkspace(WS, { current: 1, ledgerFromDaysAgo: 10 });
     await itemCrediting(WS, "keeper", [dayAgo(3), dayAgo(2), dayAgo(1)]);
     const doomed = await itemCrediting(WS, "doomed", [dayAgo(0)]);
