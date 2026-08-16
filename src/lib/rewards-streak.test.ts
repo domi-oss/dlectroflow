@@ -110,12 +110,20 @@ import {
   rewardStepDone,
   maybeAwardInboxZero,
 } from "./rewards";
+// #233 — the SAME `ymd` the code under test uses, imported rather than copied.
+//
+// This file used to carry a byte-identical private copy. Harmless while the two
+// agreed, and precisely the hazard `rewards.ts`' own import note describes: two
+// derivations of "what day is it" differing by an hour make a streak silently
+// unrecomputable. A private copy in the test is the worse half of that, because
+// it would keep asserting the OLD derivation and stay green while production
+// moved — a test that has quietly stopped testing what it claims to.
+//
+// Raised in review on !352 as a missing import causing `ReferenceError`. That
+// part was wrong — the local definition was three lines above the call — but the
+// duplication under it was real, so the copy is gone instead.
+import { ymd } from "@/lib/engagement-ledger";
 
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-}
 const daysAgo = (n: number) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
