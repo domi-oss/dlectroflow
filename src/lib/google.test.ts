@@ -968,9 +968,7 @@ describe("#211 — every Google call carries a deadline", () => {
       const fetchMock = stubFetch(
         vi.fn().mockRejectedValue(deadlineRejection()),
       );
-      const { upsertGoogleTask, GoogleTimeoutError } = await import(
-        "./google"
-      );
+      const { upsertGoogleTask, GoogleTimeoutError } = await import("./google");
       await expect(
         upsertGoogleTask("tok", "list-9", "gtask-9", { title: "t" }),
       ).rejects.toBeInstanceOf(GoogleTimeoutError);

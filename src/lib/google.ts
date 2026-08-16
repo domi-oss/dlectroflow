@@ -21,6 +21,98 @@ const RECLAIM_LIST_MATCH = (
   process.env.GOOGLE_TASKS_LIST_NAME ?? "reclaim"
 ).toLowerCase();
 
+/**
+ * How long ANY one call to Google may take before it is abandoned (#211).
+ *
+ * Node's fetch defaults to a **300 s** header timeout, so an endpoint that
+ * accepts the connection and then goes quiet holds the request for five minutes
+ * with no error and nothing on screen. That is not hypothetical here: the OAuth
+ * callback is a browser navigation with no client-side bound at all, so a
+ * stalled token exchange is five minutes of blank page after someone clicks
+ * Connect — the same failure `PROVIDER_FETCH_TIMEOUT_MS` was added for in
+ * `src/lib/auth/providers.ts`, on the same kind of call to a different provider.
+ *
+ * **One constant for the whole module**, which is the half of #211 that outlives
+ * the fix: `!288` covered the PATCH and left six calls uncovered, and #155 and
+ * #194 add more callers next. Anything reaching Google from here uses this
+ * rather than a literal of its own, and `google.test.ts` counts the two against
+ * each other so a new call site cannot quietly skip it.
+ *
+ * `TASKS_PATCH_TIMEOUT_MS` folded into this. It was 10 s for the bulk-complete
+ * loop, this is 10 s for everything, and two equal numbers with two rationales
+ * is the state the issue exists to end.
+ *
+ * `PROVIDER_FETCH_TIMEOUT_MS` is also 10 s and is still deliberately NOT
+ * imported (Duo review, `!288`). Equal by coincidence, not by requirement: that
+ * one bounds how long a person stares at a sign-in callback, this one bounds how
+ * long Google Tasks may hold a schedule push. Sharing it would mean tuning for a
+ * slow identity provider silently retuning this module, and would point
+ * `google.ts` at the auth module for no other reason.
+ *
+ * `AbortSignal.timeout` rather than the hand-owned timer in
+ * `focus-catalog-source.ts`: that shape exists to avoid truncating a long body,
+ * and the largest response here is the task-list read — capped at
+ * `maxResults=100` — so every response is small JSON. A server that answers
+ * promptly and then trickles the body should hit this deadline too.
+ *
+ * 10 s: well above a slow mobile round trip to Google, far below anything a
+ * person would sit through. It is also the number every other wait in the app
+ * already uses (`INBOX_ACTION_TIMEOUT_MS`, `SHOPPING_ACTION_TIMEOUT_MS`,
+ * `LIBRARY_ACTION_TIMEOUT_MS`, `AUDIO_HEADER_TIMEOUT_MS`).
+ */
+export const GOOGLE_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * The deadline above fired, expressed as something a caller can act on.
+ *
+ * The raw rejection is a `DOMException` named `TimeoutError` whose message is
+ * "The operation was aborted due to timeout" — and it satisfies `instanceof
+ * Error`, so the OAuth callback's `err instanceof Error ? err.message` branch
+ * would put that sentence in a URL and the inbox banner would print it. Every
+ * call site below therefore converts it into a sentence that names the
+ * CONSEQUENCE, because that is the part the reader has to act on.
+ *
+ * Exported so `src/app/api/google/oauth/callback/route.ts` can tell a deadline
+ * apart from Google refusing the exchange: the first is retryable and the second
+ * is not, and only one of them should offer to connect again.
+ */
+export class GoogleTimeoutError extends Error {
+  constructor(consequence: string) {
+    super(
+      `Google did not respond within ${GOOGLE_FETCH_TIMEOUT_MS / 1000}s — ${consequence}`,
+    );
+    this.name = "GoogleTimeoutError";
+  }
+}
+
+/**
+ * The `reason` the OAuth callback redirects with when the exchange timed out,
+ * and the value the inbox banner branches on to offer a reconnect.
+ *
+ * One token, one definition: the route writes it into the URL and the page reads
+ * it back, and two surfaces spelling the same literal is how a banner comes to
+ * silently stop matching.
+ */
+export const GOOGLE_TIMEOUT_REASON = "timed_out";
+
+/**
+ * Is this rejection OUR deadline firing, or Google failing some other way?
+ *
+ * `fetch` rejects with the signal's own reason, which for `AbortSignal.timeout`
+ * is a `DOMException` named `TimeoutError`. Measured against a server that
+ * accepts the connection and never answers, on both Node majors this app runs
+ * on — `node:22-alpine` (v22.23.1, the CI image) and v26.4.0 — with no wrapping
+ * `TypeError` and no `cause` chain in either.
+ *
+ * Everything else keeps its own identity on purpose. A dropped socket and an
+ * unresolvable host are different faults with different first moves, and
+ * relabelling them "Google was slow" sends the reader looking for the wrong
+ * thing.
+ */
+function isDeadlineRejection(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError";
+}
+
 export { createPkce, randomState };
 
 export function googleClient() {
@@ -131,11 +223,31 @@ export async function exchangeCode(
     client_secret: clientSecret,
     code_verifier: codeVerifier,
   });
-  const res = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // The worst of the six, and the one with no client-side bound of any kind:
+    // this runs inside a browser navigation to /api/google/oauth/callback, so
+    // until this deadline existed a stalled Google meant five minutes of blank
+    // page for someone who had just clicked Connect.
+    //
+    // Nothing has been written at this point, so the state is exactly what it
+    // was before the attempt — which is what makes "try connecting again" a
+    // safe thing to offer rather than a guess. The route turns this into
+    // `reason=timed_out` and the banner offers the affordance.
+    if (isDeadlineRejection(err)) {
+      throw new GoogleTimeoutError(
+        "nothing was connected. Try connecting again.",
+      );
+    }
+    throw err;
+  }
   if (!res.ok) {
     throw new Error(`Google token exchange failed (${res.status})`);
   }
@@ -153,11 +265,33 @@ async function refreshAccessToken(userId: string): Promise<string | null> {
     client_id: clientId,
     client_secret: clientSecret,
   });
-  const res = await fetch(TOKEN_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+      signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // A deadline is TRANSIENT, and that distinction is the whole point of
+    // handling it here. This function's one destructive branch — clearing the
+    // tokens and setting `needsReconnect` — belongs to `invalid_grant` and
+    // nothing else: it means Google has told us the grant is dead. A timeout
+    // tells us nothing about the grant, so treating it the same way would send
+    // a perfectly connected person back through consent because of a slow
+    // network.
+    //
+    // `null` is what the non-`invalid_grant` failure branch below already
+    // returns for a 5xx, and every caller reads it the same way: the
+    // best-effort sync paths (`google-task-sync.ts`) skip and report "not
+    // synced", and the interactive push offers Connect. Returning it here also
+    // stops the raw abort propagating out of `pushStepsToGoogleTasks`, which
+    // resolves its token OUTSIDE its try/catch — so a rejection there escapes
+    // the server action rather than becoming a result the UI can render.
+    if (isDeadlineRejection(err)) return null;
+    throw err;
+  }
   if (!res.ok) {
     let errCode: string | undefined;
     try {
@@ -300,6 +434,7 @@ export async function disconnectGoogle(userId: string): Promise<boolean> {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ token }),
+        signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
       });
       // `fetch` rejects only on a network-level failure — a 400 for a grant
       // Google has already expired, or a 5xx, RESOLVES. Reading `res.ok` is the
@@ -307,6 +442,13 @@ export async function disconnectGoogle(userId: string): Promise<boolean> {
       // every realistic revoke failure was reported as a success.
       revoked = res.ok;
     } catch {
+      // #211 — the deadline needs no new branch here, and that is the decision
+      // rather than an omission: "we asked and got no answer" is already
+      // `revoke_rejected`, which is exactly what a timeout leaves behind. The
+      // tokens still go, because a grant we could not revoke is more reason to
+      // drop the token, not less. All the deadline changes is that the person
+      // who clicked Disconnect gets their dialog back in ten seconds instead of
+      // five minutes — `integrations-panel.tsx` awaits this action unwrapped.
       revoked = false;
     }
     // Logged here, before the delete, not after it: the delete can throw, and a
@@ -389,9 +531,22 @@ function tasksUrl(...segments: string[]): string {
 type TaskList = { id: string; title: string };
 
 export async function listTaskLists(token: string): Promise<TaskList[]> {
-  const res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // A read, and the first call a push makes — so nothing has been written
+    // anywhere yet and the message can say so without qualification. It is
+    // rendered verbatim: `pushStepsToGoogleTasks` returns it as its `error`
+    // message and the schedule surfaces print that.
+    if (isDeadlineRejection(err)) {
+      throw new GoogleTimeoutError("nothing was scheduled.");
+    }
+    throw err;
+  }
   if (!res.ok)
     throw new Error(`Google Tasks list fetch failed (${res.status})`);
   const data = (await res.json()) as { items?: TaskList[] };
@@ -412,18 +567,34 @@ export async function createGoogleTask(
   listId: string,
   input: { title: string; notes?: string; due?: string },
 ): Promise<{ id: string }> {
-  const res = await fetch(tasksUrl("lists", listId, "tasks"), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      title: input.title,
-      notes: input.notes,
-      ...(input.due ? { due: input.due } : {}),
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(tasksUrl("lists", listId, "tasks"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: input.title,
+        notes: input.notes,
+        ...(input.due ? { due: input.due } : {}),
+      }),
+      signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // The one message that must NOT claim nothing happened. The deadline fires
+    // at this end; the POST may already have reached Google and created the
+    // task before it went quiet. Telling someone "nothing was scheduled" here
+    // is what walks them into pressing the button again and getting a second
+    // task, and a second Reclaim block on their calendar.
+    if (isDeadlineRejection(err)) {
+      throw new GoogleTimeoutError(
+        "the task may or may not have been created. Check your Google Tasks list before trying again.",
+      );
+    }
+    throw err;
+  }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`Google Tasks create failed (${res.status}) ${detail}`);
@@ -432,44 +603,21 @@ export async function createGoogleTask(
 }
 
 /**
- * How long one Google Tasks PATCH may take before it is abandoned.
- *
- * !288 (#195) put this call inside `completeItem`, which `bulkBrainDumpAction`
- * runs in a sequential loop over every selected row — so one stalled connection
- * stops being a slow request and becomes a bulk operation that never returns.
- * Node's fetch defaults to a **300 s** header timeout, which on twenty selected
- * to-dos is an hour and forty minutes, and no caller's try/catch can help
- * because a stall never throws. The callers' best-effort contract is a promise
- * about errors; this is the half of it that has to be a promise about time.
- *
- * 10 s: well above a slow round trip to Google, far below anything a person
- * would sit through. `AbortSignal.timeout` rather than a hand-owned timer, for
- * the reason `src/lib/auth/providers.ts` gives — the response is a few hundred
- * bytes of JSON, so a server that answers promptly and then trickles the body
- * should hit this too, and there is no long stream to truncate.
- *
- * `PROVIDER_FETCH_TIMEOUT_MS` in that file is also 10 s, and this deliberately
- * does NOT import it (Duo review, !288). The two budgets are equal by
- * coincidence, not by requirement, and each moves for its own reason: that one
- * bounds how long a person stares at an OAuth callback, this one bounds how
- * long ONE item of a bulk-complete can stall the nineteen behind it. Sharing
- * the constant would mean tuning for a slow identity provider silently retuning
- * a Google Tasks batch, and would point `google.ts` at the auth module for no
- * other reason. The consolidation that IS right — one constant for this
- * module's seven fetches instead of seven literals — is #211.
- *
- * Deliberately only on the PATCH: it is the one call this change put in a loop.
- * The other six fetches here have the same gap and the same fix, but they sit
- * on interactive paths where a stall costs one request, so they are #211 rather
- * than a widening of this one.
- */
-const TASKS_PATCH_TIMEOUT_MS = 10_000;
-
-/**
  * PATCH a Google Task (title/status/notes). Best-effort — returns ok.
+ *
  * Throws only if an identifier is unusable (see {@link pathSegment}); callers
- * already skip steps with a missing list/task id. A timed-out request rejects
- * with the abort error, which every caller already treats as "not synced".
+ * already skip steps with a missing list/task id. A timed-out request rejects,
+ * which every caller already treats as "not synced" — `google-task-sync.ts`
+ * swallows it structurally rather than leaving each call site to remember.
+ *
+ * This is the call `!288` (#195) gave the module's first deadline, because it
+ * put the call inside `completeItem`, which `bulkBrainDumpAction` runs in a
+ * sequential loop: one stalled connection there stops being a slow request and
+ * becomes a bulk operation that never returns — twenty selected to-dos against
+ * Node's 300 s default is an hour and forty minutes. That reasoning still holds
+ * and is why the loop is worth naming here; what has changed is that it is no
+ * longer the only covered call, so its own `TASKS_PATCH_TIMEOUT_MS` is gone and
+ * the shared {@link GOOGLE_FETCH_TIMEOUT_MS} does the job for all seven (#211).
  */
 export async function patchGoogleTask(
   token: string,
@@ -483,15 +631,27 @@ export async function patchGoogleTask(
     status?: "needsAction" | "completed";
   },
 ): Promise<boolean> {
-  const res = await fetch(tasksUrl("lists", listId, "tasks", taskId), {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(patch),
-    signal: AbortSignal.timeout(TASKS_PATCH_TIMEOUT_MS),
-  });
+  let res: Response;
+  try {
+    res = await fetch(tasksUrl("lists", listId, "tasks", taskId), {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // Named rather than swallowed even though the callers discard it: the
+    // reason a bulk complete stopped syncing reaches an operator through this
+    // message, and "the operation was aborted due to timeout" does not say
+    // which operation or what it left behind.
+    if (isDeadlineRejection(err)) {
+      throw new GoogleTimeoutError("the task was not confirmed updated.");
+    }
+    throw err;
+  }
   return res.ok;
 }
 
@@ -521,17 +681,31 @@ export async function upsertGoogleTask(
   };
 
   if (existingTaskId) {
-    const res = await fetch(
-      tasksUrl("lists", listId, "tasks", existingTaskId),
-      {
+    let res: Response;
+    try {
+      res = await fetch(tasksUrl("lists", listId, "tasks", existingTaskId), {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
-      },
-    );
+        signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // #211 — this must THROW, and the fall-through below is exactly why.
+      // Recreating is right for a 404, where Google has told us the task is
+      // gone; a deadline tells us nothing, and the task is most likely still
+      // sitting there. Continuing would POST a second one, and Reclaim would
+      // book a second calendar block for the same step — the duplicate #104
+      // exists to have stopped.
+      if (isDeadlineRejection(err)) {
+        throw new GoogleTimeoutError(
+          "the task may not have been updated, and was not replaced.",
+        );
+      }
+      throw err;
+    }
     if (res.ok) return { id: existingTaskId, created: false };
     if (res.status !== 404) {
       const detail = await res.text().catch(() => "");
