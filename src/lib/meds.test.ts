@@ -91,6 +91,42 @@ describe("doseDeadline", () => {
     );
   });
 
+  /**
+   * ⚠️ The FEATURE-level half of the `!364` range fix, and it is not redundant
+   * with `target-time.test.ts`.
+   *
+   * That file proves the helper degrades. This proves the degradation reaches the
+   * thing that matters: a deadline computed from an out-of-range time used to
+   * land on **another day**, and a deadline in tomorrow means a dose that can
+   * never read as *missed* today. The helper-level test alone would have gone
+   * green while a dose was silently un-missable, which is the exact shape of
+   * failure this module's docblock warns about.
+   *
+   * `dueAfter` carries no CHECK constraint by design, so the values below are
+   * reachable from a hand-edited row today and from any future importer.
+   */
+  it.each(["25:00", "24:00", "12:99", "99:99"])(
+    "keeps the deadline on TODAY for the out-of-range dueAfter %o",
+    (bad) => {
+      const deadline = new Date(doseDeadline(bad, "17:00", MONDAY_0900));
+      expect(deadline.getDate(), `${bad} moved the deadline off Monday`).toBe(
+        17,
+      );
+      // It collapses to `workdayEndTime`, which is exactly a dose with no stated
+      // time — the honest reading of a value nobody could have meant.
+      expect(deadline.getTime()).toBe(new Date(2026, 7, 17, 17, 0).getTime());
+    },
+  );
+
+  it("keeps the deadline on today for an out-of-range workdayEndTime too", () => {
+    // The other side of the `max`. `Settings.workdayEndTime` has no constraint
+    // either, and a workspace holding "24:00" would otherwise push EVERY dose's
+    // deadline into tomorrow at once.
+    const deadline = new Date(doseDeadline(null, "24:00", MONDAY_0900));
+    expect(deadline.getDate()).toBe(17);
+    expect(deadline.getTime()).toBe(new Date(2026, 7, 17, 17, 0).getTime());
+  });
+
   it("degrades a malformed dueAfter to workdayEndTime rather than to NaN", () => {
     // NaN would be worse than either bound: every comparison against it is false,
     // so the dose would silently never be missed.
@@ -134,6 +170,35 @@ describe("deriveTodayDoses", () => {
       DerivedDoseState.Missed,
       DerivedDoseState.Missed,
     ]);
+  });
+
+  it("still marks an out-of-range-dueAfter dose missed on its OWN day", () => {
+    // ⚠️ The consequence, asserted on the rendered state rather than on the
+    // helper. Before the `!364` fix a `dueAfter` of "24:00" pushed the deadline
+    // to tomorrow, so this dose read `not recorded` at 22:00 on the day it was
+    // due and never became `missed` at all — un-missable, silently, on a health
+    // record. It now behaves as a dose with no stated time.
+    const bad = regimen({
+      doses: [
+        {
+          id: "dose-evening",
+          label: "after dinner",
+          quantity: 1,
+          dueAfter: "24:00",
+          order: 1,
+        },
+      ],
+    });
+    const state = (now: Date) =>
+      deriveTodayDoses({
+        medications: [bad],
+        settings: SETTINGS,
+        logs: [],
+        now,
+      })[0].state;
+    expect(state(MONDAY_1400)).toBe(DerivedDoseState.Unknown);
+    expect(state(MONDAY_1800)).toBe(DerivedDoseState.Missed);
+    expect(state(MONDAY_2200)).toBe(DerivedDoseState.Missed);
   });
 
   it("does not mark a 21:00 dose missed at 18:00", () => {
