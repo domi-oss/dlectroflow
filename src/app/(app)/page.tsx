@@ -299,8 +299,6 @@ export default async function InboxPage({
       <InboxView
         initialItems={firstRun ? [] : items}
         settings={{
-          agingThresholdMinutes: settings.agingThresholdMinutes,
-          demoOverrideSeconds: settings.demoOverrideSeconds,
           agingHours: settings.agingHours,
           overdueHours: settings.overdueHours,
           wayOverdueHours: settings.wayOverdueHours,

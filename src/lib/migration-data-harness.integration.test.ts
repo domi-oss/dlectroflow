@@ -650,6 +650,130 @@ describe("the migrations applied to a database that already holds rows (#190)", 
     }
   });
 
+  /**
+   * #261 — the minutes → hours conversion, asserted rather than merely survived.
+   *
+   * `20260816120000_aging_hours_single_source` removes `agingThresholdMinutes`,
+   * and converts any non-default value into `agingHours` first so a workspace
+   * that set 90 minutes does not wake up on the 4-hour default.
+   *
+   * ⚠️ A row COUNT cannot stand in for these assertions, and that is the reason
+   * they exist. `Settings` is populated long before this migration runs — the
+   * init seed inserts the singleton and `20260706130912_workspaces` inserts the
+   * owner's row — so the harness's coverage gate was already satisfied, while
+   * every one of those rows holds the 240 default the `UPDATE` deliberately
+   * skips. Without the seed the statement would have matched nothing and
+   * reported a clean pass: the 2026-08-07 property (a statement provable only in
+   * production) in its quieter form, where the statement cannot FAIL anywhere
+   * else because it cannot ACT anywhere else.
+   *
+   * The seed is `migration-seeds/20260815120100_engagement_day_backfill.sql`; its
+   * header explains what each row is for. Written as a per-workspace map rather
+   * than a count, because "five rows still have an agingHours" is satisfied by a
+   * migration that converted none of them.
+   */
+  it("converts a non-default aging threshold from minutes to hours (#261)", async () => {
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const rows = await prisma.settings.findMany({
+        where: { workspaceId: { startsWith: "seed-aging-ws-" } },
+        orderBy: { workspaceId: "asc" },
+        select: { workspaceId: true, agingHours: true },
+      });
+
+      expect(rows.map((r) => [r.workspaceId, r.agingHours])).toEqual([
+        // ⚠️ NEGATIVE CONTROL, listed first by sort order: 90 minutes AND an
+        // explicitly chosen 10 hours. The explicit choice survives untouched.
+        ["seed-aging-ws-both-set", 10],
+        // ⚠️ NEGATIVE CONTROL: both columns at their defaults, nothing converted.
+        ["seed-aging-ws-default", 4],
+        // 30 min → 1h, and the floor is what stops a sub-half-hour threshold
+        // rounding to 0 and calling every item aging on capture.
+        ["seed-aging-ws-floor", 1],
+        // 150 min → 3h. Ties break AWAY FROM ZERO, matching `Math.round` in
+        // `updateAgingSettings`. A double-precision division would store 2.
+        ["seed-aging-ws-round-half-even-trap", 3],
+        // 90 min → 2h. Also the row that fails if the division is written
+        // `/ 60`, which is integer division in Postgres and truncates to 1.
+        ["seed-aging-ws-round-up", 2],
+      ]);
+
+      // The columns are gone, not merely unread — asserted against the live
+      // catalog rather than the generated client, which is rebuilt from the same
+      // schema file the migration is supposed to be implementing and so cannot
+      // disagree with it.
+      const columns = await prisma.$queryRaw<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'Settings'
+           AND column_name IN ('agingThresholdMinutes', 'demoOverrideSeconds', 'roundupDemoOverride')
+      `;
+      expect(columns).toEqual([]);
+      // The control for that zero: the same query, asked about a column that IS
+      // there. An empty result from a mis-scoped query looks identical to a
+      // dropped column.
+      const control = await prisma.$queryRaw<{ column_name: string }[]>`
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'Settings'
+           AND column_name = 'agingHours'
+      `;
+      expect(control).toEqual([{ column_name: "agingHours" }]);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  /**
+   * #208 — the redundant single-column indexes, dropped by the same migration.
+   *
+   * Each was a plain index whose column list is a PREFIX of another index on the
+   * same model, so Postgres served every read it could serve from the leading
+   * column of the wider one. The issue names two; re-deriving it over the whole
+   * schema found five, the fifth sitting under a composite PRIMARY KEY rather
+   * than a `@@unique`, which is why searching for `@@unique` had missed it.
+   *
+   * Asserted with its own non-zero control, because "no such index" and "the
+   * query looked in the wrong schema" return the same empty set.
+   */
+  it("drops five redundant single-column indexes and keeps their covering ones (#208)", async () => {
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const dropped = [
+        "BrainDumpItem_workspaceId_idx",
+        "Step_taskId_idx",
+        "FocusPlaylist_workspaceId_idx",
+        "Badge_workspaceId_idx",
+        "GuestDailyActivity_day_idx",
+      ];
+      // The wider index each dropped one was a prefix of. Every read on these
+      // models is `where: { <col> }` or `where: { <col>, <second col> }`, both of
+      // which the covering index serves from its leading column.
+      const covering = [
+        "BrainDumpItem_workspaceId_clientKey_key",
+        "Step_taskId_order_key",
+        "FocusPlaylist_workspaceId_name_key",
+        "Badge_workspaceId_key_key",
+        "GuestDailyActivity_pkey",
+      ];
+      const present = async (names: string[]) =>
+        (
+          await prisma.$queryRaw<{ indexname: string }[]>`
+            SELECT indexname FROM pg_indexes
+             WHERE schemaname = current_schema()
+               AND indexname = ANY(${names})
+             ORDER BY indexname
+          `
+        ).map((r) => r.indexname);
+
+      expect(await present(dropped)).toEqual([]);
+      // The control for that zero, on the same table in the same schema.
+      expect(await present(covering)).toEqual([...covering].sort());
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   // ── The close condition of #190 ─────────────────────────────────────────────
   // "Do not close this on a harness that passes. Close it on a harness
   // demonstrated to fail against the pre-fix 20260806100000 migration with

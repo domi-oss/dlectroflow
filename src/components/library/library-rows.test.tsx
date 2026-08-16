@@ -38,8 +38,6 @@ import {
 } from "@/app/actions/braindump";
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 60,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

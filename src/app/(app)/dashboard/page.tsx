@@ -81,7 +81,6 @@ export default async function DashboardPage({
         initialRollup={rollup}
         settings={{
           workdayEndTime: settings.workdayEndTime,
-          roundupDemoOverride: settings.roundupDemoOverride,
           roundupEmailEnabled: settings.roundupEmailEnabled,
           roundupEmail: settings.roundupEmail,
           notifyRoundup: settings.notifyRoundup,

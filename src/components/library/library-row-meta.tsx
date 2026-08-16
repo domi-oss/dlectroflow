@@ -84,7 +84,11 @@ export function AgeLabel({
   // tint has to be decided by the same clock, or the class the server sent and
   // the class the client computes can disagree on a row sitting on the
   // threshold. The Library page stamps `now` once per request (page.tsx).
-  const aging = isAging(item.createdAt, settings, now);
+  //
+  // #261 — `freshenedAt`, so the hub agrees with the Inbox about a row somebody
+  // has confirmed is still needed, not just about where the boundary is. It reads
+  // the `aging` tier's colour, so it has to ask the tier system the question.
+  const aging = isAging(item.createdAt, item.freshenedAt, settings, now);
   return (
     <span
       className={cn(

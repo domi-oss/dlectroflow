@@ -15,8 +15,6 @@ import type { AccountIdentity } from "@/lib/identity";
  */
 
 const settingsFixture = {
-  agingThresholdMinutes: 45,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

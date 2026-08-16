@@ -77,7 +77,6 @@ const settings = (notifyRoundup: boolean): RoundupSettings => ({
   // Workday end is after the frozen 09:00 test clock, so the scheduled mount
   // tick never fires — these tests exercise only the manual "Trigger now" path.
   workdayEndTime: "23:59",
-  roundupDemoOverride: false,
   roundupEmailEnabled: false,
   roundupEmail: null,
   notifyRoundup,
@@ -157,50 +156,63 @@ describe("RoundupCard notification-permission prompt", () => {
   });
 });
 
-// #23 safety net for the mount-clock refactor (`useRef(Date.now())` ran an
-// impure call during render): the demo override must still fire the round-up
-// about 4s after the card mounts, and not before.
-describe("RoundupCard demo override timing", () => {
-  it("fires ~4s after mount, not sooner", async () => {
+/**
+ * #261 — `roundupDemoOverride` is gone. It made the round-up auto-fire ~4s after
+ * mount and skipped the once-a-day localStorage guard so a demo could be re-run,
+ * and the talk it existed for has happened.
+ *
+ * What replaces the two specs it had is the assertion that the card is now
+ * governed by the workday clock alone. #23's mount-clock refactor is still
+ * pinned, from the other side: the card must NOT fire on mount.
+ */
+describe("RoundupCard workday-end firing (#261 — no demo override)", () => {
+  it("does not auto-fire on mount; waits for the workday-end time", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 0, 15, 9, 0, 0));
     render(
       <RoundupCard
         initialRollup={null}
-        settings={{ ...settings(false), roundupDemoOverride: true }}
+        settings={settings(false)}
         emailConfigured={false}
       />,
     );
     expect(triggerRollup).not.toHaveBeenCalled();
 
-    // The poll runs every 5s; at +3s the 4s target hasn't passed yet.
+    // Well past the ~4s the demo override used to fire at, and past several
+    // 5s poll ticks. 23:59 has not arrived, so nothing is due.
     await act(async () => {
-      vi.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(30_000);
     });
+    expect(triggerRollup).not.toHaveBeenCalled();
+  });
+
+  it("fires once the clock passes the workday-end time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 15, 16, 59, 55));
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={{ ...settings(false), workdayEndTime: "17:00" }}
+        emailConfigured={false}
+      />,
+    );
     expect(triggerRollup).not.toHaveBeenCalled();
 
     await act(async () => {
-      vi.advanceTimersByTime(2500);
+      vi.advanceTimersByTime(10_000);
     });
     expect(triggerRollup).toHaveBeenCalledTimes(1);
   });
 
-  // #109 — the note inherits the <summary>'s 12px, so the 4.5:1 normal-text
-  // threshold applies. `text-amber-600` was 3.01:1 on the light --background and
-  // only ever renders with the override on, so /dashboard's contrast gate never
-  // measured it. amber-700/amber-400 (4.75:1 / 11.44:1) is the pair the "still
-  // needed?" link in this same file already uses.
-  it("paints the demo note with the AA-tuned amber pair (#109)", () => {
+  it("renders no demo note in the settings disclosure", () => {
     render(
       <RoundupCard
         initialRollup={null}
-        settings={{ ...settings(false), roundupDemoOverride: true }}
+        settings={settings(false)}
         emailConfigured={false}
       />,
     );
-    const note = screen.getByText(/demo: auto-fires on load/);
-    expect(note.className).toContain("text-amber-700");
-    expect(note.className).toContain("dark:text-amber-400");
-    expect(note.className).not.toContain("text-amber-600");
+    expect(screen.queryByText(/demo: auto-fires on load/)).toBeNull();
+    expect(screen.queryByLabelText(/demo/i)).toBeNull();
   });
 });

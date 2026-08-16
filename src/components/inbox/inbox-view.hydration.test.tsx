@@ -82,8 +82,6 @@ vi.mock("@/lib/notifications", () => ({
 }));
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 30,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,
@@ -254,16 +252,27 @@ describe("#105 the inbox hydrates a sub-minute row from one clock", () => {
     // clock. `isAging`, `freshnessTier` and `shouldPrompt24h` each defaulted to
     // their own Date.now(), and each feeds RENDERED output: the amber tint, the
     // StatusPill's WORDS, and whether the "still needed?" nudge exists at all.
-    // Demo mode (`demoOverrideSeconds`) puts those thresholds seconds apart,
-    // well inside the server↔hydration gap — so a demo row crossing 🟢 Recent →
-    // 🟡 Aging mismatches STRUCTURALLY, not just in a label.
-    const demo: AgingSettings = { ...settings, demoOverrideSeconds: 10 };
-    // 9.4s old at the server's clock (Recent); 10.8s old at the client's (Aging).
-    const item = makeItem({ createdAt: new Date(SERVER_NOW - 9_400) });
+    // A row crossing 🟢 Recent → 🟡 Aging between the two passes mismatches
+    // STRUCTURALLY, not just in a label.
+    //
+    // #261 — this case used to reach the boundary through `demoOverrideSeconds`,
+    // which put the tiers ten seconds apart and made the crossing trivial to
+    // arrange. That column is gone, and the hazard is NOT: the boundary is now
+    // an hour rather than ten seconds, so an item lands on it far less often —
+    // "rarer, not impossible", which is the reason #261 kept `now` a parameter
+    // rather than reverting #105. The case is therefore rebuilt on the real
+    // thresholds, sitting the item 600 ms short of a one-hour boundary the
+    // client's clock then crosses. Nothing about the fault changed; only how
+    // hard it is to walk into.
+    const oneHour: AgingSettings = { ...settings, agingHours: 1 };
+    // 59m59.4s old at the server's clock (Recent); 1h0m0.8s at the client's (Aging).
+    const item = makeItem({
+      createdAt: new Date(SERVER_NOW - (3_600_000 - 600)),
+    });
 
     const { html, container, serverRow, recoverable } = await serverThenHydrate(
       [item],
-      demo,
+      oneHour,
     );
 
     expect(html).toContain("🟢");

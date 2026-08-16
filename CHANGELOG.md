@@ -796,6 +796,20 @@ operators upgrading a self-hosted instance don't get surprised.
   frozen. Nothing here ever reached the server; what was at stake was the sentence
   you were part-way through.
 
+- **A local end-to-end run can no longer test the wrong branch (#266).** Playwright
+  reuses an existing server outside CI, on fixed ports, and this project's default
+  working mode is many concurrent worktrees — so the server it attached to
+  frequently belonged to a different branch, with nothing checking which. It was
+  seen twice inside one review as an all-red run that came back clean on an
+  immediate re-run with no change to the tree; the more expensive direction is the
+  opposite, a spec that should fail passing against a build that happens to satisfy
+  it. The checkout's commit is now handed to the servers under test, `/api/health`
+  is asked for it back before any spec runs, and a mismatch aborts the run naming
+  both commits and the port to free, so it can never be read as a failing feature.
+  When the commit cannot be established at all, server reuse is switched off rather
+  than left unverified. No effect on a self-hosted instance or on CI, where
+  Playwright always starts its own server — this is this project's own test harness.
+
 - **A stalled Google no longer holds a request for five minutes (#211).** Node's
   `fetch` defaults to a 300 s header timeout, and only one of the seven calls this
   app makes to Google set a deadline of its own. An endpoint that accepted the

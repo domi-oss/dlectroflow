@@ -1,7 +1,9 @@
 import { chromium } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
+import path from "node:path";
 import { signUserSession, OWNER_COOKIE } from "../src/lib/auth/session";
 import { clearGoogleTokens } from "./google-credential";
+import { assertServersAreThisBuild } from "./build-identity";
 import {
   SESSION_SECRET,
   OWNER_SUB,
@@ -14,7 +16,10 @@ import {
   MEMBER_STORAGE_STATE,
   STORAGE_STATE,
   BASE_URL,
+  MEMBER_BASE_URL,
 } from "./constants";
+
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 // Mint a real, valid signed-in session the same way the OAuth callback does,
 // then persist it as Playwright storageState so every spec starts logged in.
@@ -29,6 +34,28 @@ import {
 // as an unauthenticated visitor while continuing to pass. The account and its
 // workspace are therefore seeded here first, idempotently.
 export default async function globalSetup(): Promise<void> {
+  // #266 — FIRST, before anything is written anywhere.
+  //
+  // `reuseExistingServer` is on outside CI on fixed ports 3000/3100, so
+  // Playwright may have attached to a server another worktree left running.
+  // Playwright starts the `webServer` entries before globalSetup — the runner
+  // sequences plugin setup ahead of the global-setup task — so by here both
+  // servers are answering and can be asked what they are.
+  //
+  // Ordering inside this function is load-bearing rather than tidiness: the
+  // upserts below re-assert fixture rows in the database the WRONG server is
+  // also talking to, and the guard's claim is that a wrong-build attach changes
+  // nothing and is distinguishable from a spec failure. Seeding first would
+  // break the first half of that. `src/lib/e2e-build-identity.test.ts` pins the
+  // order.
+  await assertServersAreThisBuild(
+    [
+      { label: "the default project's server", url: BASE_URL },
+      { label: "the member project's server", url: MEMBER_BASE_URL },
+    ],
+    REPO_ROOT,
+  );
+
   const prisma = new PrismaClient();
   try {
     await prisma.user.upsert({

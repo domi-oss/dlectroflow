@@ -117,8 +117,9 @@ async function seedSavedLaterItem(marker: string): Promise<PrismaClient> {
 }
 
 // #95 seeding. The Library row's "added Xh ago" label only turns amber once
-// `isAging()` is true (src/lib/aging.ts — age >= agingThresholdMinutes, default
-// 240). CI's database is recreated every run, so no row is ever old enough and
+// `isAging()` is true (src/lib/aging.ts — age >= `agingHours`, default 4; #261
+// collapsed the old minutes threshold into it). CI's database is recreated
+// every run, so no row is ever old enough and
 // BOTH /library a11y gates pass while the amber state is broken: a gated route
 // with an ungated state, the same blind spot as #48/#56/#89. Backdating
 // `createdAt` puts that state inside the gate's reach. 13h is deliberately
