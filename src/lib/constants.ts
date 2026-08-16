@@ -336,6 +336,70 @@ export const Typeface = {
 } as const;
 export type Typeface = (typeof Typeface)[keyof typeof Typeface];
 
+// ── #269 — medication tracker ──────────────────────────────────────────────
+
+/**
+ * What a `MedsDoseLog` row says happened. Mirrors `MedsDoseLog.state`,
+ * CHECK-constrained by `MedsDoseLog_state_check`
+ * (`20260816120000_meds_tracker`); Prisma cannot express a CHECK, so the
+ * constraint is registered in `src/lib/enum-constraint-sync.integration.test.ts`.
+ *
+ * ── Two values, four states, and only three of them are stored ─────────────
+ *
+ * **Unknown** is the absence of a row and **Missed** is that same absence once
+ * the dose's deadline has passed, so neither is a value here. `src/lib/meds.ts`
+ * derives both at read time; there is no job, no nightly backfill and no state
+ * machine, because a derivation cannot fail to fire — it *is* the read.
+ *
+ * ── Why this one gets a CHECK when `Settings.voice` does not ───────────────
+ *
+ * The convention (pseudo-enum → CHECK) is dominant but not unanimous, and the
+ * discriminator is what an out-of-set value costs. An unrecognised `voice`
+ * degrades to the default register and the reader sees plainer copy —
+ * `Typeface`'s comment records that posture. An unrecognised `state` has **no
+ * safe reading**: the strip would have to decide whether an unknown value means a
+ * dose was taken, and both answers are wrong about a health record.
+ */
+export const MedsDoseState = {
+  Taken: "taken",
+  /** Deliberately skipped. A first-class answer, not a failure: its copy is held
+   *  to the same warmth as `Taken`'s, because a reader who is made to feel worse
+   *  for logging a skip has been handed a motive to log a lie, and a tracker you
+   *  have lied to once is worth less than no tracker at all. */
+  Skipped: "skipped",
+} as const;
+export type MedsDoseState = (typeof MedsDoseState)[keyof typeof MedsDoseState];
+
+/**
+ * How the header's medication control behaves. Mirrors `Settings.medsNavMode`,
+ * CHECK-constrained by `Settings_medsNavMode_check`
+ * (`20260816120000_meds_tracker`) and registered in the same sync test.
+ *
+ * ⚠️ **This one needs the OPPOSITE argument to `MedsDoseState` above, and citing
+ * that one for both would be a contradiction.** An out-of-set `medsNavMode` *does*
+ * have a safe reading — fall back to the default mode — so the no-safe-reading
+ * test does not reach it. It carries a constraint on the plain dominant-convention
+ * ground instead: its two nearest analogues are appearance columns that both have
+ * safe readings and both carry one anyway (`Settings_typeface_check`,
+ * `Settings_focusTimerStyle_check`). The rule is "pseudo-enums get a constraint".
+ *
+ * A **behaviour** column, not a visibility one: `medsTracker` already governs
+ * whether the control exists at all, which is why there is no second Boolean here
+ * (the trolley icon has none either, for the same reason — `#252`'s comment states
+ * the discriminator).
+ */
+export const MedsNavMode = {
+  /** `B★` — one dot per dose. One tap marks the next unrecorded dose taken, a
+   *  second tap on the same dose makes it skipped, and the cycle TERMINATES
+   *  there. The default, by owner decision of 2026-08-15. */
+  Dots: "dots",
+  /** `E` — only the next unrecorded dose, labelled, with a tick and a cross of
+   *  identical weight. Recommended for screen-reader users, in Settings COPY:
+   *  nothing detects assistive technology and nothing here may try. */
+  Next: "next",
+} as const;
+export type MedsNavMode = (typeof MedsNavMode)[keyof typeof MedsNavMode];
+
 /**
  * #225 — how long a brain-dump→Task write may spend, including time spent
  * WAITING for another caller's row lock.
