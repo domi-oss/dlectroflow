@@ -56,13 +56,21 @@ vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: vi.fn().mockResolvedValue("ws-test"),
   currentUser: () => currentUserMock(),
 }));
-vi.mock("@/lib/google", () => ({
-  getGoogleStatus: vi.fn().mockResolvedValue({
-    configured: false,
-    connected: false,
-    needsReconnect: false,
-  }),
-}));
+// #211 — `GOOGLE_TIMEOUT_REASON` comes from the REAL module. The OAuth callback
+// writes that token into the URL and this page reads it back out; a literal
+// copied into the mock would keep passing after the two had stopped agreeing,
+// which is the whole failure mode a shared constant exists to prevent.
+vi.mock("@/lib/google", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/google")>();
+  return {
+    GOOGLE_TIMEOUT_REASON: actual.GOOGLE_TIMEOUT_REASON,
+    getGoogleStatus: vi.fn().mockResolvedValue({
+      configured: false,
+      connected: false,
+      needsReconnect: false,
+    }),
+  };
+});
 vi.mock("@/lib/workspace-history", async (importOriginal) => {
   // The pure decision keeps its REAL implementation — this test is about the
   // page's use of it, not a second copy of its rules — while the four-table
@@ -120,8 +128,8 @@ vi.mock("@/components/inbox/inbox-view", () => ({
 
 import InboxPage from "./page";
 
-function renderInbox() {
-  return InboxPage({ searchParams: Promise.resolve({}) });
+function renderInbox(searchParams: { google?: string; reason?: string } = {}) {
+  return InboxPage({ searchParams: Promise.resolve(searchParams) });
 }
 
 /** The `newAccount` the page handed <InboxView>, as "label/provider" or "null". */
@@ -448,5 +456,68 @@ describe("Inbox page — the shopping-list summary (#199)", () => {
     expect(summaryProp()).toBe("null");
     expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
     expect(db.shoppingItem.count).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #211 — the OAuth return banner, and the one case that earns a control.
+ *
+ * This page is where every `?google=…` redirect lands, and the banner is the
+ * only thing the person who clicked Connect ever sees. A timed-out exchange is
+ * the one failure here that is worth retrying immediately and that wrote
+ * nothing, so it is the one that gets an affordance rather than an instruction
+ * to go and find one — every other reason keeps the generic copy, because
+ * offering "try again" for a state mismatch or a refused grant sends someone
+ * round a loop that cannot succeed.
+ */
+describe("Google connect banner (#211)", () => {
+  const connectLink = () =>
+    screen.queryByRole("link", {
+      name: /connect/i,
+    }) as HTMLAnchorElement | null;
+
+  it("offers a reconnect when the exchange timed out", async () => {
+    render(await renderInbox({ google: "error", reason: "timed_out" }));
+    const link = connectLink();
+    expect(link).not.toBeNull();
+    // The same entry point every other connect control uses: it mints a fresh
+    // PKCE verifier and state, which is exactly what the timed-out attempt's
+    // cleared cookies no longer supply.
+    expect(link!.getAttribute("href")).toBe("/api/google/oauth/start");
+  });
+
+  it("says what happened in words, not with the reason token", async () => {
+    render(await renderInbox({ google: "error", reason: "timed_out" }));
+    expect(screen.getByText(/did not answer in time/i)).toBeTruthy();
+    // The token is machine-readable plumbing between the route and this page.
+    expect(screen.queryByText(/timed_out/)).toBeNull();
+  });
+
+  it("says nothing was connected, because nothing was", async () => {
+    // Load-bearing rather than reassurance: `exchangeCode` stores tokens only
+    // after the response arrives, so a deadline leaves the account exactly as
+    // it was. That is what makes pressing the control again safe to suggest.
+    render(await renderInbox({ google: "error", reason: "timed_out" }));
+    expect(screen.getByText(/nothing was connected/i)).toBeTruthy();
+  });
+
+  it("keeps the generic copy — and no control — for any other failure", async () => {
+    render(await renderInbox({ google: "error", reason: "state_mismatch" }));
+    expect(screen.getByText(/connection failed/i)).toBeTruthy();
+    expect(screen.getByText(/state_mismatch/)).toBeTruthy();
+    expect(connectLink()).toBeNull();
+  });
+
+  it("still congratulates a connection that worked", async () => {
+    render(await renderInbox({ google: "connected" }));
+    expect(screen.getByText(/Google Tasks connected/i)).toBeTruthy();
+    expect(connectLink()).toBeNull();
+  });
+
+  it("shows no banner at all on an ordinary visit", async () => {
+    render(await renderInbox());
+    expect(screen.queryByText(/connection failed/i)).toBeNull();
+    expect(screen.queryByText(/did not answer in time/i)).toBeNull();
+    expect(connectLink()).toBeNull();
   });
 });

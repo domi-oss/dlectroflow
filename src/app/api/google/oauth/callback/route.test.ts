@@ -11,7 +11,18 @@ const { currentUserMock, exchangeCodeMock, cookiesMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({ currentUser: currentUserMock }));
-vi.mock("@/lib/google", () => ({ exchangeCode: exchangeCodeMock }));
+// #211 — the route needs the REAL `GoogleTimeoutError` and the real reason
+// token, because telling a deadline apart from a refusal is the behaviour under
+// test. A stub class would let the route match on something the module does not
+// actually throw, and the banner reads the same token back out of the URL.
+vi.mock("@/lib/google", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/google")>();
+  return {
+    GoogleTimeoutError: actual.GoogleTimeoutError,
+    GOOGLE_TIMEOUT_REASON: actual.GOOGLE_TIMEOUT_REASON,
+    exchangeCode: exchangeCodeMock,
+  };
+});
 vi.mock("next/headers", () => ({ cookies: cookiesMock }));
 vi.mock("@/lib/origin", () => ({
   requestOrigin: () => "https://dlectroflow.test",
@@ -133,6 +144,85 @@ describe("google oauth callback — authenticated gate (#118, owner-only in #119
     expect(res.headers.get("location")).toBe(
       "https://dlectroflow.test/?google=connected",
     );
+  });
+
+  // ── #211 — a deadline is not a refusal ────────────────────────────────────
+  //
+  // This route has no client-side bound of any kind: it is reached by a browser
+  // navigation back from Google, so until `exchangeCode` carried a deadline a
+  // stalled endpoint meant five minutes of blank page for someone who had just
+  // clicked Connect. Now that it fails in ten seconds, the redirect has to say
+  // something worth reading — a timeout is retryable and a refusal is not, and
+  // only one of them should offer to connect again.
+  describe("a timed-out exchange (#211)", () => {
+    it("redirects with the reason the banner offers a reconnect for", async () => {
+      currentUserMock.mockResolvedValue(ownerUser());
+      const { GoogleTimeoutError, GOOGLE_TIMEOUT_REASON } =
+        await import("@/lib/google");
+      exchangeCodeMock.mockRejectedValue(
+        new GoogleTimeoutError("nothing was connected. Try connecting again."),
+      );
+
+      const res = await GET(new Request(CALLBACK_URL));
+
+      expect(res.headers.get("location")).toBe(
+        `https://dlectroflow.test/?google=error&reason=${GOOGLE_TIMEOUT_REASON}`,
+      );
+    });
+
+    it("never puts the raw abort wording in front of the user", async () => {
+      // `err instanceof Error ? err.message` accepts a DOMException, so before
+      // #211 the URL — and the banner that prints it — read "The operation was
+      // aborted due to timeout".
+      currentUserMock.mockResolvedValue(ownerUser());
+      const { GoogleTimeoutError } = await import("@/lib/google");
+      exchangeCodeMock.mockRejectedValue(
+        new GoogleTimeoutError("nothing was connected. Try connecting again."),
+      );
+
+      const res = await GET(new Request(CALLBACK_URL));
+
+      // Decoded, because the raw `location` percent-encodes the spaces — a
+      // regex over the encoded form passes for the wrong reason.
+      const location = decodeURIComponent(res.headers.get("location") ?? "");
+      expect(location).not.toMatch(/abort/i);
+      expect(location).not.toMatch(/did not respond/i);
+      expect(location).not.toMatch(/try connecting again/i);
+    });
+
+    it("clears the one-shot cookies, so the retry mints a fresh pair", async () => {
+      // The verifier and state are single-use and expire in ten minutes.
+      // Leaving them behind would send "try connecting again" into a state
+      // mismatch instead of a fresh consent.
+      currentUserMock.mockResolvedValue(ownerUser());
+      const { GoogleTimeoutError } = await import("@/lib/google");
+      exchangeCodeMock.mockRejectedValue(new GoogleTimeoutError("nothing."));
+
+      const res = await GET(new Request(CALLBACK_URL));
+
+      const cookies = res.headers.getSetCookie().join("; ");
+      expect(cookies).toMatch(/google_oauth_state=;/);
+      expect(cookies).toMatch(/google_pkce_verifier=;/);
+    });
+
+    it("still reports a REFUSED exchange as itself, not as a timeout", async () => {
+      // The distinction the reason exists for. A 400 from Google is not going
+      // to be fixed by pressing the same button again.
+      currentUserMock.mockResolvedValue(ownerUser());
+      const { GOOGLE_TIMEOUT_REASON } = await import("@/lib/google");
+      exchangeCodeMock.mockRejectedValue(
+        new Error("Google token exchange failed (400)"),
+      );
+
+      const res = await GET(new Request(CALLBACK_URL));
+
+      const location = res.headers.get("location") ?? "";
+      expect(location).toContain("google=error");
+      expect(location).not.toContain(`reason=${GOOGLE_TIMEOUT_REASON}`);
+      expect(decodeURIComponent(location)).toContain(
+        "Google token exchange failed (400)",
+      );
+    });
   });
 
   it("still rejects a state mismatch (gate relaxed, checks kept)", async () => {
