@@ -20,6 +20,8 @@ import {
   UserStatus,
   AiPolicy,
   LlmProvider,
+  MedsDoseState,
+  MedsNavMode,
 } from "@/lib/constants";
 // #106 — the scheduling vocabulary lives in its own client-safe module (both the
 // server actions and the Schedule menu import it), so these two value sets are
@@ -243,6 +245,43 @@ const REGISTRY: ReadonlyArray<{
     column: "scheduleHours",
     values: ScheduleHours,
     nullable: true,
+  },
+  // #269 — the medication tracker's two pseudo-enums, and they are here for two
+  // DIFFERENT reasons rather than one applied twice.
+  //
+  // `state` has NO SAFE READING for an out-of-set value: the today-strip would
+  // have to decide whether an unknown string means a dose was taken, and both
+  // answers are wrong about a health record. That is what puts it with the
+  // constrained columns rather than with `Settings.voice`, which is the schema's
+  // one CHECK-less pseudo-enum precisely because an unrecognised voice degrades
+  // harmlessly to plainer copy.
+  //
+  // `medsNavMode` DOES have a safe reading — fall back to the default mode — so
+  // the argument above does not reach it and citing it for both would be a
+  // contradiction. It is here on the plain dominant-convention ground: its two
+  // nearest analogues, `Settings_typeface_check` and
+  // `Settings_focusTimerStyle_check`, both have safe readings and both carry a
+  // constraint anyway.
+  //
+  // ⚠️ These two entries are a REVIEW obligation. The "no missing, no strays"
+  // assertion below intersects the live constraint list with this registry's own
+  // names before comparing, so a constraint applied and never registered is
+  // filtered out and the suite stays green — nothing mechanical would have
+  // noticed their absence. The behavioural half is in the identity-rejection
+  // block at the foot of this file.
+  {
+    constraint: "MedsDoseLog_state_check",
+    table: "MedsDoseLog",
+    column: "state",
+    values: MedsDoseState,
+    nullable: false,
+  },
+  {
+    constraint: "Settings_medsNavMode_check",
+    table: "Settings",
+    column: "medsNavMode",
+    values: MedsNavMode,
+    nullable: false,
   },
 ];
 
@@ -818,5 +857,166 @@ describe("identity CHECK constraints actually reject out-of-set values", () => {
       `DELETE FROM "User" WHERE id = ANY($1::text[])`,
       ids,
     );
+  });
+});
+
+/**
+ * #269 — the behavioural half for the medication tracker's two constraints.
+ *
+ * Its own block because both need FIXTURE ROWS the block above deliberately does
+ * not have: `MedsDoseLog` has two foreign keys and `Settings` has one, so there
+ * is no single INSERT that reaches either column. The rejections themselves are
+ * the same shape — raw SQL past Prisma's types, which is the only way an
+ * out-of-set value gets to the database at all.
+ *
+ * ⚠️ **This block is what makes the registry entries above worth anything.** The
+ * sync assertions prove the constraint DEFINITIONS mirror `constants.ts`; they
+ * cannot prove Postgres enforces them, because a constraint added `NOT VALID`
+ * would still have to be re-added for the definition check to pass. And the
+ * "no strays" assertion cannot see an unregistered constraint at all. So for
+ * these two, "the constraint bites" is asserted here or it is asserted nowhere.
+ */
+describe("#269 medication CHECK constraints actually reject out-of-set values", () => {
+  const WS = "meds-check-ws";
+  const MED = "meds-check-med";
+  const DOSE = "meds-check-dose";
+
+  beforeAll(async () => {
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "Workspace" (id, kind) VALUES ($1,'user') ON CONFLICT (id) DO NOTHING`,
+      WS,
+    );
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "Medication" (id, "workspaceId", name, "order") VALUES ($1,$2,'Ritalin',1) ON CONFLICT (id) DO NOTHING`,
+      MED,
+      WS,
+    );
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "MedicationDose" (id, "medicationId", label, quantity, "order") VALUES ($1,$2,'after breakfast',2,1) ON CONFLICT (id) DO NOTHING`,
+      DOSE,
+      MED,
+    );
+  });
+
+  afterAll(async () => {
+    // The Workspace cascade takes Medication, MedicationDose, MedsDoseLog and
+    // Settings with it, so one DELETE is the whole teardown.
+    await prisma.$executeRawUnsafe(`DELETE FROM "Workspace" WHERE id = $1`, WS);
+  });
+
+  it("MedsDoseLog.state rejects 'missed', which is DERIVED and must never be stored", async () => {
+    // Not an arbitrary bad value. `missed` is the one an implementer would reach
+    // for, because it is a real state the UI renders — and storing it would make
+    // the absence of a row and the presence of a `missed` row two ways to say the
+    // same thing, one of which a job can fail to write.
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "MedsDoseLog" (id, "workspaceId", date, "medicationDoseId", state)
+           VALUES ('meds-check-bite-missed',$1,'2026-08-17',$2,'missed')`,
+        WS,
+        DOSE,
+      ),
+    ).rejects.toThrow(/violates check constraint/i);
+  });
+
+  it("MedsDoseLog.state rejects an unrecognised value", async () => {
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "MedsDoseLog" (id, "workspaceId", date, "medicationDoseId", state)
+           VALUES ('meds-check-bite-maybe',$1,'2026-08-17',$2,'maybe')`,
+        WS,
+        DOSE,
+      ),
+    ).rejects.toThrow(/violates check constraint/i);
+  });
+
+  it("still accepts every value constants.ts declares for MedsDoseLog.state", async () => {
+    // The non-zero control. Without it the two rejections above are satisfied by
+    // a constraint that refuses everything, which would pass while making the
+    // feature unusable.
+    for (const state of Object.values(MedsDoseState)) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "MedsDoseLog" (id, "workspaceId", date, "medicationDoseId", state)
+           VALUES ($1,$2,$3,$4,$5)`,
+        `meds-check-ok-${state}`,
+        WS,
+        `2026-08-${state === MedsDoseState.Taken ? "18" : "19"}`,
+        DOSE,
+        state,
+      );
+    }
+    const rows = await prisma.$queryRawUnsafe<{ state: string }[]>(
+      `SELECT state FROM "MedsDoseLog" WHERE "workspaceId" = $1 ORDER BY state`,
+      WS,
+    );
+    expect(rows.map((r) => r.state)).toEqual(
+      [...Object.values(MedsDoseState)].sort(),
+    );
+  });
+
+  it("Settings.medsNavMode rejects an out-of-set mode", async () => {
+    await expect(
+      prisma.$executeRawUnsafe(
+        `INSERT INTO "Settings" (id, "workspaceId", "medsNavMode", "updatedAt")
+           VALUES ('meds-check-bite-mode',$1,'dial',CURRENT_TIMESTAMP)`,
+        WS,
+      ),
+    ).rejects.toThrow(/violates check constraint/i);
+  });
+
+  it("still accepts every value constants.ts declares for Settings.medsNavMode", async () => {
+    // `Settings.workspaceId` is @unique, so the control updates one row through
+    // both values rather than inserting one row per value.
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "Settings" (id, "workspaceId", "updatedAt") VALUES ('meds-check-settings',$1,CURRENT_TIMESTAMP)`,
+      WS,
+    );
+    for (const mode of Object.values(MedsNavMode)) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Settings" SET "medsNavMode" = $1 WHERE "workspaceId" = $2`,
+        mode,
+        WS,
+      );
+      const rows = await prisma.$queryRawUnsafe<{ medsNavMode: string }[]>(
+        `SELECT "medsNavMode" FROM "Settings" WHERE "workspaceId" = $1`,
+        WS,
+      );
+      expect(rows[0]?.medsNavMode).toBe(mode);
+    }
+  });
+
+  it("defaults a NEW Settings row to 'dots' and the tracker to off", async () => {
+    // The migration's ADD COLUMN defaults are where two decisions live — "B★ is
+    // the default mode" and "the feature is off until you ask for it" — so they
+    // are asserted rather than left in a comment.
+    //
+    // Its OWN workspace, because the mode case above walks the shared row
+    // through every declared value and leaves it on the last one. Reusing that
+    // row read `next` and failed this assertion, which is the test-order
+    // coupling doing its job rather than a flake.
+    const freshWs = "meds-check-ws-default";
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "Workspace" (id, kind) VALUES ($1,'user') ON CONFLICT (id) DO NOTHING`,
+      freshWs,
+    );
+    try {
+      const rows = await prisma.$queryRawUnsafe<
+        { medsNavMode: string; medsTracker: boolean }[]
+      >(
+        `INSERT INTO "Settings" (id, "workspaceId", "updatedAt")
+           VALUES ('meds-check-default', $1, CURRENT_TIMESTAMP)
+         RETURNING "medsNavMode", "medsTracker"`,
+        freshWs,
+      );
+      expect(rows[0]).toMatchObject({
+        medsNavMode: MedsNavMode.Dots,
+        medsTracker: false,
+      });
+    } finally {
+      await prisma.$executeRawUnsafe(
+        `DELETE FROM "Workspace" WHERE id = $1`,
+        freshWs,
+      );
+    }
   });
 });

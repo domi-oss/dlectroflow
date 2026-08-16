@@ -7,6 +7,9 @@ import type {
   EngagementDay,
   FocusPlaylist,
   FocusSession,
+  Medication,
+  MedicationDose,
+  MedsDoseLog,
   RewardEvent,
   Settings,
   ShoppingItem,
@@ -33,6 +36,15 @@ import type {
 export type ExportTask = Task & {
   steps: Step[];
   turns: BreakdownTurn[];
+};
+
+/** #269 — a medication with its ordered doses. `MedicationDose` carries no
+ *  `workspaceId` of its own and is reached THROUGH the scoped medication read,
+ *  the same idiom as `ExportTask` above and for the same reason: adding the
+ *  column would enrol a table in guards whose own comments say such tables must
+ *  not have an entry. */
+export type ExportMedication = Medication & {
+  doses: MedicationDose[];
 };
 
 /**
@@ -254,6 +266,31 @@ export type ExportSnapshot = {
    * both things the user wrote down.
    */
   shoppingItems: ShoppingItem[];
+  /**
+   * #269 — the medication regimen, doses nested inside their parent.
+   *
+   * ⚠️ **Exported regardless of `Settings.medsTracker`.** Turning the tracker off
+   * HIDES it and deletes nothing, so a workspace can hold a full history behind a
+   * switch that is currently `false`. Reading the toggle here instead of the
+   * table would hand a reader an Art. 15/20 archive missing special-category data
+   * the controller still holds — a worse version of the `FocusPlaylist` omission
+   * that made `__tests__/model-coverage.test.ts` exist.
+   *
+   * A deactivated medication is carried too: `active: false` hides it from the
+   * strip, and every {@link ExportSnapshot.medsDoseLogs} row pointing at it would
+   * otherwise reference a name the archive does not contain.
+   */
+  medications: ExportMedication[];
+  /**
+   * #269 — one row per (local day, dose) that was actually recorded.
+   *
+   * **There is no `missed` row and there must never be one.** `Missed` is derived
+   * at read time from the ABSENCE of a row plus the clock (`src/lib/meds.ts`), so
+   * an archive that materialised it would hand the reader a health record they
+   * never created. What the file shows for a missed dose is a gap, which is
+   * exactly what the database holds.
+   */
+  medsDoseLogs: MedsDoseLog[];
   gamification: ExportGamification;
   /**
    * Metadata about connected integrations — never a token, encrypted or

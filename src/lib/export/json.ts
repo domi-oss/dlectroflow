@@ -132,6 +132,25 @@ export function exportJson(snapshot: ExportSnapshot): string {
     focusSessions: snapshot.focusSessions,
     focusPlaylists: snapshot.focusPlaylists,
     shoppingItems: snapshot.shoppingItems,
+    /**
+     * #269 — the medication regimen and its dose history.
+     *
+     * ⚠️ **Nothing mechanical requires these two keys to be here.**
+     * `__tests__/model-coverage.test.ts` reads `collect.ts` and `types.ts` and
+     * has no `read("json.ts")` assertion at all, so a model can satisfy the guard
+     * while being absent from the only lossless tier — which is precisely the
+     * `FocusPlaylist` failure the guard was built for, one file further along.
+     * `json.test.ts` carries the assertions instead; if that block is ever
+     * deleted, this comment is the only thing left saying it mattered.
+     *
+     * `medsDoseLogs` holds `taken` and `skipped` rows and nothing else. **A
+     * `missed` dose appears here as an ABSENCE**, because that is what it is: the
+     * state is derived from a gap plus the clock (`src/lib/meds.ts`), and
+     * materialising it into the archive would hand the reader a health record
+     * they never created.
+     */
+    medications: snapshot.medications,
+    medsDoseLogs: snapshot.medsDoseLogs,
     gamification: snapshot.gamification,
   };
   // Two-space indent: a person will open this file too, and a single-line

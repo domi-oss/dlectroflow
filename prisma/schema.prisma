@@ -132,6 +132,8 @@ model Workspace {
   dailySparks     DailySpark[]
   shoppingItems   ShoppingItem[]
   shoppingSummary ShoppingSummary?
+  medications     Medication[]
+  medsDoseLogs    MedsDoseLog[]
 
   @@index([lastSeenAt])
 }
@@ -241,6 +243,36 @@ model Settings {
   // src/lib/constants.ts. Turning it off HIDES the list, it does not delete it —
   // the rows survive and reappear if it is turned back on.
   shoppingList             Boolean   @default(false)
+  // #269 — medication tracker. Follows shoppingList EXACTLY, including the
+  // doctrine above: OFF by default, and turning it off HIDES the strip, the
+  // banner, the nav control and the editor while deleting no MedsDoseLog row.
+  //
+  // Hide-not-delete matters more here than it does for a shopping list. A
+  // medication history destroyed by a settings toggle is not recoverable, and it
+  // is the one thing the v2 /meds page needs and cannot backfill.
+  //
+  // Off by default is doing LEGAL work as well as product work: a workspace that
+  // has not opted in genuinely has no health field, so /privacy's notice is
+  // conditional rather than a retraction. Plain Boolean, so no CHECK to mirror.
+  medsTracker              Boolean   @default(false)
+  // #269 — how the header's meds control behaves. Mirrors MedsNavMode in
+  // src/lib/constants.ts + Settings_medsNavMode_check
+  // (20260816120000_meds_tracker). "dots" is B★ (one dot per dose, immediate
+  // commit, persistent Undo); "next" is E (only the next unrecorded dose, tick
+  // and cross of identical weight).
+  //
+  // A BEHAVIOUR column, not a visibility one, and that is what decides the
+  // count: medsTracker above already governs AVAILABILITY, which is why the
+  // trolley icon has no column of its own either (#252's comment states the
+  // discriminator — /focus needed focusQuickAccess only because /focus is not
+  // optional). A separate Boolean to hide the control is one owner decision away
+  // and deliberately not invented here.
+  //
+  // NOT nullable. Nullable in this schema means DELEGATE (focusTimerStyle,
+  // breakdownModel), and there is nothing to delegate to; a String? whose null
+  // meant "hidden" would collapse a visibility meaning and a behaviour meaning
+  // onto one column, which is the inexpressiveness #260 records.
+  medsNavMode              String    @default("dots") // dots | next
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.
   completeStrikethrough    Boolean   @default(true)
@@ -355,10 +387,10 @@ model CalendarFeed {
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
-  id                   String    @id @default(cuid())
+  id                   String          @id @default(cuid())
   text                 String
-  createdAt            DateTime  @default(now())
-  status               String    @default("inbox") // inbox | triaged | archived
+  createdAt            DateTime        @default(now())
+  status               String          @default("inbox") // inbox | triaged | archived
   triagedAt            DateTime?
   remindedAt           DateTime?
   snoozedUntil         DateTime?
@@ -477,9 +509,9 @@ model BrainDumpItem {
   // src/lib/braindump-client-key-unique.integration.test.ts.
   clientKey            String?
   taskId               String?
-  task                 Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  task                 Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId          String
-  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace            Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   /// #233 — the engagement credits this item is the evidence for. `Cascade` on
   /// the far side, so deleting the item withdraws them; see `EngagementDay`.
   engagementDays       EngagementDay[]
@@ -734,7 +766,7 @@ model RewardEvent {
 /// (Postgres treats NULLs as distinct). `logReward` has the same property for the
 /// same reason.
 model EngagementDay {
-  id String @id @default(cuid())
+  id          String         @id @default(cuid())
   /// The local workday this engagement credited, YYYY-MM-DD — the same key and
   /// the same `ymd()` derivation as `Streak.lastActiveWorkday`, so the two are
   /// directly comparable.
@@ -742,7 +774,7 @@ model EngagementDay {
   /// Rows on a NON-working day are recorded and then ignored by the recompute,
   /// exactly as `touchStreakOnEngagement` ignores them when advancing. Recording
   /// them keeps the ledger a truthful log rather than a derived view.
-  day String
+  day         String
   /// Mirrors `EngagementKind` in src/lib/constants.ts; CHECK-constrained by
   /// `20260815120000_engagement_day_ledger` and registered in
   /// src/lib/enum-constraint-sync.integration.test.ts.
@@ -924,4 +956,144 @@ model GuestDailyActivity {
 
   @@id([day, ipHash])
   @@index([day])
+}
+
+// ── #269 — the medication tracker ─────────────────────────────────────────
+//
+// "Did I take my meds" is a MEMORY problem, not a scheduling one, so the whole
+// model is three tables and a comparison performed at read time. There is no
+// job, no reminder row and no adherence score anywhere in it.
+//
+// ⚠️ NO AI, EVER, IN ANY TIER — declined rather than deferred. /terms tells
+// readers not to rely on an AI suggestion for "medication or dosing", and the
+// cheapest way to keep that promise absolutely is for no medication row to reach
+// a prompt. docs/legal.md records the absence explicitly so it is a documented
+// property rather than an intention.
+//
+// The four states are Unknown / Taken / Skipped / Missed and only three of them
+// are stored: `Missed` is DERIVED (src/lib/meds.ts) from the absence of a row
+// plus the clock, so `Unknown` and `Missed` are the same stored shape. Nothing
+// writes anything in between and no backfill can fail to run.
+model Medication {
+  id          String           @id @default(cuid())
+  name        String
+  // NULL INHERITS Settings.workingDays; a value overrides it with its own ISO
+  // weekday CSV ("1,2,3,4,5,6,7" for a daily medication). That is what makes the
+  // owner's weekday-only regimen the zero-config default.
+  //
+  // Nullable-inherits is the repo's convention for DELEGATION — Settings
+  // .focusTimerStyle ("null → voice default") and Settings.breakdownModel
+  // ("null = env/default") — as distinct from a column that is nullable because
+  // the value is genuinely optional. Read that distinction before citing this.
+  //
+  // NO CHECK CONSTRAINT, deliberately: Settings.workingDays is the same CSV
+  // shape and has none, and a CHECK cannot express "a comma-separated list of
+  // ISO weekdays" without a regex that will be wrong about whitespace.
+  // Validation lives at the write path, and parseWorkingDays'
+  // (src/lib/engagement-ledger.ts) filter-to-1..7 makes a malformed value
+  // degrade to "no days" rather than throw — the same degrade-don't-throw
+  // posture Settings.typeface documents.
+  days        String?
+  // Deactivate rather than delete: a deleted medication takes its dose rows and
+  // therefore its history with it (the FK below cascades), and that history is
+  // the thing v2 needs and cannot backfill. The Settings editor offers this and
+  // not a delete for exactly that reason.
+  active      Boolean          @default(true)
+  // Display order, same idea as ShoppingItem.order. Ties are broken on `id` by
+  // the read side (src/lib/meds.ts), so two concurrent adds allocating the same
+  // number render stably rather than reshuffling between page loads.
+  order       Int
+  createdAt   DateTime         @default(now())
+  doses       MedicationDose[]
+  workspaceId String
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// One dose of one medication — "after breakfast, 2 tablets".
+//
+// NO `workspaceId`, and that is a decision rather than an omission: it is only
+// ever reached through its scoped parent as an `include`, exactly as `Step` is
+// through `Task`. src/lib/export/__tests__/model-coverage.test.ts names that
+// case, and adding the column would enrol this table in guards whose own
+// comments say such tables must not have an entry.
+model MedicationDose {
+  id           String        @id @default(cuid())
+  medicationId String
+  medication   Medication    @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  // Meal-relative, because the owner's regimen is: "after breakfast" is not a
+  // time, and a required clock picker would invite a precision the reader does
+  // not have and cannot honour.
+  label        String
+  quantity     Int
+  // OPTIONAL HH:mm, and it schedules NOTHING. Exactly two things read it, both
+  // pure functions evaluated when something renders: the banner, so it can name
+  // the lunch dose at 11:00; and doseDeadline (src/lib/meds.ts), via the
+  // `max(workdayEndTime, dueAfter)` that stops an evening dose being marked
+  // missed hours before it is due. Empty means the dose has no stated time, so
+  // the banner says a dose is outstanding without inventing one.
+  dueAfter     String?
+  order        Int
+  logs         MedsDoseLog[]
+
+  @@index([medicationId])
+}
+
+// One row per (workspace, local day, dose). Its PRESENCE is the record; its
+// ABSENCE is Unknown before the deadline and Missed after it.
+//
+// Full per-dose history from day one, even though v1's UI only ever shows today:
+// it cannot be backfilled, and the rows not written in v1 are the rows v2's
+// dashboard does not have. One row per dose per day is the whole cost.
+model MedsDoseLog {
+  // YYYY-MM-DD in the READER'S local time, not the server's. Same shape as
+  // DayRollup.date, DailySpark.date and Streak.lastActiveWorkday. It is a string
+  // rather than a DateTime because "which day was this" is a calendar fact and a
+  // timestamp would re-open the timezone question the whole design answers once.
+  // (GuestDailyActivity is NOT a citation for this convention: its column is
+  // `day`, it carries no workspaceId and its key is an @@id.)
+  date             String
+  id               String         @id @default(cuid())
+  medicationDoseId String
+  dose             MedicationDose @relation(fields: [medicationDoseId], references: [id], onDelete: Cascade)
+  // taken | skipped — mirrors MedsDoseState in src/lib/constants.ts and is
+  // CHECK-constrained by MedsDoseLog_state_check (20260816120000_meds_tracker).
+  // Prisma cannot express a CHECK, so that migration and this comment are its
+  // only trace in the schema; it is registered in
+  // src/lib/enum-constraint-sync.integration.test.ts so dropping it out of band
+  // fails the suite.
+  //
+  // `missed` is NOT a value here and must never become one — see the block
+  // comment above and src/lib/meds.ts.
+  state            String
+  markedAt         DateTime       @default(now())
+  // Its own workspaceId even though `dose` reaches one through Medication,
+  // because the today-strip reads this table BY DATE directly without joining,
+  // and the scoping harness requires every direct query to name workspaceId.
+  //
+  // ⚠️ That denormalisation opens one hole the unique index below does NOT
+  // close: nothing in the key stops workspace A's id being paired with workspace
+  // B's medicationDoseId, because the foreign key proves the dose exists, not
+  // that it belongs here. THE WRITE PATH MUST FILTER THE DOSE TO THE RESOLVED
+  // WORKSPACE — src/app/actions/meds.ts does, and an integration test posts a
+  // valid foreign dose id and requires the write to be refused. Settings
+  // .focusPlaylistIds' comment above records the identical reasoning for a
+  // scalar list: "the write path filters to playlists the resolved workspace
+  // actually owns — so a foreign id cannot be stored even if one is posted."
+  workspaceId      String
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  // The idempotency the feature's most likely interaction needs. The write is an
+  // UPSERT on a key the client already knows, so a double-tap on Taken — by an
+  // audience whose defining trait makes it likely — writes ONE row. Deliberately
+  // the opposite of the capture path's failure (#257): there is nothing nullable
+  // in this key and no client-generated token to forget, so the property comes
+  // from the schema rather than from a convention.
+  //
+  // It also serves the strip's read: Postgres indexes a unique constraint, and a
+  // leading (workspaceId, date) prefix is exactly the access path, so there is
+  // no separate index here on purpose.
+  @@unique([workspaceId, date, medicationDoseId])
+  @@index([medicationDoseId])
 }

@@ -158,6 +158,105 @@ describe("export.json — the round-trippable tier", () => {
     expect(parsed.shoppingItems).toHaveLength(3);
   });
 
+  /**
+   * #269 — the medication tables, and the leg of the coverage guard that does
+   * not exist.
+   *
+   * ⚠️ **`__tests__/model-coverage.test.ts` reads exactly two files, `collect.ts`
+   * and `types.ts`.** It has no `read("json.ts")` assertion — verified by reading
+   * every `read(` call in it — so "the lossless tier serialises this model" is a
+   * REVIEW item there and an assertion only here. That is the same shape as the
+   * CHECK registry: a docblock describing a safety net that does not exist. These
+   * assertions are the net.
+   *
+   * It matters more for these two tables than for any other. A `MedsDoseLog` row
+   * is structured health data — special category under Art. 9 UK GDPR — so a
+   * table missing from the one round-trippable tier is the `FocusPlaylist`
+   * failure with the stakes raised: an archive silently short of exactly the data
+   * a reader is most entitled to receive.
+   */
+  it("carries the medication regimen, its doses nested, in the lossless tier", () => {
+    expect(parsed.medications).toHaveLength(2);
+    expect(parsed.medications[0]).toMatchObject({
+      id: "med-1",
+      name: 'Ritalin 10mg, the "LA" one',
+      days: null,
+      active: true,
+    });
+    // Nested rather than a fourth top-level array: `MedicationDose` carries no
+    // `workspaceId` and is reached through its scoped parent, exactly as `Step`
+    // is through `Task` — so it is serialised where it is read.
+    expect(
+      parsed.medications[0].doses.map((d: { id: string }) => d.id),
+    ).toEqual(["dose-breakfast", "dose-lunch"]);
+    expect(parsed.medications[0].doses[0]).toMatchObject({
+      label: "after breakfast",
+      quantity: 2,
+      dueAfter: null,
+    });
+    expect(parsed.medications[1].doses[0].dueAfter).toBe("21:00");
+  });
+
+  it("carries a DEACTIVATED medication, because its history points at it", () => {
+    // Deactivating hides a medication from the strip; it unwrites nothing. An
+    // export that dropped it would leave every log row referencing a name the
+    // archive does not contain.
+    expect(parsed.medications[1]).toMatchObject({
+      id: "med-2",
+      active: false,
+      days: "1,2,3,4,5,6,7",
+    });
+  });
+
+  it("carries every dose log, both states, with the local date as stored", () => {
+    expect(
+      parsed.medsDoseLogs.map(
+        (l: { date: string; medicationDoseId: string; state: string }) => [
+          l.date,
+          l.medicationDoseId,
+          l.state,
+        ],
+      ),
+    ).toEqual([
+      ["2026-07-02", "dose-breakfast", "taken"],
+      ["2026-07-02", "dose-lunch", "skipped"],
+      ["2026-07-03", "dose-breakfast", "taken"],
+    ]);
+    // `date` stays the `YYYY-MM-DD` string it is stored as rather than becoming a
+    // timestamp: it is a calendar fact in the reader's own timezone, and rendering
+    // it as an instant would re-open the question the whole design answers once.
+    expect(typeof parsed.medsDoseLogs[0].date).toBe("string");
+    // `markedAt` IS an instant and goes through Date.prototype.toJSON like every
+    // other timestamp in the archive.
+    expect(parsed.medsDoseLogs[0].markedAt).toBe("2026-07-02T08:15:00.000Z");
+  });
+
+  it("invents no `missed` row — the archive shows an ABSENCE, as the model does", () => {
+    // The strongest property of the derived design, asserted on the artefact that
+    // outlives the app: 2026-07-03 has one row and not two, because the lunch dose
+    // has no row at all. A serialiser that materialised the derived state would
+    // hand the reader a health record they never created.
+    const july3 = parsed.medsDoseLogs.filter(
+      (l: { date: string }) => l.date === "2026-07-03",
+    );
+    expect(july3).toHaveLength(1);
+    expect(everyKey(parsed)).not.toContain("missed");
+    for (const log of parsed.medsDoseLogs) {
+      expect(["taken", "skipped"]).toContain(log.state);
+    }
+  });
+
+  it("renders both medication tables as empty arrays for a workspace with none", () => {
+    // The null path, and the reason the fixture's empty variant exists: an
+    // account that never opted in must serialise to `[]` rather than to `undefined`
+    // (which `JSON.stringify` drops) or to a missing key.
+    const empty = JSON.parse(exportJson(makeEmptySnapshot()));
+    expect("medications" in empty).toBe(true);
+    expect("medsDoseLogs" in empty).toBe(true);
+    expect(empty.medications).toEqual([]);
+    expect(empty.medsDoseLogs).toEqual([]);
+  });
+
   // #175 — the archive carries `clientKey`, and this pins it as a decision rather
   // than a side effect of `inbox` being typed against the whole model (Duo review,
   // `!334`). The reasoning lives beside the column in `prisma/schema.prisma`; the

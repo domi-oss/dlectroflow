@@ -86,6 +86,16 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     // what was STORED, and turning the switch off hides the list rather than
     // deleting it.
     shoppingList: false,
+    // #269 — held at the schema defaults, on exactly the reasoning above: this is
+    // a row an existing account could hold, and the medication tracker is off
+    // until somebody asks for it. `makeSnapshot` still carries medication rows
+    // for the same reason it carries shopping items — the export reproduces what
+    // was STORED, and the switch hides rather than deletes. That distinction
+    // matters more here than for a shopping list: a medication history the export
+    // dropped because a toggle was off would be an Art. 15/20 archive silently
+    // missing special-category data the controller still holds.
+    medsTracker: false,
+    medsNavMode: "dots",
     completeStrikethrough: true,
     completeTickColor: "green",
     typeface: "figtree",
@@ -411,6 +421,101 @@ export function makeSnapshot(
         createdAt: new Date(Date.UTC(2026, 6, 3, 7, 2, 0)),
       },
     ],
+    // #269 — the owner's day-one regimen, plus the two shapes that would
+    // otherwise go unserialised: a `days` override and a `dueAfter`.
+    //
+    // Present even though `settings.medsTracker` is `false` above, and that is
+    // the point rather than an inconsistency: turning the switch off HIDES the
+    // tracker and deletes nothing, so a workspace really can hold this exact
+    // pair. An export that read the toggle instead of the table would hand a
+    // reader an Art. 15/20 archive missing special-category data the controller
+    // still holds — a worse omission than the `FocusPlaylist` one that made the
+    // coverage guard exist.
+    medications: [
+      {
+        id: "med-1",
+        workspaceId: WORKSPACE_ID,
+        // Free text the reader typed, with a comma and a quote for the same
+        // reason the shopping item above has them.
+        name: 'Ritalin 10mg, the "LA" one',
+        // NULL inherits Settings.workingDays — the zero-config weekday regimen.
+        days: null,
+        active: true,
+        order: 1,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 8, 0, 0)),
+        doses: [
+          {
+            id: "dose-breakfast",
+            medicationId: "med-1",
+            label: "after breakfast",
+            quantity: 2,
+            dueAfter: null,
+            order: 1,
+          },
+          {
+            id: "dose-lunch",
+            medicationId: "med-1",
+            label: "after lunch",
+            quantity: 1,
+            dueAfter: null,
+            order: 2,
+          },
+        ],
+      },
+      {
+        // A DEACTIVATED medication with its own `days` and a `dueAfter`. It is
+        // exported: deactivating hides it from the strip and does not unwrite the
+        // history, so an archive that dropped it would lose the context for every
+        // MedsDoseLog row pointing at it.
+        id: "med-2",
+        workspaceId: WORKSPACE_ID,
+        name: "Vitamin D",
+        days: "1,2,3,4,5,6,7",
+        active: false,
+        order: 2,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 8, 1, 0)),
+        doses: [
+          {
+            id: "dose-evening",
+            medicationId: "med-2",
+            label: "after dinner",
+            quantity: 1,
+            // The case the deadline's `max(workdayEndTime, dueAfter)` exists for.
+            dueAfter: "21:00",
+            order: 1,
+          },
+        ],
+      },
+    ],
+    // Two days, both states, and one dose deliberately unlogged on the second
+    // day — because `Missed` is DERIVED and never stored, so the archive must
+    // show an absence rather than a third state.
+    medsDoseLogs: [
+      {
+        id: "meds-log-1",
+        workspaceId: WORKSPACE_ID,
+        date: "2026-07-02",
+        medicationDoseId: "dose-breakfast",
+        state: "taken",
+        markedAt: new Date(Date.UTC(2026, 6, 2, 8, 15, 0)),
+      },
+      {
+        id: "meds-log-2",
+        workspaceId: WORKSPACE_ID,
+        date: "2026-07-02",
+        medicationDoseId: "dose-lunch",
+        state: "skipped",
+        markedAt: new Date(Date.UTC(2026, 6, 2, 13, 5, 0)),
+      },
+      {
+        id: "meds-log-3",
+        workspaceId: WORKSPACE_ID,
+        date: "2026-07-03",
+        medicationDoseId: "dose-breakfast",
+        state: "taken",
+        markedAt: new Date(Date.UTC(2026, 6, 3, 8, 20, 0)),
+      },
+    ],
     gamification: {
       streak: {
         id: "streak-1",
@@ -515,6 +620,8 @@ export function makeEmptySnapshot(): ExportSnapshot {
     focusSessions: [],
     focusPlaylists: [],
     shoppingItems: [],
+    medications: [],
+    medsDoseLogs: [],
     accountRecords: {
       // The invitation survives into the empty state on purpose: it PREDATES
       // first sign-in — it is what allowed the account to exist at all — so an

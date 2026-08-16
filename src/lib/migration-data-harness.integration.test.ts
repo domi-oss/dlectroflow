@@ -650,6 +650,58 @@ describe("the migrations applied to a database that already holds rows (#190)", 
     }
   });
 
+  /**
+   * #269 — what the medication migration did to `Settings` rows that already
+   * existed, and whether its constraint is enforced on those rows.
+   *
+   * `Settings_medsNavMode_check` is the one statement in
+   * `20260816120000_meds_tracker` whose outcome depends on stored data:
+   * `ADD CONSTRAINT` re-validates every existing row. The seed corpus populates
+   * `Settings` from `20260703150450_init.sql` onward, so by the time this
+   * migration runs the table is not empty — which is the property the 2026-08-07
+   * incident proves is worth asserting rather than assuming, because zero rows
+   * updated means no constraint is ever evaluated.
+   *
+   * The two assertions are deliberately different in kind: the first says the
+   * backfilled default arrived on rows written years of migrations earlier, the
+   * second says the constraint BITES on the same connection that just read them.
+   * A migration can satisfy the first while having added the constraint
+   * `NOT VALID`, and nothing else in this suite would notice.
+   */
+  it("gives every pre-existing Settings row the meds defaults, and enforces the mode", async () => {
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const settings = await prisma.settings.findMany({
+        select: { workspaceId: true, medsTracker: true, medsNavMode: true },
+      });
+      // The non-zero control. An empty table would satisfy every `every()` below
+      // while proving that nothing was looked at.
+      expect(settings.length).toBeGreaterThan(1);
+      for (const s of settings) {
+        // Off for a row that predates the feature by definition: nobody could
+        // have opted in, so the workspace genuinely has no health field — which
+        // is the sentence /privacy's amendment rests on.
+        expect(s.medsTracker, `${s.workspaceId} opted in by itself`).toBe(
+          false,
+        );
+        // B★, the owner's chosen default, reaching rows the column did not exist
+        // for when they were written.
+        expect(s.medsNavMode, `${s.workspaceId} took the wrong mode`).toBe(
+          "dots",
+        );
+      }
+
+      await expect(
+        prisma.$executeRawUnsafe(
+          `UPDATE "Settings" SET "medsNavMode" = 'dial' WHERE "workspaceId" = $1`,
+          settings[0].workspaceId,
+        ),
+      ).rejects.toThrow(/violates check constraint/i);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   // ── The close condition of #190 ─────────────────────────────────────────────
   // "Do not close this on a harness that passes. Close it on a harness
   // demonstrated to fail against the pre-fix 20260806100000 migration with
