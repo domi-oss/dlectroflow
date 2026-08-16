@@ -43,7 +43,7 @@ type ChatMsg = { role: "assistant" | "user"; text: string };
  * un-timed-out `await` is indistinguishable from the bug this fixes: a row that
  * never comes back, with nothing said about it. `createBrainDumpItem` is one
  * Prisma insert plus a streak touch, so ten seconds is already pathological;
- * this matches `CAPTURE_TIMEOUT_MS` in `inbox-view.tsx`,
+ * this matches `CAPTURE_FLUSH_TIMEOUT_MS` in `use-capture-queue.ts`,
  * `SHOPPING_ACTION_TIMEOUT_MS` in `shopping-list.tsx` and `ACTION_TIMEOUT_MS` in
  * `focus-timer.tsx` for the same class of call. The request itself carries on (a
  * server action cannot be aborted from the client), so a write that lands late

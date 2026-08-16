@@ -154,6 +154,7 @@ function staleActionError() {
 function renderInbox(initialItems: Item[]) {
   const view = render(
     <InboxView
+      workspaceId="ws-test"
       now={Date.now()}
       initialItems={initialItems}
       settings={settings}
@@ -544,6 +545,7 @@ describe("InboxView — a row write that does not land (#225)", () => {
 
     rerender(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -610,6 +612,7 @@ describe("InboxView — a row write that does not land (#225)", () => {
     await act(async () => {
       rerender(
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[]}
           settings={settings}
@@ -1701,6 +1704,7 @@ describe("InboxView — invariants that were documented but unpinned (#225)", ()
     await act(async () => {
       view.rerender(
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[]}
           settings={settings}
@@ -1757,6 +1761,7 @@ describe("InboxView — invariants that were documented but unpinned (#225)", ()
     await act(async () => {
       view.rerender(
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[]}
           settings={settings}

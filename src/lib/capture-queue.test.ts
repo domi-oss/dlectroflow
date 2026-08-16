@@ -346,14 +346,18 @@ describe("capture queue — enqueue and the caps (#175)", () => {
   // input, no check in `createBrainDumpItem`, and an unbounded Postgres `text`
   // column. So one pasted essay is the realistic way to exhaust the quota, and
   // the byte bound rather than the item bound is what stops it.
-  it("refuses a single capture larger than the byte bound", () => {
+  it("refuses a single capture larger than the byte bound, as too-long", () => {
     const store = memoryStore();
     const result = enqueue(
       store,
       capture({ text: "x".repeat(CAPTURE_QUEUE_MAX_BYTES + 1) }),
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("max-bytes");
+    // ⚠️ `too-long`, not `no-room`, and the distinction is the copy: this
+    // capture's own length is the problem, so "shorten it" is the right advice.
+    // Nothing already queued is relevant — the check runs before the store is
+    // read at all.
+    if (!result.ok) expect(result.reason).toBe("too-long");
     expect(readQueue(store)).toEqual([]);
   });
 
@@ -366,7 +370,10 @@ describe("capture queue — enqueue and the caps (#175)", () => {
     const result = enqueue(store, capture({ clientKey: "b", text: big }));
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("max-bytes");
+    // ⚠️ `no-room`, not `too-long`: this capture is half the bound and perfectly
+    // holdable on its own. Offering "shorten it" here would send the user at a
+    // remedy that cannot work, which is why the two reasons are separate.
+    if (!result.ok) expect(result.reason).toBe("no-room");
     // Well under 20 items, so this proves the byte bound is independent.
     expect(readQueue(store)).toHaveLength(1);
   });
@@ -869,7 +876,7 @@ describe("capture queue — two tabs against one origin (#175)", () => {
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("max-bytes");
+    if (!result.ok) expect(result.reason).toBe("no-room");
     expect(readQueue(store).map((c) => c.clientKey)).toEqual([
       "a",
       "other-tab",

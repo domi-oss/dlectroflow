@@ -285,6 +285,13 @@ export default async function InboxPage({
         // would be two things that could come to disagree, and the one that skips
         // the query is the one that is also cheaper.
         shoppingSummary={shoppingSummary}
+        // #175 — the offline capture queue needs to know whose captures these
+        // are: `localStorage` is scoped to the origin, not to a session, so
+        // without it a second person signing in on the same browser would read
+        // the first one's unsaved words. Resolved on the server here for the same
+        // reason `now` is — a client component cannot reach it, and this repo has
+        // no `NEXT_PUBLIC_*` variables at all.
+        workspaceId={workspaceId}
         // #105 — the same request-time clock used above, handed to the client
         // component so its FIRST render matches this one. Without it InboxView
         // read the wall clock again at hydration time, and any row younger than

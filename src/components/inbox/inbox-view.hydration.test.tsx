@@ -123,6 +123,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
 function view(items: Item[], s: AgingSettings = settings) {
   return (
     <InboxView
+      workspaceId="ws-test"
       initialItems={items}
       settings={s}
       welcomeVisible={false}

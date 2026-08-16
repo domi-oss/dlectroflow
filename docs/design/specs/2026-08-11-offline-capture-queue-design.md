@@ -812,11 +812,22 @@ misconfigured origin rule or a body genuinely over the cap retries forever — b
 client that deletes a capture on a status the server may be returning for a reason the client cannot see.
 **A wasted retry is recoverable; a dropped capture is not.**
 
-⚠️ **A terminal mark is taken from the parsed body, never from the status line.** The route answers
-`{ "status": "account-revoked" }` alongside its `403`, and the mark is set only when the body carries a
-recognised `FlushOutcome`. This matters because a `403` the app did not send — an auth proxy in front of a
-self-host, an ingress rule, a corporate filter — would otherwise permanently mark a perfectly good capture
-*"This account can no longer save"*, whose only exit is deliberately destroying the words.
+⚠️ **A terminal mark needs the status line AND the parsed body to agree.** The route answers
+`{ "status": "account-revoked" }` alongside its `403`, and the mark is set only when **both** the `403` and
+the recognised `FlushOutcome` in the body are present. This matters because either control alone is
+reachable from something the app did not author: a `403` it did not send — an auth proxy in front of a
+self-host, an ingress rule, a corporate filter — or a proxy error page answering `500` with a JSON body of
+its own that happens to carry `status: "account-revoked"`. Either would permanently mark a perfectly good
+capture *"This account can no longer save"*, whose only exit is deliberately destroying the words.
+
+⚠️ **Corrected during `!348` (client half), and the correction is the reason this paragraph is worth
+re-reading rather than skimming.** It previously read *"taken from the parsed body, **never from the status
+line**"*, and named only the spurious-`403` direction. `use-capture-queue.ts` was written to the strict
+conjunction and its own comment then restated this sentence, so the code and the prose beside it disagreed;
+`public/sw.js` — which can import nothing and therefore copies the rule by hand — implemented **this
+sentence**, and Duo review round 2 found the two flush paths classifying one response two different ways, in
+the direction that loses words. **Both halves are load-bearing and each looks redundant while the other
+stands**, which is the same trap the CSRF section records: the danger is a future reader tidying one away.
 
 ⚠️ **And the CSRF refusal is `400`, not `403`, deliberately.** `403` already means `account-revoked` in this
 vocabulary, so reusing it would collapse two states with different remedies — the same defect this document
@@ -1291,6 +1302,19 @@ So each expanded entry carries a **Discard** control:
   So the residual after this ordering is *"a discard may not stick if the tab dies mid-press"*, which is
   the same shape as every other exit in this design: **persisted, or refused and still visible.** There is
   no ordering that makes both deletes atomic, and pretending otherwise is what produced the gap.
+
+  ⚠️ **And the ordering only delivers the table if the first delete's RESULT is read.** Added during `!348`
+  (client half), where it was not: the mirror delete's boolean was discarded, so an aborted `readwrite`
+  transaction — storage pressure on a phone, a version change from another tab, an evicted origin — left the
+  row mirrored and the `localStorage` delete went ahead anyway. That is row 2 of the table exactly, reached
+  without any tab dying. **A failed mirror delete must refuse the discard and leave the words visible**,
+  which is row 1, the direction this ordering exists to choose.
+
+  ⚠️ **`false` from the mirror write means two different things and only one of them is a failure.** The
+  helper answers `false` for a **null** database as well as for an aborted transaction, and treating them
+  alike would deny a perfectly safe discard on every browser without IndexedDB, in Firefox private
+  browsing, and in the window before the mirror finishes opening — because with no mirror there is nothing
+  for the worker to find. Refuse only when there **was** a mirror and the delete did not land.
 - ⚠️ **Mirror-first closed the worker path and left the foreground's own flush open, in both directions.**
   Found in review of this spec. The ordering above is about a `sync` event firing between the two deletes;
   this is about the tab the user is looking at already having a `POST` in flight for the very entry they
@@ -1334,6 +1358,30 @@ So each expanded entry carries a **Discard** control:
      enough to bridge them because both the flush loop and the discard run on **one tab's single thread**.
   4. **The flush's per-entry loop skips a claimed entry.** Per-entry, matching *"Failures are per-entry, not
      per-pass"*: one claimed entry must not stop the pass draining the rest.
+  5. ⚠️ **The flush's per-entry loop re-reads each entry against live storage before sending it.** Added
+     during `!348` (client half); steps 1–4 as merged were **not sufficient**, and the gap was measured
+     rather than argued.
+     A pass reads the queue once and then awaits a network round-trip per entry, so every entry after the
+     first is acted on from a snapshot one round-trip old. The claim in step 3 bridges a discard that is
+     **in progress** and the in-flight set bridges a `POST`, but **a discard that has already completed
+     holds neither** — and the entry it removed is still in the snapshot the pass is walking. So the pass
+     re-`POST`s it. The table above reasons only about the entry *being* discarded and about a flush in
+     flight *for that entry*; nothing in it covers a completed discard racing a pass suspended on a
+     **different** entry.
+     Same outcome as the row this section calls unrecoverable — *"a silent save after an explicit
+     refusal"* — reached from the flush side instead, with **one tab and one press**, because the human
+     pause the two-step confirm creates is exactly the length of the `POST` it overlaps. And a
+     never-saved capture has no `200` duplicate to absorb the re-`POST`, so the row is **created**.
+     Re-read the whole entry rather than testing presence: it also picks up a `blockedBy` that a
+     concurrent pass or the mirror carve-out wrote while this pass waited.
+  6. ⚠️ **And `public/sw.js`'s drain loop owes the same rule, for the same reason.** Also `!348` — the
+     worker had the identical shape and was found by Duo review round 5 citing step 5 above against it.
+     **`sync` can fire while a tab is open**, so this needs no closed-tab premise: the connection returns,
+     the platform fires the sync, the user is looking at the strip, and a Discard removes the mirror row —
+     *first*, by the ordering above — inside the window the loop is suspended in. The two paths cannot share
+     code, so this is the third rule they hold in common by test-on-both-sides rather than by construction,
+     alongside the terminal-mark conjunction and the constants. **A rule stated only for the foreground is
+     half-written**, and the worker is the half whose breakage is silent.
 
   **Why a claim rather than suppressing flush triggers while the dialog is open:** suppression would need
   every trigger to know about a dialog, which is four call sites and a new coupling, and it fails open —
@@ -1649,6 +1697,21 @@ unmount case needs the queue to empty. So:
 - **Focus returns to a stable anchor on both confirm and cancel.** Cancel returns it to the Discard control
   it came from; confirm follows the rule above. Both arms, because a cancel that drops focus is the same
   defect arriving on the path where the user chose to change nothing.
+- ⚠️ **A confirm that is REFUSED removes nothing, so it follows the cancel rule and not the rule above.**
+  Spelled out during `!348` (client half) because the implementation read the rule above for all three arms
+  and the resolution order's own words for this arm — *"with focus returned to the Discard control"* — were
+  missed. The removal anchor is wrong by construction when nothing is removed: focus landed on the **next**
+  capture's Discard control, and every anchor here is a *destructive* control, so the user is told *"give it
+  a moment and try again"* and their next press opens a confirm over a different thought. This is the
+  ordinary arm, not a rare one — a flush starting during the human pause is what step 2 of the resolution
+  order exists for.
+- ⚠️ **A stranded GROUP's anchor is computed over the groups, not over the live entries.** Also `!348`:
+  the two lists are separate, and reusing the entry rule for a group returned *the group being removed*
+  whenever there were no live entries — so discarding the first of two groups left the anchor pointing at a
+  row that no longer existed and fell through to the collapse toggle, **past a group still on screen**. The
+  toggle is the last resort permitted above only for the *last* remaining row; a surviving group must get
+  focus. Because the groups render below the entries, a lone group leaving hands focus to the **last** of
+  the live entries rather than the first. Reported by Duo review round 3 on `!348`, then measured.
 
 ### Multi-device dissolves by construction
 

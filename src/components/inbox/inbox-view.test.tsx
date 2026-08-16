@@ -11,7 +11,6 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  CAPTURE_TIMEOUT_MS,
   InboxView,
   dragEndToMove,
   DragGhostRow,
@@ -214,8 +213,62 @@ function makeMultiStep() {
   });
 }
 
+/**
+ * #175 — the capture bar reaches `localStorage` and `POST /api/braindump` now.
+ *
+ * ⚠️ **Both doubles are required for the DEFAULT path, not only for the queue's
+ * own specs**, which is why they live in the global `beforeEach` rather than in
+ * one describe. This jsdom environment has **no `localStorage` at all** (see
+ * `use-capture-queue.test.tsx`, and `theme-toggle.test.tsx`'s `try`/`catch` for
+ * the same reason), and Node's real `fetch` would be handed a relative URL with no
+ * base. Without them every capture in this file is refused as
+ * `storage-unavailable`, the words stay in the field, and roughly a hundred specs
+ * that merely happen to capture something first fail for a reason that has nothing
+ * to do with what they assert.
+ *
+ * The defaults are the ONLINE, storage-available case, so a capture saves exactly
+ * as it did when the path was `createBrainDumpItem`. A spec that wants the offline
+ * behaviour drives `captureFetch` the other way.
+ */
+function installCaptureStorage(): void {
+  const map = new Map<string, string>();
+  const storage = {
+    get length() {
+      return map.size;
+    },
+    key: (i: number) => [...map.keys()][i] ?? null,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, String(v)),
+    removeItem: (k: string) => void map.delete(k),
+    clear: () => map.clear(),
+  } as Storage;
+  Object.defineProperty(window, "localStorage", {
+    value: storage,
+    configurable: true,
+    writable: true,
+  });
+}
+
+/** A `Response`-shaped answer from `/api/braindump`. */
+function captureReply(status: number, body: unknown = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+let captureFetch: ReturnType<typeof vi.fn>;
+
 beforeEach(async () => {
   vi.clearAllMocks();
+  installCaptureStorage();
+  captureFetch = vi.fn().mockResolvedValue(captureReply(201));
+  vi.stubGlobal("fetch", captureFetch);
+  // IndexedDB is absent in jsdom. `openMirror` answers null for exactly that and
+  // every mirror write then reports false rather than throwing, so the queue
+  // degrades to `localStorage` only — which is the durability guarantee anyway.
+  vi.stubGlobal("indexedDB", undefined);
   // #168 — re-arm the two Google actions from scratch, because
   // `vi.clearAllMocks()` clears recorded calls but NOT the
   // `mockResolvedValueOnce` queue. Any spec that queues a once-value and then
@@ -243,6 +296,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("InboxView — capture confirm", () => {
@@ -250,6 +304,7 @@ describe("InboxView — capture confirm", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -261,7 +316,20 @@ describe("InboxView — capture confirm", () => {
     await user.type(input, "buy milk{enter}");
 
     expect(await screen.findByText("captured ✓")).toBeInTheDocument();
-    expect(createBrainDumpItem).toHaveBeenCalledWith("buy milk");
+    // #175 — the confirmation is now about a write that DEMONSTRABLY landed: the
+    // capture went through `POST /api/braindump`, the route answered 201, and the
+    // entry left the queue. `createBrainDumpItem` is no longer on this path at all
+    // — a worker cannot replay a server action, and Background Sync is the only
+    // thing that flushes while no tab is open.
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
+    expect(captureFetch).toHaveBeenCalledWith(
+      "/api/braindump",
+      expect.objectContaining({ method: "POST" }),
+    );
+    // Nothing left waiting. The key may have been removed outright rather than
+    // written as `[]`, so this reads the queue rather than the raw string.
+    const raw = window.localStorage.getItem("df-capture-queue");
+    expect(raw === null ? [] : JSON.parse(raw)).toEqual([]);
   });
 
   // #40 phase 1: --background moved from a near-white gray to a warm-tinted
@@ -272,6 +340,7 @@ describe("InboxView — capture confirm", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -292,6 +361,7 @@ describe("InboxView — capture confirm", () => {
     vi.useFakeTimers();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -321,42 +391,33 @@ describe("InboxView — capture confirm", () => {
 });
 
 /**
- * #210 — the capture bar used to clear the input and render "captured ✓"
- * unconditionally, before the write had resolved and regardless of whether it
- * ever did. Capture is the only irreversible loss in the app: every other
- * action works on an `id` that exists because the server already has the row,
- * so a failure there can be retried against data that is still present. Here
- * the words existed nowhere else.
+ * #175 — the capture bar's failure path, which is now a persisted queue rather
+ * than a one-slot notice.
  *
- * Every other spec in this file mocks `createBrainDumpItem` as resolving, which
- * is exactly why this survived — so these drive the mock the other way.
+ * ── What replaced what ───────────────────────────────────────────────────────
+ *
+ * `describe("InboxView — a capture that fails (#210)")` lived here, ~25 specs over
+ * `CaptureFailure`: `stale`, `timedOut`, `retrying`, `wordsInField`, `supersedes`,
+ * and a nested block pinning the one-slot displacement its own comment called a
+ * known loss. All of it is gone, because the state it tested is gone — and three
+ * of those flags describe conditions that **can no longer occur** (see the note
+ * where `CaptureFailure` used to be declared in `inbox-view.tsx`).
+ *
+ * What has to be re-proved here is different and smaller: the words reach storage
+ * before anything can fail, the queue is what reports a failure, and — the one
+ * #210 could not give — **a second failure does not displace an unresolved first**.
+ *
+ * ⚠️ **`inbox-view.write-failure.test.tsx` is deliberately untouched.** Its 44
+ * cases are ROW writes (#225), which still go through `run()`/`attemptWrite` and
+ * still use the single-slot notice, correctly: nothing a row write can lose is
+ * unrecoverable, because the row is still in the list and the press is repeatable.
+ * That boundary is #210's and #242 restates it. Checked, not assumed.
  */
-describe("InboxView — a capture that fails (#210)", () => {
-  /**
-   * #168's hazard, from the other end: `vi.clearAllMocks()` in the global
-   * beforeEach drops recorded calls but NOT a queued `mockRejectedValueOnce`.
-   * These specs queue one every time, so reset the queue and restore the
-   * module-level default rather than leaving a rejection for whichever spec
-   * runs next.
-   */
-  beforeEach(() => {
-    vi.mocked(createBrainDumpItem).mockReset();
-    vi.mocked(createBrainDumpItem).mockResolvedValue(undefined);
-  });
-
-  /** What Next 16's client throws when the action id is from another build. */
-  function staleActionError() {
-    return Object.assign(
-      new Error(
-        'Server Action "40bef5efc6c80527f80d35d95a902c7e0bc4056eb0" was not found on the server.',
-      ),
-      { name: "UnrecognizedActionError" },
-    );
-  }
-
+describe("InboxView — a capture that does not reach the server (#175)", () => {
   function renderInbox(initialItems: Item[] = []) {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={initialItems}
         settings={settings}
@@ -364,838 +425,302 @@ describe("InboxView — a capture that fails (#210)", () => {
         resumeStep={null}
       />,
     );
-    return screen.getByPlaceholderText(/Brain dump/i) as HTMLInputElement;
+    return screen.getByPlaceholderText(/Brain dump/i);
   }
 
-  /**
-   * `fireEvent` rather than `userEvent`: two of these specs drive fake timers
-   * (the action timeout, the confirm window) and userEvent's own timer plumbing
-   * has to be wired to them separately. The "clears the captured indicator
-   * after ~1.5s" spec above sets the same precedent.
-   */
-  async function capture(input: HTMLInputElement, value: string) {
-    fireEvent.change(input, { target: { value } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
+  /** Everything the queue is holding, straight out of the store. */
+  function queued(): { text: string; workspaceId: string }[] {
+    const raw = window.localStorage.getItem("df-capture-queue");
+    return raw === null ? [] : JSON.parse(raw);
   }
 
-  /**
-   * The notice's Retry, on the same flush budget as `capture` above.
-   *
-   * Duo review round 1: the click-then-flush block was inlined four times with
-   * the tick count drifting between two and four, so a spec could have passed
-   * for having flushed enough rather than for the behaviour it names. One helper
-   * with one budget, and it moves in one place if the async hop count changes.
-   */
-  async function clickRetry() {
-    await act(async () => {
-      screen.getByRole("button", { name: /try again/i }).click();
-      await flushTicks();
-    });
-  }
+  /** Open the strip so the queued words are on screen. */
+  const expand = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole("button", { name: /waiting to save/ }));
 
-  /** Flush the microtask queue driving the startTransition/async action. */
-  async function flush() {
-    await act(async () => {
-      await flushTicks();
-    });
-  }
-
-  async function flushTicks() {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  }
-
-  it("does not claim 'captured ✓' when the write rejected", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+  it("writes the words to storage BEFORE the network is attempted", async () => {
+    // The promise this feature makes, and the assertion that carries it: a `fetch`
+    // that never settles cannot lose anything, because the words are already
+    // durable. Chrome discards background tabs under memory pressure and a
+    // discarded tab fires no unload event, so there is no later chance to write.
+    captureFetch.mockImplementation(() => new Promise(() => {}));
+    const user = userEvent.setup();
     const input = renderInbox();
 
-    await capture(input, "buy milk");
+    await user.type(input, "ring mum about the boiler{enter}");
 
-    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /couldn't save that/i,
-    );
+    expect(queued().map((c) => c.text)).toEqual(["ring mum about the boiler"]);
+    expect(queued()[0]?.workspaceId).toBe("ws-test");
   });
 
-  it("keeps the typed words recoverable in the input", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+  it("goes through POST /api/braindump and not the server action", async () => {
+    // The capture path had to move off `createBrainDumpItem`: a worker cannot
+    // replay a Next server action, and Background Sync is the only thing that
+    // flushes while no tab is open. Adding the queue without moving the write
+    // would double-write and duplicate every row.
+    const user = userEvent.setup();
     const input = renderInbox();
 
-    await capture(input, "buy milk");
+    await user.type(input, "buy milk{enter}");
 
-    expect(input).toHaveValue("buy milk");
+    await waitFor(() => expect(captureFetch).toHaveBeenCalled());
+    const [url, init] = captureFetch.mock.calls[0] as [
+      string,
+      { method: string; body: string },
+    ];
+    expect(url).toBe("/api/braindump");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body).text).toBe("buy milk");
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
   });
 
-  it("names the words it could not save, so they survive even if the field has moved on", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+  it("keeps a capture the network refused, and says so on the strip", async () => {
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
     const input = renderInbox();
 
-    await capture(input, "buy milk");
+    await user.type(input, "find the passport{enter}");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
-  });
-
-  it("offers Retry, and Retry re-posts the same words", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    await clickRetry();
-
-    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
-      ["buy milk"],
-      ["buy milk"],
-    ]);
-  });
-
-  it("a successful Retry clears both the notice and the text it restored", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    await clickRetry();
-
-    // The row is on the server now, so leaving the words in the field would
-    // invite a duplicate on the next Enter.
-    expect(input).toHaveValue("");
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-  });
-
-  // The restore must never be a second kind of data loss: a slow failure gives
-  // the user time to type their next thought, and overwriting THAT would be the
-  // same bug wearing the other hat.
-  it("does not clobber words typed while the failed capture was still in flight", async () => {
-    let rejectWrite!: (reason: unknown) => void;
-    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
-      new Promise<void>((_, reject) => {
-        rejectWrite = reject;
-      }),
-    );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    fireEvent.change(input, { target: { value: "call mum" } });
-    await act(async () => {
-      rejectWrite(new Error("offline"));
-      await flushTicks();
-    });
-
-    expect(input).toHaveValue("call mum");
-    // "buy milk" is not lost — the notice is holding it, with a Retry.
-    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
-  });
-
-  it("a stale deployment offers a reload and no Retry, which could never work", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(staleActionError());
-    const input = renderInbox();
-
-    await capture(input, "buy milk");
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/app updated/i);
-    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
-    // Still recoverable: the reload cannot happen without the user pressing it,
-    // and the words are on screen either way.
-    expect(input).toHaveValue("buy milk");
-  });
-
-  // The third failure mode is silence, not a rejection: a pod rolling
-  // mid-request leaves the write hanging, and an un-timed-out await looks
-  // exactly like the bug from the user's side — cleared field, no confirmation,
-  // no error, no words.
-  it("surfaces a write that never answers, once CAPTURE_TIMEOUT_MS elapses", async () => {
-    vi.useFakeTimers();
-    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
-      new Promise<void>(() => {}),
-    );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
-    });
-
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(input).toHaveValue("buy milk");
-  });
-
-  /**
-   * Duo review round 2: a timeout is the one failure whose verdict is genuinely
-   * unknown. `withActionTimeout` bounds how long the UI waits, not the request —
-   * a server action cannot be aborted from the client — so the write may still
-   * land, and a retry after it does creates a duplicate. "Couldn't save that"
-   * would be a claim the client cannot make, and it is the same class of
-   * unverifiable confirmation as the `captured ✓` this issue is about, just
-   * pointing the other way.
-   */
-  it("says a timed-out capture MAY have saved, rather than asserting it did not", async () => {
-    vi.useFakeTimers();
-    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
-      new Promise<void>(() => {}),
-    );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
-    });
-
-    const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent(/may already have saved/i);
-    expect(notice).toHaveTextContent(/check your inbox/i);
-    expect(notice).not.toHaveTextContent(/couldn't save that/i);
-    // Retry is still offered: a duplicate item is one tap to delete, an
-    // unwritten thought is not recoverable at all, so the choice is the user's
-    // and the notice gives them what they need to make it.
-    expect(
-      screen.getByRole("button", { name: /try again/i }),
-    ).toBeInTheDocument();
-    expect(input).toHaveValue("buy milk");
-  });
-
-  /**
-   * Duo review round 2, and the reason `schedulingIds` is keyed per row rather
-   * than being one boolean (#169): a shared in-flight flag belongs to whichever
-   * request settles last, not to the one it is guarding.
-   *
-   * A capture the user starts while a retry is outstanding is deliberately not
-   * gated (independent inserts, and firing thoughts in a row is the point of the
-   * control) — so it WILL settle inside the retry's window, and a shared flag
-   * would hand the Retry button back while its own request was still in flight.
-   */
-  it("scopes the Retry guard to the retry, so an unrelated capture settling cannot unblock it", async () => {
-    let rejectFirst!: (reason: unknown) => void;
-    let resolveOther!: () => void;
-    vi.mocked(createBrainDumpItem)
-      // the original capture, failed on demand so the field can be typed into
-      // first — that is what makes the second capture a genuinely unrelated
-      // thought rather than one that supersedes the notice
-      .mockReturnValueOnce(
-        new Promise<void>((_, reject) => {
-          rejectFirst = reject;
-        }),
-      )
-      // its retry, which never answers
-      .mockReturnValueOnce(new Promise<void>(() => {}))
-      // the unrelated capture, resolved on demand
-      .mockReturnValueOnce(
-        new Promise<void>((resolve) => {
-          resolveOther = resolve;
-        }),
-      );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    fireEvent.change(input, { target: { value: "call mum" } });
-    await act(async () => {
-      rejectFirst(new Error("offline"));
-      await flushTicks();
-    });
-
-    await clickRetry();
-    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-    await act(async () => {
-      resolveOther();
-      await flushTicks();
-    });
-
-    // "buy milk"'s retry is still outstanding, so Retry must still be blocked —
-    // and a press must not post it a second time.
-    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    await clickRetry();
-    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
-      ["buy milk"],
-      ["buy milk"],
-      ["call mum"],
-    ]);
-  });
-
-  /**
-   * Duo review round 3 — WCAG 2.4.3, on the far side of the press. Keeping the
-   * notice mounted stops focus dropping to `<body>` while the retry runs; a
-   * retry that SUCCEEDS then unmounts the button the user is standing on, which
-   * is the same failure the `aria-disabled` decision was written to avoid, one
-   * step later. The capture input is where they want to be anyway.
-   */
-  it("hands focus back to the capture input when a successful Retry unmounts the notice", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    screen.getByRole("button", { name: /try again/i }).focus();
-    await clickRetry();
-
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(input).toHaveFocus();
-    expect(document.body).not.toHaveFocus();
-  });
-
-  // …but only from the notice's own button. Focus is the user's, and pulling it
-  // out of wherever they have moved to would be a different WCAG problem (3.2.2)
-  // dressed as a fix for this one.
-  it("does not pull focus off whatever the user moved to before the retry landed", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox([makeItem({ id: "abc", text: "delete me" })]);
-    await capture(input, "buy milk");
-
-    // Any focusable control on another row will do; #253 moved Delete into the ▾
-    // list, so the inline CTA is the nearest stable one that needs no interaction
-    // to reach (opening a popup would move focus itself and confuse the subject).
-    const elsewhere = within(
-      screen.getByText("delete me").closest("li")!,
-    ).getByRole("button", { name: /Break into steps/ });
-    elsewhere.focus();
-    await clickRetry();
-
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(elsewhere).toHaveFocus();
-  });
-
-  /**
-   * Duo review round 3 — the notice is cleared by the words landing, so editing
-   * the restored text and pressing Enter used to leave a stale alert beside the
-   * fresh "captured ✓", inviting a Retry that would post a near-duplicate.
-   *
-   * The discriminator is whether the words are IN THE FIELD: if they are, the
-   * user has seen them and replaced them, so this capture supersedes the notice.
-   * If they are not, the notice is the only copy of them, and the spec below pins
-   * that it survives.
-   */
-  it("clears the notice when the user edits the restored words and captures the edit", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    expect(input).toHaveValue("buy milk");
-
-    fireEvent.change(input, { target: { value: "buy oat milk" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
-      ["buy milk"],
-      ["buy oat milk"],
-    ]);
-  });
-
-  it("keeps a notice whose words it could NOT restore, even once a later capture succeeds", async () => {
-    let rejectWrite!: (reason: unknown) => void;
-    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
-      new Promise<void>((_, reject) => {
-        rejectWrite = reject;
-      }),
-    );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    fireEvent.change(input, { target: { value: "call mum" } });
-    await act(async () => {
-      rejectWrite(new Error("offline"));
-      await flushTicks();
-    });
-    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
-
-    // The field never held "buy milk", so this is a different thought and the
-    // notice is still the only copy of the first one.
-    await capture(input, "call mum");
-
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
-  });
-
-  /**
-   * capture-failure-pile-up — Duo review round 7, and the correction that came
-   * out of writing these.
-   *
-   * Duo flagged that the single notice slot can drop an earlier failure's only
-   * copy of its words. Real. Writing the specs then falsified the comment that
-   * was defending it: it claimed the notice and the field between them hold two
-   * outstanding failures, and **they do not.** Submitting anything empties the
-   * field, so a second failure both takes the notice AND repopulates the field
-   * with its own words. There is no arrangement in which both survive.
-   *
-   * These pin that boundary rather than leaving it as a claim nothing checks —
-   * which is precisely how the wrong claim survived. It is #175's to close: the
-   * issue scopes "a real offline session" there, and consecutive failures ARE
-   * one. Every fix available inside this issue trades the loss for a different
-   * silence (keeping the older record leaves the newer failure unannounced;
-   * rescuing the older words into the field puts text the user did not just type
-   * where they are looking). A queue needs neither.
-   */
-  describe("two failures outstanding, one notice slot (#210 → #175)", () => {
-    /** Two captures that both fail, the second typed while the first is in flight. */
-    async function twoFailures(input: HTMLInputElement) {
-      let rejectFirst!: (reason: unknown) => void;
-      vi.mocked(createBrainDumpItem)
-        .mockReturnValueOnce(
-          new Promise<void>((_, reject) => {
-            rejectFirst = reject;
-          }),
-        )
-        .mockRejectedValueOnce(new Error("offline"));
-      await capture(input, "buy milk");
-      fireEvent.change(input, { target: { value: "call mum" } });
-      await act(async () => {
-        rejectFirst(new Error("offline"));
-        await flushTicks();
-      });
-      // The field was occupied, so "buy milk" went to the notice only.
-      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
-      expect(input).toHaveValue("call mum");
-
-      fireEvent.keyDown(input, { key: "Enter" });
-      await flush();
-    }
-
-    it("lets the second failure displace the first, whose words were only in the notice", async () => {
-      const input = renderInbox();
-      await twoFailures(input);
-
-      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
-      expect(screen.getByRole("alert")).not.toHaveTextContent("buy milk");
-      // The honest statement of the cost, executable rather than asserted in
-      // prose: "buy milk" is now in neither place.
-      expect(input).not.toHaveValue("buy milk");
-    });
-
-    /**
-     * Duo review round 9 — the same slot, from the other direction, and the
-     * asymmetry it names is real: the SUCCESS path refuses to clear a record
-     * whose own attempt is unsettled, while the catch writes unconditionally. So
-     * an older retry failing late takes the notice from a newer failure.
-     *
-     * Deferred with the rest, not overlooked. The asymmetry cannot be removed by
-     * making the catch match the success path, because the two are answering
-     * different questions: a success may decline the slot (its words are safe on
-     * the server), whereas a failure that declines it reports nothing at all.
-     * Whichever record wins, the other is unannounced. What is verified here is
-     * the part that matters — the loser's WORDS are still in the field, so the
-     * cost is a missing notice rather than missing text.
-     */
-    it("lets a late retry failure take the notice, leaving the newer words in the field", async () => {
-      let rejectRetry!: (reason: unknown) => void;
-      vi.mocked(createBrainDumpItem)
-        .mockRejectedValueOnce(new Error("offline"))
-        .mockReturnValueOnce(
-          new Promise<void>((_, reject) => {
-            rejectRetry = reject;
-          }),
-        )
-        .mockRejectedValueOnce(new Error("offline"));
-      const input = renderInbox();
-      await capture(input, "buy milk");
-      await clickRetry();
-
-      // A newer, unrelated capture fails while that retry is still outstanding.
-      fireEvent.change(input, { target: { value: "call mum" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-      await flush();
-      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
-      expect(input).toHaveValue("call mum");
-
-      await act(async () => {
-        rejectRetry(new Error("still offline"));
-        await flushTicks();
-      });
-
-      // The older retry took the slot back…
-      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
-      // …but "call mum" is not lost — it is in the field, which is the guarantee
-      // that holds however many fail.
-      expect(input).toHaveValue("call mum");
-    });
-
-    it("is never silent about the failure it does hold", async () => {
-      const input = renderInbox();
-      await twoFailures(input);
-
-      // Whatever it drops, the state it leaves is always the honest one: an
-      // alert naming words that did not save, those words in the field, and a
-      // Retry. Never an empty field and a false confirmation, which is #210.
-      const notice = screen.getByRole("alert");
-      expect(notice).toHaveTextContent(/couldn't save that/i);
-      expect(notice).toHaveTextContent("“call mum”");
-      expect(input).toHaveValue("call mum");
+    await waitFor(() =>
       expect(
-        within(notice).getByRole("button", { name: /try again/i }),
-      ).toBeInTheDocument();
-      expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
-    });
-  });
-
-  /**
-   * Duo review round 8 — the `try` must govern the WRITE, not everything after
-   * it. `router.refresh()` sat inside it, so a refresh that threw would run the
-   * catch and tell the user a capture had failed when the row was already
-   * written: #210's lie, produced by the code fixing #210.
-   */
-  it("does not report a capture as failed when only the list refresh threw", async () => {
-    const input = renderInbox();
-    refresh.mockImplementationOnce(() => {
-      throw new Error("refresh blew up");
-    });
-
-    await capture(input, "buy milk");
-
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-    expect(input).toHaveValue("");
-  });
-
-  /**
-   * Duo review round 8 — nested live regions are the question it raised, and the
-   * answer is not to have one. A `role="status"` inside a `role="alert"` is a
-   * polite region inside an assertive one, which is undefined enough in practice
-   * that "will it announce" cannot be answered.
-   *
-   * So the wait is carried by the two mechanisms that ARE defined: the pressed
-   * button's own `aria-disabled` state change, and its `aria-describedby`, which
-   * picks up the "Saving…" text while it is showing. Sighted users see exactly
-   * the same thing.
-   */
-  it("carries the retry's wait on the button rather than nesting a live region", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(new Promise<void>(() => {}));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    await clickRetry();
-
-    const notice = screen.getByRole("alert");
-    expect(within(notice).queryByRole("status")).toBeNull();
-    expect(notice).toHaveTextContent(/saving/i);
-
-    const retry = within(notice).getByRole("button", { name: /try again/i });
-    const ids = retry.getAttribute("aria-describedby")!.trim().split(/\s+/);
-    expect(ids).toHaveLength(2);
-    const described = ids
-      .map((id) => document.getElementById(id)?.textContent ?? "")
-      .join(" ");
-    expect(described).toMatch(/couldn't save that/i);
-    expect(described).toMatch(/saving/i);
-  });
-
-  /**
-   * #218 / Duo round 16 on `!303` — round 8's answer was half of one. Not
-   * nesting the live region was right; leaving `aria-describedby` to carry the
-   * wait on its own was not. A description is computed when focus LANDS on a
-   * control, and this control already has focus and deliberately keeps it, so
-   * the value gaining `captureSavingId` mid-flight is not something a screen
-   * reader goes back and re-reads. The nested-region hole was moved, not closed.
-   *
-   * A live region is the one spec-defined channel for content that changes
-   * while the user is stationary, so the wait gets a real one — polite,
-   * visually hidden, and a SIBLING of the `role="alert"`. Mounted empty with the
-   * notice, for the reason the move announcer below already documents: a region
-   * that arrives together with its first message is silent. The visible copy
-   * stays exactly where it was and goes `aria-hidden`, so the sentence reaches
-   * a screen reader once rather than also re-reading the assertive notice.
-   *
-   * Kept identical to `focus-timer.tsx`'s notice on purpose — the two have
-   * drifted once already, which is what produced this round.
-   */
-  it("announces the wait through a polite live region beside the notice, not by changing a description under held focus", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(new Promise<void>(() => {}));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    const announcer = screen.getByTestId("capture-saving-announcer");
-    expect(announcer).toBeEmptyDOMElement();
-    expect(screen.getByRole("alert")).not.toContainElement(announcer);
-
-    await clickRetry();
-
-    expect(announcer).toHaveTextContent(/saving/i);
-    expect(announcer).toHaveAttribute("role", "status");
-    expect(announcer).toHaveAttribute("aria-live", "polite");
-    expect(announcer).toHaveClass("sr-only");
-    expect(screen.getByRole("alert")).not.toContainElement(announcer);
-
-    const visible = screen.getByTestId("capture-saving-visible");
-    expect(screen.getByRole("alert")).toContainElement(visible);
-    expect(visible).toHaveAttribute("aria-hidden", "true");
-    expect(visible).not.toHaveClass("sr-only");
-  });
-
-  /**
-   * Duo review round 4 — the superseding rule, reached from the one path the
-   * round-3 specs did not walk: a **retry that fails again**.
-   *
-   * A retry does not clear the field (only success does), so on the second
-   * failure the words are already sitting there untouched. Deciding "were these
-   * words put back in the field?" by asking "was the field empty?" answered no,
-   * and the notice then refused to be superseded — leaving a stale alert beside
-   * a fresh "captured ✓" after the user had visibly typed over those words and
-   * captured the edit. Which is #210's own bug, from a different door.
-   */
-  it("still supersedes the notice after a retry that failed again", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockRejectedValueOnce(new Error("still offline"));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    await clickRetry();
-
-    // The words are back where the user can see them, twice over.
-    expect(input).toHaveValue("buy milk");
-    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
-
-    fireEvent.change(input, { target: { value: "buy oat milk" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-
-    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-  });
-
-  /**
-   * Duo review round 5 — `submit()` is deliberately ungated, because firing
-   * thoughts in a row is the point of the control and they are independent
-   * inserts. The exception is the words a Retry is already resubmitting: those
-   * are not an independent insert, they are the same request by a second route,
-   * and the field is holding them precisely because the notice put them back.
-   */
-  it("ignores an Enter that would re-post the words a Retry is already resubmitting", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(new Promise<void>(() => {}));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    await clickRetry();
-    expect(input).toHaveValue("buy milk");
-
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-
-    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
-    // Not a silent discard — #169's other harm. The notice is on screen saying a
-    // save for these exact words is in flight, and Retry reads busy.
-    const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent(/saving/i);
-    expect(
-      within(notice).getByRole("button", { name: /try again/i }),
-    ).toHaveAttribute("aria-disabled", "true");
-    expect(input).toHaveValue("buy milk");
-  });
-
-  /**
-   * Duo review round 5 — superseding means "the user has seen how this attempt
-   * ended and replaced its words". While a retry is still in flight they have
-   * seen no such thing, so clearing the notice would be clearing it out from
-   * under a request whose outcome nobody knows yet — and a later failure would
-   * then look like a notice resurrecting itself from nothing.
-   *
-   * The answer is to leave the notice up, not to suppress the failure. A write
-   * the client knows did not land and says nothing about is the silence this
-   * whole issue exists to remove.
-   */
-  it("does not let a capture supersede a failure whose retry has not answered yet", async () => {
-    let rejectRetry!: (reason: unknown) => void;
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(
-        new Promise<void>((_, reject) => {
-          rejectRetry = reject;
-        }),
-      )
-      .mockResolvedValueOnce(undefined);
-    const input = renderInbox();
-    await capture(input, "buy milk");
-    await clickRetry();
-
-    fireEvent.change(input, { target: { value: "buy oat milk" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-
-    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
-
-    await act(async () => {
-      rejectRetry(new Error("still offline"));
-      await flushTicks();
-    });
-
-    // It failed, and the notice never left — so this is a report, not a
-    // resurrection. The words go back into the field the other capture emptied.
-    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
-    expect(input).toHaveValue("buy milk");
-  });
-
-  /**
-   * Duo review round 6 — the same hazard through the remaining door. `supersedes`
-   * is decided when a capture is SUBMITTED; a Retry pressed between that press
-   * and its response makes the outcome unknown again, and the stale decision
-   * would still have cleared the record on arrival.
-   *
-   * So the invariant is enforced where the record is written rather than only
-   * where the decision is taken: **a record whose own attempt is unsettled is
-   * never cleared by anything except that attempt.**
-   */
-  it("does not clear a record mid-retry, even when an earlier submit had marked it superseded", async () => {
-    let resolveOther!: () => void;
-    let rejectRetry!: (reason: unknown) => void;
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(
-        new Promise<void>((resolve) => {
-          resolveOther = resolve;
-        }),
-      )
-      .mockReturnValueOnce(
-        new Promise<void>((_, reject) => {
-          rejectRetry = reject;
-        }),
-      );
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    // Typed over the restored words and captured, so this submit decides
-    // `supersedes = "buy milk"` — while its own request is still in flight.
-    fireEvent.change(input, { target: { value: "call mum" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await flush();
-
-    // …and only THEN is Retry pressed, after the decision was taken.
-    await clickRetry();
-    await act(async () => {
-      resolveOther();
-      await flushTicks();
-    });
-
-    const notice = screen.getByRole("alert");
-    expect(notice).toHaveTextContent("“buy milk”");
-    expect(
-      within(notice).getByRole("button", { name: /try again/i }),
-    ).toHaveAttribute("aria-disabled", "true");
-
-    await act(async () => {
-      rejectRetry(new Error("still offline"));
-      await flushTicks();
-    });
-    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
-  });
-
-  /**
-   * WCAG 2.4.3 — the finding `focus-timer.tsx:1252` documents: a native
-   * `disabled` attribute cannot hold focus, so the browser drops the focused
-   * element to `<body>` the moment the retry starts. `aria-disabled` plus a
-   * guarded handler keeps the press point where it is.
-   */
-  it("marks Retry aria-disabled rather than disabled while it is in flight", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(new Promise<void>(() => {}));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    screen.getByRole("button", { name: /try again/i }).focus();
-    await clickRetry();
-
-    const after = screen.getByRole("button", { name: /try again/i });
-    expect(after).toHaveAttribute("aria-disabled", "true");
-    expect(after).not.toHaveAttribute("disabled");
-    expect(after).toHaveFocus();
-    expect(after.className).toMatch(/min-h-\[44px\]/);
-  });
-
-  it("does not fire a second write when Retry is pressed mid-flight", async () => {
-    vi.mocked(createBrainDumpItem)
-      .mockRejectedValueOnce(new Error("offline"))
-      .mockReturnValueOnce(new Promise<void>(() => {}));
-    const input = renderInbox();
-    await capture(input, "buy milk");
-
-    await clickRetry();
-    await clickRetry();
-
-    // once for the original attempt, once for the retry — not three times
-    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
-  });
-
-  /**
-   * WCAG 3.2.2 On Input, and the deliberate divergence from `focus-timer.tsx`:
-   * there, the pressed control unmounted, so focus HAD to be handed somewhere.
-   * Here the capture input never unmounts and is where the user is still
-   * typing, so moving focus to the notice would interrupt them and fight the
-   * restored text. `role="alert"` announces the failure without taking focus.
-   */
-  it("leaves focus in the capture input rather than taking it to the notice", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    const input = renderInbox();
-    input.focus();
-
-    await capture(input, "buy milk");
-
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(input).toHaveFocus();
-  });
-
-  /**
-   * Two live regions must never contradict each other. A confirmation from an
-   * earlier capture is on screen for 1.5s, so a failure landing inside that
-   * window would render "captured ✓" and "couldn't save that" together — and a
-   * screen reader would hear both.
-   */
-  it("clears a still-showing 'captured ✓' when the next capture fails", async () => {
-    const input = renderInbox();
-    await capture(input, "first thought");
-    expect(screen.getByText("captured ✓")).toBeInTheDocument();
-
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
-    await capture(input, "second thought");
-
-    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /couldn't save that/i,
+        screen.getByRole("button", { name: /1 waiting to save/ }),
+      ).toBeInTheDocument(),
     );
+    // ⚠️ The strip never says "offline". `navigator.onLine` reads true on a
+    // captive portal, in a lift and at the edge of coverage, so the app is not
+    // entitled to assert it — every sentence says what is TRUE instead.
+    expect(screen.queryByText(/offline/i)).not.toBeInTheDocument();
+
+    await expand(user);
+    expect(screen.getByText("find the passport")).toBeInTheDocument();
   });
 
-  it("a11y: the notice reads as an error and its control describes the reason", async () => {
-    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+  it("does not claim 'captured ✓' for a capture that is still waiting", async () => {
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
     const input = renderInbox();
-    await capture(input, "buy milk");
 
-    const notice = await screen.findByRole("alert");
-    const retry = screen.getByRole("button", { name: /try again/i });
-    const describedBy = retry.getAttribute("aria-describedby");
-    expect(describedBy).toBeTruthy();
-    const message = document.getElementById(describedBy!)!;
+    await user.type(input, "buy milk{enter}");
 
-    // The state is carried by the text, never by the red alone (WCAG 1.4.1),
-    // and the reason is reachable from the control — whichever announcement
-    // wins, the user gets both.
-    expect(notice.textContent).toMatch(/couldn't save that/i);
-    expect(message).toHaveTextContent(/couldn't save that/i);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /waiting/ })).toBeVisible(),
+    );
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+  });
 
-    // Duo review round 1: this spec's comment claimed `text-destructive` was
-    // under test while only the border was asserted, so a non-AA text colour
-    // would have passed it. Duo's own patch put the assertion on the notice,
-    // which would have failed — the token is on the MESSAGE, and the notice
-    // carries the surface pair. Both are asserted, on the elements that have
-    // them. `text-destructive` on --background/--card is the pairing globals.css
-    // documents as AA in both themes (5.2:1+); a raw palette shade is what
-    // dropped the emerald confirmation below 4.5:1 on the warm-tinted
-    // --background in #40.
-    expect(message.className).toContain("text-destructive");
-    expect(notice.className).toContain("border-destructive/40");
-    expect(notice.className).toContain("bg-destructive/5");
+  it("empties the field once the words are durable, so a second Enter is not a second row", async () => {
+    // The instant-capture feel AND the double-submit guard, both of which used to
+    // come from clearing the field before the write. It is cleared after the
+    // SYNCHRONOUS storage write instead, so it is still gone within the keypress.
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    const input = renderInbox();
+
+    await user.type(input, "buy milk{enter}");
+    expect(input).toHaveValue("");
+
+    await user.keyboard("{enter}");
+    expect(queued()).toHaveLength(1);
+  });
+
+  /**
+   * ⚠️ **#242, and the reason this MR is what closes it.**
+   *
+   * *"A new failure notice must not displace one the user has not resolved."*
+   * #210 shipped the opposite and said so: one slot, newest wins, and its own
+   * docblock recorded that with two outstanding failures *"the first's words are
+   * then in neither place"* — because submitting anything empties the field, so
+   * the second failure took the notice **and** repopulated the field with its own
+   * words. There was no arrangement in which both survived.
+   *
+   * Here they both survive because there is **no slot to contend for**: every
+   * capture that has not reached the server is a queue entry. That is a structural
+   * answer rather than a precedence rule, which matters — a precedence rule is a
+   * thing that can be got wrong later, and #242's checklist asks each surface for
+   * exactly this spec: raise failure A, leave it unresolved, cause failure B,
+   * assert A is still reachable.
+   */
+  it("does not let a second failed capture displace an unresolved first (#242)", async () => {
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    const input = renderInbox();
+
+    await user.type(input, "first thought{enter}");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /1 waiting to save/ }),
+      ).toBeInTheDocument(),
+    );
+    await user.type(input, "second thought{enter}");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /2 waiting to save/ }),
+      ).toBeInTheDocument(),
+    );
+    await expand(user);
+    // BOTH sets of words readable, and the first is still the first: it was not
+    // displaced, dimmed, or turned into a count.
+    expect(screen.getByText("first thought")).toBeInTheDocument();
+    expect(screen.getByText("second thought")).toBeInTheDocument();
+    expect(queued().map((c) => c.text)).toEqual([
+      "first thought",
+      "second thought",
+    ]);
+  });
+
+  it("keeps the words in the field when the queue refuses them", async () => {
+    // A refusal is user-facing behaviour, not a defensive branch. Every refusal
+    // sentence promises the words are still in the box, so the field must not be
+    // cleared — and the assertive region has to say which refusal it was, because
+    // a silent refusal is the silence this whole issue exists to remove.
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    const input = renderInbox();
+    // Fill the item cap first: 20 is CAPTURE_QUEUE_MAX_ITEMS, per workspace.
+    window.localStorage.setItem(
+      "df-capture-queue",
+      JSON.stringify(
+        Array.from({ length: 20 }, (_, i) => ({
+          clientKey: `k${i}`,
+          text: `held ${i}`,
+          workspaceId: "ws-test",
+          capturedAt: 1_000,
+        })),
+      ),
+    );
+
+    await user.type(input, "one thought too many{enter}");
+
+    const refusal = screen.getByTestId("capture-queue-refusal");
+    await waitFor(() => expect(refusal).toHaveTextContent(/20 captures/));
+    expect(refusal).toHaveTextContent(/still in the box/);
+    // The words are where the user can see them, which is what the copy promises.
+    expect(input).toHaveValue("one thought too many");
+    expect(queued()).toHaveLength(20);
+  });
+
+  it("refreshes the list when a queued capture reaches the server", async () => {
+    // Without this the capture leaves the queue, the strip stops mentioning it,
+    // and NOTHING appears in the inbox until the next unrelated interaction — the
+    // words read as destroyed at the exact moment they became safe. The mount
+    // flush is the trigger here, which is the case a return value cannot cover.
+    window.localStorage.setItem(
+      "df-capture-queue",
+      JSON.stringify([
+        {
+          clientKey: "from-an-earlier-session",
+          text: "saved while the app was shut",
+          workspaceId: "ws-test",
+          capturedAt: 1_000,
+        },
+      ]),
+    );
+    renderInbox();
+
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(queued()).toEqual([]);
+  });
+});
+
+describe("InboxView — the capture queue's two live regions (#175, #218)", () => {
+  function renderInbox() {
+    render(
+      <InboxView
+        workspaceId="ws-test"
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    return screen.getByPlaceholderText(/Brain dump/i);
+  }
+
+  /**
+   * ⚠️ Both regions are declared in `inbox-view.tsx` rather than inside
+   * `<CaptureQueueStrip>`, and that is mechanical: `write-notice-hygiene`'s rules
+   * D and E reason about ONE file's JSX tree, so a region rendered by a child
+   * component is invisible to both. Rule D is the only thing in the repo that can
+   * see a polite region nested inside an assertive one, and rule E the only thing
+   * that can see a missing wait announcement — which has shipped green here four
+   * times (#210, #218, #225, #246).
+   */
+  /**
+   * ⚠️ **The two roles are mounted on DIFFERENT schedules, and that asymmetry is
+   * the a11y point rather than an inconsistency.** `role="status"` is announced
+   * when its content CHANGES, so a polite region that arrives together with its
+   * first message is silent and must pre-exist. `role="alert"` is announced when
+   * the element is INSERTED, so it must not pre-exist to work — and an empty one
+   * left on the page permanently would make `getByRole("alert")` ambiguous with
+   * the row-write notice for no benefit.
+   */
+  it("mounts the polite region empty from first paint, with its role fixed", () => {
+    renderInbox();
+    const polite = screen.getByTestId("capture-queue-saving-announcer");
+
+    expect(polite).toHaveAttribute("role", "status");
+    expect(polite).toHaveAttribute("aria-live", "polite");
+    expect(polite).toHaveTextContent("");
+    // And nothing assertive yet: there is no news.
+    expect(
+      screen.queryByTestId("capture-queue-refusal"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the two regions siblings rather than one inside the other", async () => {
+    // #218's defect: a polite region inside an assertive one inherits the
+    // container's politeness across the whole subtree, so "will it announce" has
+    // no answer. Structural, and therefore checkable — but only once both exist,
+    // so this raises a real refusal first.
+    captureFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = userEvent.setup();
+    const input = renderInbox();
+    window.localStorage.setItem(
+      "df-capture-queue",
+      JSON.stringify(
+        Array.from({ length: 20 }, (_, i) => ({
+          clientKey: `k${i}`,
+          text: `held ${i}`,
+          workspaceId: "ws-test",
+          capturedAt: 1_000,
+        })),
+      ),
+    );
+    await user.type(input, "one too many{enter}");
+
+    const assertive = await screen.findByTestId("capture-queue-refusal");
+    const polite = screen.getByTestId("capture-queue-saving-announcer");
+
+    expect(assertive).toHaveAttribute("role", "alert");
+    expect(assertive.contains(polite)).toBe(false);
+    expect(polite.contains(assertive)).toBe(false);
+    expect(polite.parentElement).toBe(assertive.parentElement);
+  });
+
+  it("announces the wait from the polite region while a flush is outstanding", () => {
+    // Rule E's channel. `aria-describedby` cannot carry this alone: a description
+    // is read when focus LANDS on a control, and the strip's Retry is pressed on a
+    // control that already holds focus and keeps it by design (`aria-disabled`,
+    // not `disabled`), so the value gaining the id mid-flight is a change nothing
+    // goes back to re-read.
+    let settle: ((value: Response) => void) | null = null;
+    captureFetch.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const input = renderInbox();
+
+    fireEvent.change(input, { target: { value: "buy milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const polite = screen.getByTestId("capture-queue-saving-announcer");
+    return waitFor(() => {
+      expect(polite).toHaveTextContent("Saving what's waiting…");
+    }).finally(() => settle?.(captureReply(201)));
   });
 });
 
@@ -1205,6 +730,7 @@ describe("InboxView — inline delete confirm", () => {
     const item = makeItem({ id: "abc", text: "delete me" });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[item]}
         settings={settings}
@@ -1247,6 +773,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[stale]}
         settings={settings}
@@ -1273,6 +800,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[stale]}
         settings={settings}
@@ -1298,6 +826,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[stale]}
         settings={settings}
@@ -1319,6 +848,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#51: the task title is the dominant row text (text-lg font-semibold)", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "h1", text: "buy oat milk" })]}
         settings={settings}
@@ -1345,6 +875,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("design revision: the drag grip stays an adequate hit target (≥24px wide, 44px tall)", () => {
     const { container } = render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "g1", text: "grip row" })]}
         settings={settings}
@@ -1363,6 +894,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#52: the age/status pill sits on the metadata line with captured-ago, not on the title line", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -1394,6 +926,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: an aging row's captured-ago label uses AA-tuned amber (not sub-AA text-amber-600)", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -1419,6 +952,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: the NavBadge aging count uses AA-tuned amber (not sub-AA text-amber-600)", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -1449,6 +983,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: the stale-reminder is a tinted amber notification chip (clock icon + readable text), still subordinate + keyboard-usable", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -1500,6 +1035,7 @@ describe("InboxView — inbox zero copy", () => {
   it("renders the voice-aware inbox.zero string with no items", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -1530,6 +1066,7 @@ describe("InboxView — brand-new account empty state (#111)", () => {
   ) {
     return render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -1557,6 +1094,7 @@ describe("InboxView — brand-new account empty state (#111)", () => {
     render(
       <VoiceProvider voice="playful">
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[]}
           settings={settings}
@@ -1635,6 +1173,7 @@ describe("InboxView — settings panel moved to /settings", () => {
   it("no longer renders the aging & reminder settings panel on the inbox", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem()]}
         settings={settings}
@@ -1656,6 +1195,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "do it" })]}
         settings={settings}
@@ -1673,6 +1213,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -1692,6 +1233,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -1715,6 +1257,7 @@ describe("InboxView — complete + completed bucket", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[done]}
         settings={settings}
@@ -1753,6 +1296,7 @@ describe("InboxView — deleting a completed item (#251)", () => {
   const renderCompleted = () =>
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[completed()]}
         settings={settings}
@@ -1893,6 +1437,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
@@ -1916,6 +1461,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
@@ -1937,6 +1483,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
@@ -1958,6 +1505,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
@@ -1979,6 +1527,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
@@ -2000,6 +1549,7 @@ describe("InboxView — always-visible bucket board", () => {
   it("shows all four To-Do buckets with empty states when there are no to-dos", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -2022,6 +1572,7 @@ describe("InboxView — always-visible bucket board", () => {
     const todo = makeItem({ id: "t1", text: "a todo", status: "triaged" });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[todo]}
         settings={settings}
@@ -2042,6 +1593,7 @@ describe("InboxView — multi-step step count + expand", () => {
   it("shows a step-count indicator", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2057,6 +1609,7 @@ describe("InboxView — multi-step step count + expand", () => {
   it("shows the task-total remaining (not-done steps' full estimates, no open session)", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2078,6 +1631,7 @@ describe("InboxView — multi-step step count + expand", () => {
     ); // s2: 20m estimate, paused with 6m left
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[paused]}
         settings={settings}
@@ -2095,6 +1649,7 @@ describe("InboxView — multi-step step count + expand", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2116,6 +1671,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2136,6 +1692,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2162,6 +1719,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
@@ -2200,6 +1758,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2235,6 +1794,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -2273,6 +1833,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -2303,6 +1864,7 @@ describe("InboxView — tap multi-step row body to expand (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2322,6 +1884,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -2353,6 +1916,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
@@ -2434,6 +1998,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]}
         settings={settings}
@@ -2456,6 +2021,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]}
         settings={settings}
@@ -2487,6 +2053,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[done]}
         settings={settings}
@@ -2510,6 +2077,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "n1", text: "big thing", status: "triaged" }),
@@ -2570,6 +2138,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[done]}
         settings={settings}
@@ -2600,6 +2169,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
   it("renders an awaiting-breakdown item in the Multi-step bucket with a 'Break into steps now?' CTA", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
@@ -2622,6 +2192,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
@@ -2641,6 +2212,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
@@ -2684,6 +2256,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
@@ -2715,6 +2288,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
@@ -2738,6 +2312,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -2775,6 +2350,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "old name" })]}
         settings={settings}
@@ -2798,6 +2374,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "old name" })]}
         settings={settings}
@@ -2836,6 +2413,7 @@ describe("InboxView — ✎ edit title", () => {
     ];
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={items}
         settings={settings}
@@ -2872,6 +2450,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "review item" })]}
         settings={settings}
@@ -2906,6 +2485,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "same" })]}
         settings={settings}
@@ -2927,6 +2507,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
@@ -2950,6 +2531,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
@@ -2972,6 +2554,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
@@ -3018,6 +2601,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3061,6 +2645,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3120,6 +2705,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3154,6 +2740,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3178,6 +2765,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3200,6 +2788,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3237,6 +2826,7 @@ describe("InboxView — saved-for-later idle CTA contrast (#56)", () => {
   it("keeps the idle 'Review now' CTA free of any ancestor opacity dim", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3264,6 +2854,7 @@ describe("InboxView — saved-for-later idle CTA contrast (#56)", () => {
   it("still dims the idle title line so the row reads as 'asleep'", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
@@ -3291,6 +2882,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -3320,6 +2912,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -3369,6 +2962,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3401,6 +2995,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     });
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
@@ -3423,6 +3018,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -3451,6 +3047,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -3471,6 +3068,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
   it("S0 guest (google={null}): rows show an ENABLED 'Add to calendar' control per row (not hidden, not disabled)", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeMultiStep(),
@@ -3507,6 +3105,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3536,6 +3135,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeMultiStep(),
@@ -3584,6 +3184,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3612,6 +3213,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3648,6 +3250,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -3699,6 +3302,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3781,6 +3385,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "r1", text: "old name" }),
@@ -3849,6 +3454,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -3928,6 +3534,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "thr1", text: "single todo", status: "triaged" }),
@@ -3969,6 +3576,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -4000,6 +3608,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
@@ -4033,6 +3642,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("guest single-task row shows an enabled 'Add to calendar' that schedules via ICS + downloads", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -4069,6 +3679,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("owner ▾ menu offers 'Add to calendar (.ics)' as an alternative to Google", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -4094,6 +3705,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("shows a 'Scheduled ✓' indicator on a row whose task has been scheduled", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -4115,6 +3727,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("no 'Scheduled ✓' indicator when scheduledAt is null", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -4141,6 +3754,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("renders exactly four inline actions plus the ▾ trigger", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "n1", text: "capture me", taskId: "t-n1" }),
@@ -4184,6 +3798,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4219,6 +3834,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     };
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4250,6 +3866,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4272,6 +3889,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4307,6 +3925,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4329,6 +3948,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4373,6 +3993,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4449,6 +4070,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     render(
       <VoiceProvider voice="playful">
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[makeItem({ id: "n1", text: "capture me" })]}
           settings={settings}
@@ -4493,6 +4115,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4524,6 +4147,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4562,6 +4186,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4618,6 +4243,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4683,6 +4309,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       const user = userEvent.setup();
       render(
         <InboxView
+          workspaceId="ws-test"
           now={Date.now()}
           initialItems={[make()]}
           settings={settings}
@@ -4711,6 +4338,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("the Done row's 🗑 keeps the floor too — the one icon caller", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -4738,6 +4366,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
@@ -4765,6 +4394,7 @@ describe("InboxView — welcome card (Task 3, #8)", () => {
   it("welcomeVisible=true renders the WelcomeCard above the rest of the inbox", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -4781,6 +4411,7 @@ describe("InboxView — welcome card (Task 3, #8)", () => {
   it("welcomeVisible=false renders no WelcomeCard", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -4801,6 +4432,7 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
   it("resumeStep set renders a status banner with the step text + a resume link to /focus/<id>", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -4822,6 +4454,7 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
   it("resumeStep=null renders no resume banner", () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -4846,6 +4479,7 @@ describe("InboxView — the task note (#44)", () => {
   const render1 = (item: Item) =>
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[item]}
         settings={settings}
@@ -4914,6 +4548,7 @@ describe("InboxView — the capture input's accessible name (#183)", () => {
   const renderCapture = () =>
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5006,6 +4641,7 @@ describe("InboxView — row action group target size (#184)", () => {
   it("sizes every control in every bucket's action group", () => {
     const { container } = render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           // One row per frame that renders its own `inline` array.
@@ -5046,6 +4682,7 @@ describe("InboxView — row action group target size (#184)", () => {
     const user = userEvent.setup();
     const { container } = render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -5081,6 +4718,7 @@ describe("InboxView — row action group target size (#184)", () => {
     const user = userEvent.setup();
     const { container } = render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           // `ItemRow`'s own `deleteControl` — the untriaged review row.
@@ -5128,6 +4766,7 @@ describe("InboxView — row action group target size (#184)", () => {
     const user = userEvent.setup();
     const { container } = render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({ id: "t251f4c", text: "review row" }),
@@ -5178,6 +4817,7 @@ describe("InboxView — the inline-note affordance (#186)", () => {
   const renderInbox = (items: Item[] = []) =>
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={items}
         settings={settings}
@@ -5284,6 +4924,7 @@ describe("InboxView — the captured inline note (#179/#186)", () => {
   const renderInbox = (items: Item[]) =>
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={items}
         settings={settings}
@@ -5503,6 +5144,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("inserts the closing brace and leaves the caret between the pair", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5524,6 +5166,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("wraps a selection instead of replacing it", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5543,6 +5186,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("types over the closing brace rather than producing `}}`", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5563,6 +5207,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("backspacing the opening brace takes the pair with it", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5585,6 +5230,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("refuses when the field already ends in a brace group", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5609,6 +5255,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5620,12 +5267,25 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
 
     await user.type(input, "buy milk{enter}");
 
-    expect(createBrainDumpItem).toHaveBeenCalledWith("buy milk");
+    // #175 — the capture path is `POST /api/braindump` through the queue now, so
+    // "the Enter still captures" is asserted against the route rather than
+    // against `createBrainDumpItem`. What #201 is guarding is unchanged: the
+    // brace-closing handler must never swallow this keypress.
+    await waitFor(() =>
+      expect(captureFetch).toHaveBeenCalledWith(
+        "/api/braindump",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(JSON.parse(captureFetch.mock.calls[0]![1].body).text).toBe(
+      "buy milk",
+    );
   });
 
   it("leaves an IME composition alone", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5648,6 +5308,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("leaves a Cmd/Ctrl chord alone, so undo still reaches the browser", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5674,6 +5335,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
   it("claims the keystroke when the rule does fire", async () => {
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[]}
         settings={settings}
@@ -5698,6 +5360,7 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[makeItem({ text: "water the plants" })]}
         settings={settings}
@@ -5749,6 +5412,7 @@ describe("InboxView — MoveToMenu's Single-task suppression is wired (#253)", (
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -5781,6 +5445,7 @@ describe("InboxView — MoveToMenu's Single-task suppression is wired (#253)", (
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -5805,6 +5470,7 @@ describe("InboxView — MoveToMenu's Single-task suppression is wired (#253)", (
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({
@@ -5836,6 +5502,7 @@ describe("InboxView — MoveToMenu's Single-task suppression is wired (#253)", (
     const user = userEvent.setup();
     render(
       <InboxView
+        workspaceId="ws-test"
         now={Date.now()}
         initialItems={[
           makeItem({

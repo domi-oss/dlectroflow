@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -40,7 +41,6 @@ import {
   type AgingSettings,
 } from "@/lib/aging";
 import {
-  createBrainDumpItem,
   triageBrainDumpItem,
   snoozeBrainDumpItem,
   deleteBrainDumpItem,
@@ -110,6 +110,9 @@ import {
   subscribeNotificationPermission,
 } from "@/lib/notifications";
 import { formatAgo } from "@/lib/format";
+import { useCaptureQueue } from "@/lib/use-capture-queue";
+import type { CaptureAnnouncement } from "@/lib/use-capture-queue";
+import { CaptureQueueStrip } from "@/components/inbox/capture-queue-strip";
 
 /**
  * The key an inbox row's drag carries its item id under, and the one a bucket's
@@ -122,26 +125,24 @@ const DRAG_ITEM_KEY = "inboxItemId";
 const DROP_BUCKET_KEY = "inboxBucketId";
 
 /**
- * #210 — how long the capture bar is willing to WAIT for `createBrainDumpItem`
- * before calling it a failure.
+ * #175 — the capture bar's bounded wait now lives with the write it bounds.
  *
- * The third failure mode is silence rather than a rejection — a pod rolling
- * mid-request, a connection that never closes — and from the user's side an
- * un-timed-out `await` is indistinguishable from the bug this fixes: an emptied
- * field, no confirmation, no error, no words. `createBrainDumpItem` is one
- * Prisma insert plus a streak touch, so ten seconds is already pathological;
- * this matches `focus-timer.tsx`'s `ACTION_TIMEOUT_MS` for the same class of
- * call. The request itself carries on (a server action cannot be aborted from
- * the client), so a write that lands late still lands — the next
- * `router.refresh()` picks it up. Exported so the test advances the real value
- * rather than a copy of it.
+ * `CAPTURE_TIMEOUT_MS` was here while the capture path was
+ * `createBrainDumpItem`. The client half of #175 moved that path onto
+ * `POST /api/braindump` through the queue, so the bound moved with it:
+ * **`CAPTURE_FLUSH_TIMEOUT_MS` in `src/lib/use-capture-queue.ts`**, same 10s
+ * value, and there the abort is real rather than only a bound on the UI's
+ * patience — a route handler takes an `AbortSignal` and a server action does not.
+ *
+ * This note stays because four other surfaces cite the old name as the house
+ * bound for this class of call, and a constant that quietly relocates leaves
+ * every one of them pointing at nothing.
  */
-export const CAPTURE_TIMEOUT_MS = 10_000;
 
 /**
  * #225 — how long a ROW write is willing to wait before it is called a failure.
  *
- * Same reasoning and same value as `CAPTURE_TIMEOUT_MS` above,
+ * Same reasoning and same value as `CAPTURE_FLUSH_TIMEOUT_MS`,
  * `SHOPPING_ACTION_TIMEOUT_MS` and `focus-timer.tsx`'s `ACTION_TIMEOUT_MS`: the
  * third failure mode is silence rather than a rejection, and from the user's
  * side an un-timed-out `await` is indistinguishable from the silent no-op this
@@ -151,9 +152,10 @@ export const CAPTURE_TIMEOUT_MS = 10_000;
  * that lands late still lands, and the next `router.refresh()` picks it up.
  * Exported so the test advances the real value rather than a copy of it.
  *
- * A separate constant from `CAPTURE_TIMEOUT_MS` despite the identical value:
- * they bound two different calls, and welding them together would mean re-tuning
- * one silently re-tuned the other.
+ * A separate constant from `CAPTURE_FLUSH_TIMEOUT_MS` despite the identical
+ * value: they bound two different calls — one a server action, one a `fetch` that
+ * can actually be aborted — and welding them together would mean re-tuning one
+ * silently re-tuned the other.
  */
 export const INBOX_ACTION_TIMEOUT_MS = 10_000;
 
@@ -161,84 +163,43 @@ export const INBOX_ACTION_TIMEOUT_MS = 10_000;
 const CAPTURE_CONFIRM_MS = 1500;
 
 /**
- * #210 — a capture whose write did not land.
+ * #175 — the one-slot capture failure notice is GONE, and this note records what
+ * replaced it so the shape is not reintroduced.
  *
- * Holds the words, not just a flag: they are the only thing at stake, and the
- * notice quoting them is what makes them recoverable even in the one case the
- * input cannot be restored (see `capture` below).
- */
-type CaptureFailure = {
-  value: string;
-  /**
-   * The browser is running a different deployment than the server. Next
-   * regenerates server-action ids on every build, so a retry re-posts the same
-   * dead id — the ONLY thing that can work is a reload, and offering a retry
-   * would be offering something that cannot.
-   */
-  stale: boolean;
-  /**
-   * The write never answered, so **whether it landed is unknown** (Duo review
-   * round 2). `withActionTimeout` bounds how long the UI waits, not the request:
-   * a server action cannot be aborted from the client, so the insert may still
-   * complete, and a retry after it does leaves two identical items.
-   *
-   * Which is why this is a distinct flag rather than folded into the generic
-   * failure. Telling the user "couldn't save that" here would be a claim the
-   * client cannot support — the same unverifiable confirmation as the
-   * `captured ✓` this issue is about, pointing the other way. Retry is still
-   * offered, because a duplicate item is one tap to delete while an unwritten
-   * thought is not recoverable at all; the notice just says which risk they are
-   * taking. The durable answer is an idempotency key on the insert, which needs
-   * a schema change and so is not this fix.
-   */
-  timedOut: boolean;
-  /**
-   * A retry of THESE words is in flight.
-   *
-   * On the failure record rather than in a component-wide `capturing` flag, and
-   * that is the whole point (Duo review round 2). A capture the user types while
-   * a retry is outstanding is deliberately ungated, so it settles inside the
-   * retry's window — and a shared boolean would then be cleared by the wrong
-   * request, handing the Retry button back mid-flight and letting a double press
-   * post the same words twice. Same lesson `schedulingIds` already applies
-   * per-row to the Schedule controls (#169).
-   */
-  retrying: boolean;
-  /**
-   * The words are sitting in the capture field, where the user can see them.
-   *
-   * Which decides whether a LATER successful capture supersedes this notice (Duo
-   * review round 3). If they are in the box and the user submits something else
-   * from it — an edit, or a different thought typed over them — they have seen
-   * them and moved on, so the alert is only noise inviting a near-duplicate
-   * Retry. If they are not (the field already held the user's next thought) the
-   * notice is the ONLY copy of them, and it has to outlive any number of
-   * successful captures.
-   *
-   * Deliberately "are they in the field", not "did we just put them there" (Duo
-   * review round 4). A retry does not clear the field — only success does — so on
-   * a retry that fails again the words are already there, untouched. Asking the
-   * narrower question answered no, and the notice then refused to be superseded:
-   * a stale alert beside a fresh "captured ✓" after the user had visibly typed
-   * over those words. Which is this issue's own bug, from a different door.
-   */
-  wordsInField: boolean;
-};
-
-/**
- * #210 — which message a failed capture gets.
+ * `CaptureFailure` and `captureMessageKey` lived here. They held one failed
+ * capture — its words, `stale`, `timedOut`, `retrying`, `wordsInField` — because
+ * #210 had nowhere durable to put them. The whole apparatus existed to make ONE
+ * slot behave as well as one slot can, and its own docblock said so: *"a second
+ * outstanding failure displaces the first, and the first's words are then in
+ * neither place… a persisted queue needs neither, and #210 scopes 'a real offline
+ * session' to #175."*
  *
- * Ordered by how much the user can be told, most-certain first. `stale` and
- * `timedOut` both override the generic copy because both change what the user
- * should DO: a stale bundle makes a retry impossible, and a timeout makes the
- * outcome unknown, so "couldn't save that" would be a claim the client cannot
- * support. Mirrors `focus-timer.tsx`'s `failureMessageKey`.
+ * That is now what happens. `submit()` writes the words to `localStorage` before
+ * the network is touched, so every capture that has not reached the server is
+ * listed in the strip below the capture bar, however many there are. **#242 —
+ * "a new failure notice must not displace one the user has not resolved" — is
+ * therefore satisfied structurally rather than by a precedence rule**, which is
+ * the only way it can be satisfied: there is no slot left to contend for.
+ *
+ * Three of the four flags did not survive the move, and each for a reason rather
+ * than by omission:
+ *
+ *  * **`stale`** described Next regenerating server-action ids on a deploy, whose
+ *    only remedy was a reload. `POST /api/braindump` is a route handler with a
+ *    fixed URL, so the state cannot occur.
+ *  * **`timedOut`** meant *"whether it landed is unknown"*, because a server
+ *    action cannot be aborted and #210 could not tell a slow write from a lost
+ *    one. `clientKey` answers it: the retry is idempotent, so an abandoned request
+ *    that landed anyway is answered `200` and the entry leaves the queue. #210's
+ *    own note called an idempotency key "the durable answer".
+ *  * **`retrying`** guarded one slot against a double press. The strip's Retry is
+ *    guarded by `inFlightKeys` per entry, which is the same idea without the slot.
+ *
+ * `wordsInField` and `supersedes` went with `submit()`'s rewrite: they existed to
+ * decide whether a later success may clear an earlier failure, and nothing clears
+ * anything now — an entry leaves the queue when it saves or when the user
+ * discards it, and no other capture can speak for it.
  */
-function captureMessageKey(failure: CaptureFailure): StringKey {
-  if (failure.stale) return "capture.error.stale";
-  if (failure.timedOut) return "capture.error.timeout";
-  return "capture.error.failed";
-}
 
 /**
  * #225 — WHICH write a row failure is about.
@@ -525,8 +486,56 @@ function answersFailure(
 }
 
 /**
+ * #175 — which sentence the assertive region says, per refusal.
+ *
+ * A `Record` over the whole union rather than a chain of `if`s, so adding a
+ * refusal to any of the three unions behind `CaptureAnnouncement` is a type error
+ * here instead of a state that announces nothing. That is the failure mode #246
+ * was filed for on
+ * the shopping list: the key simply was not there, the helper fell through to the
+ * wrong copy, and the surface read as fixed to anyone auditing by grep.
+ *
+ * Two members map to `null`, and each is argued rather than skipped:
+ *
+ *  * **`empty`** cannot reach a user. `submit()` returns on `!value` before
+ *    `enqueueCapture` is called, so the only way to see it would be a caller that
+ *    does not exist. Copy invented for it would be untestable and unread.
+ *  * **`discarded`** is a success, and the hook deliberately does not announce it
+ *    — `discard` raises an announcement only on its three non-success arms. It is
+ *    listed so that the day it *does* announce, this map is where the decision has
+ *    to be made.
+ *
+ * `storage-unavailable` is shared by two of the unions on purpose: whether the
+ * store refused an enqueue or a discard, the user's situation and their remedy are
+ * identical, and the sentence names no cap and offers no wait because nothing
+ * queued here would free the space.
+ *
+ * ⚠️ **`recovery-failed` does NOT share a sentence with the refusal that caused
+ * it, and that is the point of it having its own member.** Every sentence above
+ * ends by telling the reader their words are still in the box; on the recovery arm
+ * they are not — the field was cleared at submit and the strip has stopped listing
+ * the entry. Reusing `max-items` there would have printed a remedy for an action
+ * the user did not take, about words that no longer exist.
+ */
+const CAPTURE_REFUSAL_COPY: Record<CaptureAnnouncement, StringKey | null> = {
+  empty: null,
+  discarded: null,
+  "max-items": "captureQueue.refused.maxItems",
+  "too-long": "captureQueue.refused.tooLong",
+  "no-room": "captureQueue.refused.noRoom",
+  "storage-unavailable": "captureQueue.refused.storage",
+  "refused-in-flight": "captureQueue.discardInFlight",
+  "already-saved": "captureQueue.discardSaved",
+  "recovery-failed": "captureQueue.refused.recoveryFailed",
+};
+
+function captureRefusalKey(reason: CaptureAnnouncement): StringKey | null {
+  return CAPTURE_REFUSAL_COPY[reason];
+}
+
+/**
  * #225 — which of the four messages a row failure gets, ordered by how much the
- * user can be told, most-certain first. Mirrors `captureMessageKey` above,
+ * user can be told, most-certain first. Mirrors `captureRefusalKey` above,
  * `writeFailureKey` in `shopping-list.tsx` and `failureMessageKey` in
  * `focus-timer.tsx`.
  */
@@ -740,6 +749,7 @@ export function InboxView({
   notifyAging = true,
   shoppingSummary = null,
   now: initialNow,
+  workspaceId,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
@@ -805,6 +815,22 @@ export function InboxView({
    * fall off the inbox. Same fault, same fix as #75 on /settings.
    */
   now: number;
+  /**
+   * #175 — the workspace the live session resolves to, for the offline capture
+   * queue.
+   *
+   * `localStorage` is scoped to the ORIGIN, not to a session, so the queue has to
+   * know which entries belong to the person looking at it: without this, a second
+   * person signing in on the same browser would read the first one's unsaved
+   * words. Resolved once on the server by the Inbox page, exactly like `now` — the
+   * client cannot resolve it, and this repo has no `NEXT_PUBLIC_*` variables to
+   * reach it another way.
+   *
+   * It is a **comparand, never a credential**. The route re-resolves the workspace
+   * from the session cookie and refuses a mismatch with a `409`; nothing is
+   * trusted because the browser declared it.
+   */
+  workspaceId: string;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -876,65 +902,90 @@ export function InboxView({
   }, []);
 
   /**
-   * #210 — the capture whose write did not land.
+   * #175 — the offline capture queue, and the only reason a capture is reachable
+   * from this component at all.
    *
-   * Deliberately not `refreshing`, which all ~20 `run()` call sites raise:
-   * renaming a row would otherwise make the capture notice's Retry read as busy
-   * and announce a save that has nothing to do with it — the same over-broad-flag
-   * mistake #169 fixed for the 📅 controls. And deliberately not a
-   * component-wide `capturing` boolean either; the in-flight marker lives on the
-   * record it guards (`CaptureFailure.retrying`), for the reason documented
-   * there.
-   *
-   * ONE failure slot rather than a queue, and the boundary that buys is sharper
-   * than a first draft of this note claimed (Duo review round 7, then the specs
-   * that were written to defend it and falsified it instead):
-   *
-   * **A second outstanding failure displaces the first, and the first's words are
-   * then in neither place.** The draft said the notice and the field between them
-   * hold two, and they do not — submitting anything empties the field, so the
-   * second failure takes the notice AND repopulates the field with its own words.
-   * There is no arrangement in which both survive.
-   *
-   * Not closed here, and not closed by accident. Every fix available inside this
-   * issue trades the loss for a different silence: keeping the older record
-   * leaves the newer failure unannounced, and rescuing the older words into the
-   * field puts text the user did not just type where they are looking. A
-   * persisted queue needs neither, and #210 scopes "a real offline session" to
-   * #175 — consecutive failures being exactly that. The boundary is recorded on
-   * both issues, and `capture-failure-pile-up` in the spec file pins it as
-   * executable behaviour rather than a comment nothing checks, which is how the
-   * wrong version of this paragraph survived in the first place.
-   *
-   * What is guaranteed at every point, however many fail: the notice names words
-   * that did not save, those words are in the field, and a Retry is offered.
-   * Never an emptied field and a false confirmation, which is the bug itself.
+   * Everything the old one-slot notice held is now in `localStorage`, so the state
+   * that used to live here (`captureFailure`, `captureErrorId`, `retryCtaRef`,
+   * `returnFocusToInput` and its effect) is gone with it. What remains is a
+   * subscription: the hook owns storage, the mirror, the four flush triggers and
+   * the `POST`, and hands back only what can be rendered.
    */
-  const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(
-    null,
-  );
-  // #210 — ties the failure message to the notice's control, so the reason is
-  // announced with the remedy however the announcement races. See captureNotice.
-  const captureErrorId = useId();
-  const captureSavingId = useId();
-  const retryCtaRef = useRef<HTMLButtonElement | null>(null);
+  const captureQueue = useCaptureQueue(workspaceId);
+
   /**
-   * #210, Duo review round 3 — hand focus back when the notice unmounts.
+   * Where focus goes when the strip is about to unmount (WCAG 2.4.3).
    *
-   * Set only when the notice's own Retry is the focused element at the moment a
-   * retry succeeds, because that is the only case where the unmount takes focus
-   * away from the user (WCAG 2.4.3). A ref rather than state: it is a one-shot
-   * instruction to the effect below, not something anything renders, and putting
-   * it in state would schedule a render just to say "no focus move needed".
+   * Discarding the last queued entry removes the strip and, with it, whichever
+   * control the user was standing on — the browser then drops focus to `<body>`
+   * and a screen reader starts the next key press from the top of the document.
+   * The capture field is the strip's nearest surviving neighbour and the place
+   * someone finishing with the queue wants to be anyway.
+   *
+   * `useCallback` so the identity is stable: the strip keys its hand-off effect on
+   * this, and an inline arrow would re-run that effect on every render of this
+   * 4,000-line component.
    */
-  const returnFocusToInput = useRef(false);
-  useEffect(() => {
-    if (captureFailure || !returnFocusToInput.current) return;
-    returnFocusToInput.current = false;
-    // In an effect rather than beside the state update: the button is still
-    // mounted then, so focusing the input would be undone by the unmount.
+  const returnFocusToCapture = useCallback(() => {
     inputRef.current?.focus();
-  }, [captureFailure]);
+  }, []);
+
+  /**
+   * The polite region's id, shared with the strip's Retry through
+   * `aria-describedby`.
+   *
+   * ⚠️ **Both regions are rendered in THIS file and not inside
+   * `<CaptureQueueStrip>`, and that is mechanical rather than stylistic.**
+   * `write-notice-hygiene`'s rules D and E reason about one file's JSX tree, so a
+   * region rendered by a child component is invisible to both — rule D is the only
+   * thing in the repo that can see a polite region nested inside an assertive one
+   * (#218's defect) and rule E the only thing that can see a missing wait
+   * announcement, which has shipped green here four times.
+   */
+  const captureSavingId = useId();
+
+  /**
+   * A refusal that has been ANNOUNCED, so it is not announced twice.
+   *
+   * The hook hands over `{ reason, token }` and bumps the token on every
+   * occurrence, because writing the same sentence into a live region twice leaves
+   * the second silent — the user presses Enter against a full queue, is refused,
+   * and hears nothing. Rendering the token as the element's `key` is what makes
+   * the region's content genuinely change: React replaces the node rather than
+   * leaving identical text in place.
+   */
+  const captureRefusal = captureQueue.announcement;
+  /**
+   * The sentence, resolved once so the region's box and its text cannot disagree.
+   *
+   * `captureRefusalKey` answers `null` for the two union members that never reach
+   * a user, and gating the styling on the SENTENCE rather than on the announcement
+   * is what stops one of those painting an empty red box.
+   */
+  const captureRefusalCopy =
+    captureRefusal === null ? null : captureRefusalKey(captureRefusal.reason);
+
+  /**
+   * A flush that saved something has made the list stale, whichever trigger ran
+   * it — and three of the four are the hook's own, so a return value cannot cover
+   * them. Without this a capture that flushes on mount leaves the queue, the strip
+   * stops mentioning it, and nothing appears in the inbox until the next unrelated
+   * interaction: the words read as destroyed at the moment they became safe.
+   *
+   * Keyed on the ticket rather than on the queue's length, because a Discard
+   * shortens the queue too and has nothing for the server to send back. The `0`
+   * guard is the first mount, where a refresh would refetch the list the server
+   * just rendered.
+   */
+  useEffect(() => {
+    if (captureQueue.savedTicket === 0) return;
+    try {
+      router.refresh();
+    } catch {
+      // A stale list, and the next interaction re-fetches. Same swallow, and the
+      // same reasoning, as every other `router.refresh()` in this file.
+    }
+  }, [captureQueue.savedTicket, router]);
 
   // Per-row inline delete confirm — only one row confirms at a time.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -1950,213 +2001,81 @@ export function InboxView({
   const captureHintId = useId();
 
   /**
-   * #210 — the one write in the app whose failure is irreversible, so the only
-   * one that cannot go through the generic `run()`.
+   * #175 — the capture path: **storage first, then the network.**
    *
    * Every other inbox action operates on an `id` that exists because the server
-   * already has the row: a rejection there leaves the data intact and the press
-   * repeatable. A capture's words exist nowhere but this component, and the old
-   * code emptied the field and rendered "captured ✓" before the call, outside
-   * any `try`. A rejection destroyed the text and lied about it in the same
-   * breath — with no `error.tsx` anywhere in `src/` to catch the throw either.
+   * already has the row, so a rejection leaves the data intact and the press
+   * repeatable. A capture's words used to exist nowhere but this component, which
+   * is what made it the one irreversible loss in the app — #210 answered that by
+   * holding them in a notice, and this answers it by making them durable before
+   * anything can fail.
    *
-   * `fromRetry` distinguishes the notice's button from a fresh Enter. It is not
-   * cosmetic: only a retry may clear the input on success, because only a retry
-   * knows the text sitting there is the copy IT restored rather than the user's
-   * next thought (see the success branch).
+   * `enqueueCapture` is **synchronous**: the words are in `localStorage` before
+   * this function returns, and therefore before the field is emptied and before a
+   * `fetch` is attempted. That ordering is the entire promise. Chrome discards
+   * background tabs under memory pressure and a discarded tab fires **no unload
+   * event at all**, so there is no later moment at which the write could be made —
+   * which is also why nothing here hooks `beforeunload` or `pagehide`.
    *
-   * `supersedes` carries the words of a notice this capture replaces — see
-   * `submit()`, which is where the user's intent is legible.
+   * ⚠️ **Not wrapped in `startTransition`, and that is deliberate rather than an
+   * omission.** React 19 holds an async transition's state updates until the action
+   * settles, so the `flushing` flag the polite region announces from would first
+   * paint at the moment it stopped being true — the trap `runSchedule` (#169)
+   * records, and here it would silence `write-notice-hygiene` rule E's channel on
+   * the submit path. This function is consequently no longer on
+   * `inbox-write-hygiene`'s ALLOWED list: it starts no transition, and the queue
+   * plus the strip are what report its failures.
+   *
+   * Returns whether the words were taken, so `submit()` knows whether it may empty
+   * the field. A refusal leaves them exactly where the user can see them, which is
+   * what every refusal sentence promises.
    */
-  const capture = (
-    value: string,
-    { fromRetry = false, supersedes = null as string | null } = {},
-  ) => {
-    // Urgent, and deliberately OUTSIDE the transition — see runSchedule (#169):
-    // React 19 holds an async transition's own state updates until the action
-    // settles, so a guard raised inside one first paints at the moment it stops
-    // being true, which is a guard that guards nothing. Discrete events like a
-    // click flush at synchronous priority, so this has landed before the next
-    // press can read it.
-    if (fromRetry) markRetrying(value, true);
-    return startTransition(async () => {
-      // Duo review round 8 — `router.refresh()` used to live inside the `try`,
-      // so a refresh that threw ran the catch and told the user a capture had
-      // failed when the row was already written. That is #210's own lie,
-      // produced by the code fixing #210. The `try` governs the WRITE; anything
-      // after it is a consequence of success and cannot un-write the row.
-      let landed = false;
-      try {
-        await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
-        landed = true;
-        // A later capture succeeding says nothing about an earlier one that
-        // failed, so the notice is cleared by only two things: these words
-        // landing at last, or the user having replaced them in the field and
-        // captured that instead. Anything else and the notice may be the only
-        // copy of words that never reached the server.
-        //
-        // Both tests read `prev`, not the closure: by now the notice may hold a
-        // different failure entirely, and clearing THAT would be the data loss
-        // this whole function exists to prevent.
-        setCaptureFailure((prev) => {
-          if (!prev) return null;
-          if (prev.value === value) return null;
-          // Duo review round 6 — the invariant, enforced where the record is
-          // written rather than only where the decision is taken: a record whose
-          // own attempt is UNSETTLED is never cleared by anything but that
-          // attempt. `supersedes` was decided when this capture was submitted,
-          // and a Retry pressed since then has made the outcome unknown again,
-          // so acting on the stale decision would clear a notice out from under
-          // a live request.
-          if (prev.retrying) return prev;
-          if (supersedes !== null && prev.value === supersedes) return null;
-          return prev;
-        });
-        // Only a retry clears the field, and only when it still holds exactly
-        // what we just saved. A fresh Enter has already emptied it
-        // synchronously, so anything in there now is the user's NEXT thought —
-        // and clearing that would be this bug with the roles reversed.
-        if (fromRetry) {
-          setText((prev) => (prev.trim() === value ? "" : prev));
-          // The notice is about to unmount. If the user is standing on its Retry
-          // — which they are, they just pressed it — the unmount would drop them
-          // to <body> (WCAG 2.4.3), so the effect above puts them back in the
-          // capture field. Read here, while the button still exists.
-          returnFocusToInput.current =
-            retryCtaRef.current !== null &&
-            retryCtaRef.current === document.activeElement;
-        }
-        setJustCaptured(true);
-        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
-        captureTimeoutRef.current = setTimeout(
-          () => setJustCaptured(false),
-          CAPTURE_CONFIRM_MS,
-        );
-      } catch (error) {
-        // An earlier capture's "captured ✓" can still be inside its 1.5s
-        // window. Leaving it up would put two live regions on screen saying
-        // opposite things about the same keystroke — and a screen reader would
-        // read both.
-        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
-        setJustCaptured(false);
-        // Restore the words, but ONLY into a field the user has not since typed
-        // into. A ten-second hang is long enough to type the next thought, and
-        // overwriting that would be the same data loss wearing the other hat.
-        // When we can't restore, the notice quotes the words instead, so they
-        // are never only in a variable.
-        //
-        // Read off the DOM node rather than through a functional `setText`
-        // updater, because the answer is needed HERE — `wordsInField` decides
-        // whether a later capture may clear this notice. An updater that also
-        // reported what it decided would have to mutate on the way past, which
-        // is not a pure updater and would run twice under StrictMode. The input
-        // is controlled, so its value is `text` as currently rendered, which is
-        // exactly what the updater would have been handed.
-        const inField = (inputRef.current?.value ?? "").trim();
-        if (inField === "") setText(value);
-        // Duo review round 9 — yes, this writes unconditionally while the
-        // success path above declines to clear a record whose attempt is
-        // unsettled, and the asymmetry is deliberate rather than an oversight.
-        // The two are answering different questions: a success may decline the
-        // slot because its own words are safe on the server, whereas a failure
-        // that declines it reports nothing at all. With one slot and two
-        // outstanding failures, whichever record wins leaves the other
-        // unannounced — so the tie is broken toward the news the user has not
-        // heard yet. The words of the displaced one are still in the field; the
-        // cost is a missing notice, not missing text, and
-        // `capture-failure-pile-up` pins both directions. Closing it properly is
-        // #175's queue.
-        setCaptureFailure({
-          value,
-          stale: isStaleActionError(error),
-          timedOut: error instanceof ActionTimeoutError,
-          // A fresh record, so the retry flag starts down: this attempt is over,
-          // whatever it was.
-          retrying: false,
-          // Either we just put them back, or a retry that failed again found
-          // them still there — both mean the user is looking at them.
-          wordsInField: inField === "" || inField === value,
-        });
-      } finally {
-        // Must run on every exit including a throw: a retry flag left up is a
-        // Retry button that reads permanently busy. Scoped to `value`, so a
-        // capture the user typed during the retry cannot clear it — the race Duo
-        // review round 2 found.
-        if (fromRetry) markRetrying(value, false);
-      }
-      // Outside the try/catch on purpose (round 8): the row is written, so a
-      // refresh that throws is a stale list, not a lost capture, and must never
-      // be reported as one. Its own `catch` for the reason the row-write path
-      // gives at length (!306, substitute review): outside the try made that
-      // claim true by letting the throw leave the transition unhandled, which is
-      // #210's own defect wearing the fix. Swallowed where it can be read.
-      try {
-        if (landed) router.refresh();
-      } catch {
-        // Intentionally empty — a stale list, and the next interaction re-fetches.
-      }
-    });
+  const capture = (value: string): boolean => {
+    const stored = captureQueue.enqueueCapture(value);
+    if (!stored.ok) {
+      // The hook has already raised the announcement, and the assertive region
+      // below says which of the five refusals it was. Nothing else to do — and
+      // above all the field is not cleared.
+      return false;
+    }
+    void (async () => {
+      const { saved } = await captureQueue.flush();
+      // "captured ✓" is about THESE words, not about the pass. Keyed on "did
+      // anything save" it would be the unverifiable confirmation #210 exists to
+      // remove, pointing the other way: an older entry draining would confirm a
+      // capture that is still waiting.
+      if (!saved.includes(stored.clientKey)) return;
+      setJustCaptured(true);
+      if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+      captureTimeoutRef.current = setTimeout(
+        () => setJustCaptured(false),
+        CAPTURE_CONFIRM_MS,
+      );
+    })();
+    // The list is refreshed by the `savedTicket` effect rather than from here, so
+    // the hook's own three triggers get a refresh too.
+    return true;
   };
-
-  /**
-   * Raise or drop `retrying` on the failure record for `value`, and only for
-   * that record.
-   *
-   * The functional update is what makes it per-attempt: it reads the CURRENT
-   * failure rather than the one captured in this closure, so an unrelated
-   * capture that displaced the notice in the meantime is left alone instead of
-   * being marked busy on another attempt's behalf.
-   */
-  const markRetrying = (value: string, active: boolean) =>
-    setCaptureFailure((prev) => {
-      if (!prev || prev.value !== value || prev.retrying === active)
-        return prev;
-      return { ...prev, retrying: active };
-    });
 
   const submit = () => {
     const value = text.trim();
     if (!value) return;
-    // Duo review round 5 — the one exception to "never gate a capture". These
-    // exact words are already being resubmitted by the notice's Retry, and they
-    // are in the field only because the notice put them back, so this Enter is
-    // the same request by a second route rather than the independent insert the
-    // ungating exists to protect. Not a silent discard either (#169's other
-    // harm): the notice is on screen announcing a save for these very words, and
-    // its Retry reads busy.
-    if (captureFailure?.retrying && captureFailure.value === value) return;
-    // Duo review round 3: a notice whose words are sitting in THIS field, and
-    // which the user has now submitted something else from, has been seen and
-    // answered — an edited typo, or a different thought typed over them. Leaving
-    // it up puts a stale alert beside a fresh "captured ✓" and invites a Retry
-    // that would post a near-duplicate. The words are carried rather than a
-    // boolean, so a failure that lands between this press and its response
-    // cannot be cleared by it.
+    // ⚠️ The field is emptied only once the words are DURABLE, and only then.
+    // Still synchronous, so the instant-capture feel and the double-submit guard
+    // both survive: a second Enter arriving before the POST resolves finds an
+    // empty field and returns above.
     //
-    // Duo review round 5 — but NOT while its retry is in flight. Superseding
-    // means "the user has seen how this attempt ended and replaced its words",
-    // and mid-flight they have seen no such thing: clearing the notice there
-    // would clear it out from under a request whose outcome nobody knows, and
-    // the eventual failure would look like a notice resurrecting itself from
-    // nothing. Leaving it up is the fix; suppressing the failure would be the
-    // silence this whole issue exists to remove.
-    const supersedes =
-      captureFailure?.wordsInField && !captureFailure.retrying
-        ? captureFailure.value
-        : null;
-    // Cleared synchronously and urgently, which is both the instant-capture
-    // feel and the double-submit guard: a second Enter arriving before the
-    // write resolves finds an empty field and returns below. Deliberately NOT
-    // gated on an in-flight capture — firing three thoughts in a row is the
-    // whole point of this control, and they are independent inserts.
+    // Deliberately NOT gated on a capture already in flight — firing three
+    // thoughts in a row is the whole point of this control, and each gets its own
+    // `clientKey`, so they are three independent rows rather than a race.
+    //
+    // The one-slot machinery this replaced is gone, and neither half is missed:
+    // no `supersedes`, because nothing can be superseded when every unsaved
+    // capture is listed; and no "ignore an Enter that repeats what a Retry is
+    // resubmitting", because a replay of the same words is answered 200 by
+    // `clientKey` rather than creating a second row.
+    if (!capture(value)) return;
     setText("");
-    capture(value, { supersedes });
-  };
-
-  /** #210 — the notice's Retry: re-posts the exact words that did not land. */
-  const retryCapture = () => {
-    if (!captureFailure || captureFailure.retrying) return;
-    capture(captureFailure.value, { fromRetry: true });
   };
 
   // Inline delete confirm: first click reveals Delete/Cancel; the action only
@@ -2446,153 +2365,97 @@ export function InboxView({
             {t("capture.confirm", voice)}
           </p>
         )}
-        {/* ── #210: the capture that did not land ────────────────────────────
-            a11y, and three decisions that are not the focus timer's:
+        {/* ── #175: everything not yet on the server ────────────────────────
+            Docked directly under the capture bar, in the slot #210's failure
+            notice occupied — and it replaces that notice rather than joining it.
+            Zero height when nothing is waiting.
 
-            `role="alert"` (assertive), not the confirmation's polite
-            `role="status"`. The two describe opposite outcomes, so the failure
-            path clears a still-showing "captured ✓" before setting this — they
-            cannot contradict each other about the same keystroke. Where they DO
-            legitimately coexist (a later capture succeeding while an earlier
-            failure stands unresolved) they are reporting different captures, and
-            assertive-interrupts-polite is exactly the priority wanted: the words
-            still at risk outrank the ones already safe.
+            Nothing queued appears in the inbox list itself: a dimmed row still
+            reads as "in my inbox" to someone scanning, which is the shape of the
+            lie #210 was filed for.
 
-            Focus is NOT moved here. `focus-timer.tsx` hands focus to its
-            notice's primary action because the pressed control unmounts, which
-            would otherwise drop the user to <body> (WCAG 2.4.3). Nothing
-            unmounts here — the capture input is still mounted, still focused,
-            and still where the user is typing — so taking focus would interrupt
-            them mid-sentence and fight the restored text (WCAG 3.2.2). The
-            alert announces without stealing.
+            Accepted cost of docking rather than fixing to the viewport: if a
+            flush happens while the user is scrolled deep in the list, the strip
+            is off-screen. That is the trade for spending no fixed height on a
+            phone viewport #253 has just decluttered, and it is recorded so it is
+            not rediscovered as a defect. */}
+        <CaptureQueueStrip
+          api={captureQueue}
+          voice={voice}
+          savingRegionId={captureSavingId}
+          now={now}
+          onReturnFocus={returnFocusToCapture}
+        />
 
-            The words are quoted, not merely referred to. In the common case they
-            are also back in the input, but when the user has typed on the notice
-            is the only copy, and a notice that says "your words are safe"
-            without showing them is the same unverifiable promise this issue is
-            about.
+        {/* ── The two live regions, SIBLINGS of each other and of the strip ──
+            ⚠️ Two elements with roles fixed for their whole lifetime, never one
+            element whose `role` swaps. Politeness is registered when an element
+            is recognised as a region, so mutating the attribute afterwards leaves
+            both "does it take effect" and "does the new text re-announce" to the
+            screen reader — and the failure mode is SILENCE, on exactly the two
+            states that most need to be heard.
 
-            Colour: the failure is carried by the text and the icon, never by the
-            red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40`
-            / `bg-destructive/5` is the token pairing globals.css documents as AA
-            in both themes (5.2:1+) and the one focus-timer's notice already
-            uses — not a raw palette shade, which is what dropped the emerald
-            confirmation below 4.5:1 on the warm-tinted --background in #40. */}
-        {captureFailure && (
-          <>
-            <div
-              role="alert"
-              className="border-destructive/40 bg-destructive/5 mt-2 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
-            >
-              <p
-                id={captureErrorId}
-                className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
-              >
-                <TriangleAlert
-                  aria-hidden="true"
-                  className="mt-0.5 h-4 w-4 shrink-0"
-                />
-                <span className="break-words">
-                  {t(captureMessageKey(captureFailure), voice)}{" "}
-                  <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
-                </span>
-              </p>
-              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-                {captureFailure.stale ? (
-                  // Retrying re-posts the same action id the running deployment
-                  // has already forgotten, so a reload is the ONLY thing on offer.
-                  <button
-                    type="button"
-                    aria-describedby={captureErrorId}
-                    onClick={() => window.location.reload()}
-                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
-                  >
-                    <RefreshCw
-                      aria-hidden="true"
-                      className="h-4 w-4 shrink-0"
-                    />
-                    {t("capture.error.reload", voice)}
-                  </button>
-                ) : (
-                  // `aria-disabled`, not `disabled`: a disabled element cannot
-                  // hold focus, so the browser would drop it to <body> the moment
-                  // the retry starts. The press is guarded in the handler instead,
-                  // so a double-tap still cannot fire two writes.
-                  <button
-                    ref={retryCtaRef}
-                    type="button"
-                    // While a retry runs, the reason AND the wait are both
-                    // reachable from the control (Duo review round 8). This is
-                    // the channel for focus LANDING here with a write already in
-                    // flight; the press itself is announced by the live region
-                    // below, because a description is not re-read under held
-                    // focus (Duo round 16 on `!303`).
-                    aria-describedby={
-                      captureFailure.retrying
-                        ? `${captureErrorId} ${captureSavingId}`
-                        : captureErrorId
-                    }
-                    aria-disabled={captureFailure.retrying}
-                    onClick={() => {
-                      if (!captureFailure.retrying) retryCapture();
-                    }}
-                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
-                  >
-                    <RotateCcw
-                      aria-hidden="true"
-                      className="h-4 w-4 shrink-0"
-                    />
-                    {t("capture.error.retry", voice)}
-                  </button>
-                )}
-                {/* Duo review round 8 — deliberately NOT `role="status"`. That
-                    would be a polite live region nested inside this assertive
-                    one, which is undefined enough in practice that "will it
-                    announce" has no answer. This is the SIGHTED copy only, and
-                    `aria-hidden` keeps it that way: the announcement is the
-                    sibling region below, and one sentence in two places is how
-                    it gets said twice. Hiding it also stops the insertion from
-                    mutating this `role="alert"` — an alert is assertive and
-                    atomic, so a visible child appearing inside it mid-retry
-                    re-reads the whole notice over the polite announcement.
-                    Nothing changes on screen. */}
-                {captureFailure.retrying && (
-                  <p
-                    data-testid="capture-saving-visible"
-                    aria-hidden="true"
-                    className="text-muted-foreground text-xs"
-                  >
-                    {t("capture.error.saving", voice)}
-                  </p>
-                )}
-              </div>
-            </div>
-            {/* Duo round 16 on `!303` — where the wait is actually ANNOUNCED,
-                and a SIBLING of the alert rather than a descendant, because a
-                polite region nested inside an assertive one inherits the
-                container's politeness across its whole subtree.
-                `aria-describedby` cannot do this alone: a description is read
-                when focus LANDS on a control, and Retry is pressed on a control
-                that already holds focus and keeps it by design, so the value
-                gaining this id mid-flight is not something a screen reader goes
-                back to re-read. A live region is the one channel defined for
-                content that changes while the user is stationary.
-                Mounted with the notice and EMPTY until there is something to
-                say — the move announcer at the foot of this file documents why:
-                a region that arrives together with its first message is silent.
-                Kept identical to the timer's notice in `focus-timer.tsx`, which
-                these two have already drifted apart on once. */}
-            <p
-              id={captureSavingId}
-              data-testid="capture-saving-announcer"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              className="sr-only"
-            >
-              {captureFailure.retrying && t("capture.error.saving", voice)}
-            </p>
-          </>
+            Both mount unconditionally and EMPTY from first paint, and are not
+            gated on the strip being visible: a region that arrives together with
+            its first message is silent. Same shape as `focus-timer.tsx` and the
+            row-write notice below, which `write-notice-hygiene` rules D and E are
+            the only things in the repo able to check — and they can only see
+            regions declared in this file, which is why these are not inside
+            `<CaptureQueueStrip>`.
+
+            Neither is nested in the other, and neither is inside the strip's
+            markup. Rule D fails closed on anything it cannot resolve, so this
+            stays plain literal JSX. */}
+        <p
+          id={captureSavingId}
+          data-testid="capture-queue-saving-announcer"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {captureQueue.flushing && t("captureQueue.saving", voice)}
+        </p>
+        {/* The refusal channel. ASSERTIVE, because the user has just pressed
+            Enter and the words did NOT go anywhere — they are still in the field
+            and the sentence says what to do about it. Visible as well as
+            announced: every refusal sentence tells the user their words are still
+            in the box and, in three of the five cases, to copy them somewhere
+            safe, which is not advice to give only to a screen reader.
+
+            ⚠️ **Rendered only while there is a refusal, and that is NOT the
+            "region that arrives with its first message" defect — the asymmetry
+            between the two roles is the point.** `role="alert"` is announced when
+            the element is INSERTED, so it does not need to pre-exist; a polite
+            `role="status"` is announced when its CONTENT CHANGES, so it does. That
+            is why the sibling above mounts unconditionally and this does not, and
+            it is the same split #210's notice already shipped: its alert was
+            conditional and its polite announcer was mounted empty beside it.
+
+            `key` on the element, so a repeat is a fresh INSERTION. Writing the
+            same string into a live region twice leaves the second announcement
+            silent, so a user refused twice for the same reason would hear it once
+            — they press Enter against a full queue, are refused, and hear nothing.
+            The hook bumps a token per occurrence and this turns that into a
+            remount, which is exactly what `alert` announces on.
+
+            Colour is carried by the icon and the words as well as the red (WCAG
+            1.4.1) — `text-destructive` / `border-destructive/40` /
+            `bg-destructive/5` is the pairing globals.css documents as AA in both
+            themes, not a raw palette shade. */}
+        {captureRefusalCopy !== null && (
+          <div
+            key={captureRefusal?.token}
+            data-testid="capture-queue-refusal"
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 text-destructive mt-2 flex items-start gap-1.5 rounded-md border p-3 text-sm font-medium"
+          >
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span className="break-words">{t(captureRefusalCopy, voice)}</span>
+          </div>
         )}
       </div>
 

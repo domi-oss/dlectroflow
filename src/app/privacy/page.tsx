@@ -949,6 +949,20 @@ export default function PrivacyPage() {
         <p>
           So your data at rest — live and backed up — is in the United Kingdom.
         </p>
+        {/* #175 — the companion sentence. Without it this section reads as "all
+            of it is on servers in the UK", and from the day the offline capture
+            queue shipped that is incomplete rather than merely terse: a capture
+            that cannot reach the server is held in the browser, which is a copy
+            of user-typed text at rest somewhere this section does not mention. */}
+        <p>
+          <strong>One exception, and it is on your own device.</strong> If a
+          brain dump cannot reach the server — patchy coverage, a dropped
+          connection — it is held in this browser until it saves, so that
+          closing the tab or losing signal does not lose the words. Nothing
+          about that changes where it ends up: it is sent to the same servers as
+          any other capture, and it is listed under <strong>Cookies</strong>{" "}
+          below with how long it is kept.
+        </p>
       </LegalSection>
 
       <LegalSection {...s("retention")}>
@@ -1136,6 +1150,58 @@ export default function PrivacyPage() {
           &mdash; is stored in your browser&rsquo;s own local storage under{" "}
           <code>df-theme</code>. It never leaves your device and is never sent
           to the server.
+        </p>
+        {/* #175 — user-typed text in browser storage is a NEW CATEGORY for this
+            app, and until now this section promised the opposite by omission: it
+            named browser storage once and pinned it to a theme preference that
+            "never leaves your device".
+
+            ⚠️ THREE retention triggers, not two. For a capture whose account can
+            no longer be reached — a guest sandbox that has since expired, an
+            account signed out of on a shared browser — neither "until it saves"
+            nor "until you clear it" can ever fire, so the two-trigger version is
+            false for exactly the entries that would sit there longest. The third
+            trigger is `CAPTURE_ORPHAN_WINDOW_HOURS` in `src/lib/capture-queue.ts`
+            stated in prose, and `capture-orphan-window.test.ts` is the gate that
+            keeps it in step with the server's guest TTL.
+
+            ⚠️ The IndexedDB mirror is named too, and it is not an implementation
+            detail of the key: it is a SECOND at-rest copy of the same text, in a
+            different store, written on a different schedule and deleted on a
+            different trigger. A notice listing one and not the other is
+            inaccurate on the day it ships. */}
+        <p>
+          Two more things live in this browser, and unlike the theme these can
+          hold <strong>text you typed</strong> — so they are the one place your
+          own words are stored outside the UK servers described above:
+        </p>
+        <ul className="ml-5 list-disc space-y-2">
+          <li>
+            <code>df-capture-queue</code> — brain dumps that have not reached
+            the server yet, held so a dropped connection or a closed tab cannot
+            lose them. Each one goes as soon as a connection allows.{" "}
+            <em>
+              Kept until it saves, until you discard it from the &ldquo;waiting
+              to save&rdquo; strip under the capture box, or — if it can no
+              longer be saved to any account this browser can reach — until
+              about a day after it was captured.
+            </em>
+          </li>
+          <li>
+            A copy of the same queue in this browser&rsquo;s IndexedDB, under
+            the same name. It exists so the words can still be saved while the
+            app is closed, which the browser cannot do from the list above.{" "}
+            <em>
+              Kept until the capture saves, or until the app next opens and
+              finds it is no longer waiting.
+            </em>
+          </li>
+        </ul>
+        <p>
+          Both are yours to clear: discarding from the strip removes a capture
+          from both, and clearing this site&rsquo;s data in your browser
+          settings removes all of it. Neither is used for anything but saving
+          your captures — no analytics, no identifiers, nothing else.
         </p>
       </LegalSection>
 
