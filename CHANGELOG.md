@@ -1357,6 +1357,19 @@ operators upgrading a self-hosted instance don't get surprised.
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
 
+- **The weekly ops digest can no longer report a security posture it did not read
+  (#203).** Reading the Vulnerability Report needs a permission, and a caller that
+  lacks it is not refused — the query resolves to an *empty* result rather than an
+  error, so "nothing was found" and "nobody was allowed to look" arrived as the
+  same bytes and the digest could publish **0 active findings**
+  under a ✅. A count of zero is now only printed once the same query has been
+  shown returning something; when it cannot be, the digest says the count could
+  not be read and marks the section ⚠️ undetermined instead. Two other counts in
+  the same note had a matching fault — a denied request answers with a JSON object,
+  and asking it for its length reported the object's **key count**, so a rejected
+  read rendered as "1 failed pipeline" — and now degrade to `?`. No effect on a
+  self-hosted instance; this is this project's own maintenance reporting.
+
 ## [0.5.0] - 2026-08-01
 
 **More than one person can use it now.** dlectroflow stops being a single-owner
