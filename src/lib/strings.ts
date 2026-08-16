@@ -1032,7 +1032,7 @@ export const STRINGS = {
   },
   // #212 (!304 review) — the same fact from the other side: why "Back to inbox"
   // and the notice's Retry are not taking the press while the plan itself is in
-  // flight.
+  // flight. #238 widened it to the whole row, below.
   //
   // Its own key rather than a re-use of the tail above, because the two are not
   // the same sentence and only look alike: that one is a TAIL with a count
@@ -1046,15 +1046,35 @@ export const STRINGS = {
   // plan shows the model the row and then replaces the plan with an answer that
   // hands it straight back, moments after the eject took it away.
   //
+  // #238 — and STILL one string, now that the same event also holds the five
+  // controls inside a row (the emoji, the step text, the minutes, the ✕ and the
+  // drag grip). They are held by the same fact and lift on it together, so this
+  // follows `breakdown.ejectHeld`'s rule rather than growing a second sentence:
+  // one paragraph for every control one event holds, because five copies would
+  // be five things to re-read rather than five explanations.
+  //
+  // Both consequences are named, and the editing one goes FIRST because it is
+  // the one the user is most likely to be mid-way through discovering — they
+  // reached for a field, not for "Back to inbox". Neither is a claim the app
+  // cannot support: the answer replaces the list wholesale, so an edit made in
+  // the gap really would be overwritten, and the plan write really would put one
+  // step in two places.
+  //
   // Identical across voices, and never the word "disabled", for the reasons the
   // `breakdown.eject.*` family and `breakdown.ejectHeld` give: the app is
   // declining an action to protect the user's data, the control is not broken,
   // and the wait is one round trip.
+  // "waits for that to finish" is load-bearing and stays: two `!304` specs
+  // assert on it, and what they are pinning is the CONCEPT — that the sentence
+  // tells the user this is a wait rather than a broken control. Widening the
+  // subject from "sending a step back to your inbox" to "the step list" keeps
+  // that true of every control the event now holds, so the assertions go on
+  // testing what they were written to test and did not need editing.
   "breakdown.planHeld": {
     plain:
-      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+      "Saving the plan, or asking for a new one — the step list waits for that to finish, so a new plan cannot land on top of an edit and the same step cannot end up in both your plan and your inbox.",
     playful:
-      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+      "Saving the plan, or asking for a new one — the step list waits for that to finish, so a new plan cannot land on top of an edit and the same step cannot end up in both your plan and your inbox.",
   },
 
   // ── #212: a step that could not be sent back to the inbox ──────────────────
@@ -1126,48 +1146,6 @@ export const STRINGS = {
   // notice's in-flight line. They describe the same outstanding write from two
   // places, so splitting them could only let the two drift apart.
   "breakdown.eject.sending": { plain: "Sending…", playful: "Sending…" },
-
-  // ── #238: a re-plan that landed on top of an edit in progress ──────────────
-  // A re-plan shows the model a snapshot of the list and then replaces the list
-  // wholesale with the answer. The five controls inside a row are not held while
-  // that stream is open — deliberately, because the row is the user's own copy
-  // of their words and a field that goes dead mid-sentence loses work too — so
-  // an edit made in the window between the press and the answer used to be
-  // overwritten with nothing said. These two are the "said".
-  //
-  // Identical across voices, for the reason the `breakdown.eject.*` family
-  // gives: this is the app reporting that it did something to the user's work,
-  // and a joke about that reads as the app being cute about losing it.
-  //
-  // TWO strings rather than one with a count, and not because the table has no
-  // interpolation (#86) — because they are two different facts and only one of
-  // them can be true. Something was carried across, or nothing could be. A
-  // single sentence hedged to cover both ("any steps you changed are kept…")
-  // is vacuously true in the second case, which is the case where the user has
-  // actually lost something and most needs a straight answer.
-  "breakdown.replan.editsKept": {
-    plain:
-      "The new plan arrived while you were editing, so it replaced the list. The steps you had changed are kept, at the end — everything else is the new plan.",
-    playful:
-      "The new plan arrived while you were editing, so it replaced the list. The steps you had changed are kept, at the end — everything else is the new plan.",
-  },
-  // The branch where nothing could be carried: a row deleted or reordered
-  // mid-stream. Neither survives a wholesale replacement — there is no row left
-  // to keep, and the answer's rows are a fresh list with no way back to the ones
-  // they replaced — so this says plainly that the change is not in the new plan
-  // rather than implying something was rescued.
-  "breakdown.replan.editsReplaced": {
-    plain:
-      "The new plan arrived while you were editing and replaced the whole list, so the change you had just made is not in it. Nothing was saved either way — have a look before you save.",
-    playful:
-      "The new plan arrived while you were editing and replaced the whole list, so the change you had just made is not in it. Nothing was saved either way — have a look before you save.",
-  },
-  // Its own key rather than a reuse of `breakdown.eject.dismiss`, whose value is
-  // the same word today. The reason is the one the `breakdown.eject.*` family's
-  // own comment gives: the prefix has to name the surface, or re-tuning one
-  // notice's copy silently re-words another's. These two notices report
-  // unrelated events and will not stay in step.
-  "breakdown.replan.dismiss": { plain: "Got it", playful: "Got it" },
 
   // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
   // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅

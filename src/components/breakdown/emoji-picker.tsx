@@ -56,9 +56,25 @@ const EMOJIS = [
 export function EmojiPicker({
   value,
   onSelect,
+  disabled = false,
 }: {
   value: string;
   onSelect: (emoji: string) => void;
+  /**
+   * #238 — hold the picker while the caller's list is being replaced.
+   *
+   * `disabled` on the trigger rather than `aria-disabled`, matching the sibling
+   * row controls the breakdown editor holds on the same event: this one has
+   * nothing of its own to say, and the shared reason is reachable from the ✕
+   * beside it, which stays focusable precisely so it can carry it.
+   *
+   * The grid is withdrawn as well as the trigger, and that is not belt and
+   * braces — the popover can be OPEN when the hold starts (the caller's stream
+   * may begin without a click landing outside this component), and a held
+   * trigger with a live grid floating over it is a control that is both
+   * unavailable and operable at the same time.
+   */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -87,12 +103,13 @@ export function EmojiPicker({
         aria-label="Choose emoji"
         aria-haspopup="listbox"
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="hover:bg-accent flex h-9 w-9 items-center justify-center rounded-md border text-center"
+        className="hover:bg-accent flex h-9 w-9 items-center justify-center rounded-md border text-center disabled:opacity-50"
       >
         {value || "🙂"}
       </button>
-      {open && (
+      {open && !disabled && (
         <div
           role="listbox"
           aria-label="Emoji"

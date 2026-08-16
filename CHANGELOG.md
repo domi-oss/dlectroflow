@@ -779,18 +779,22 @@ operators upgrading a self-hosted instance don't get surprised.
   written over. No warning, nothing saved anywhere, just a plan that no longer said
   what you had just told it.
 
-  Every control **around** the list already waits for the answer. The five **inside
+  Every control **around** the list already waited for the answer. The five **inside
   a row** did not: the emoji, the step text, the minutes, the ✕ and the drag handle.
-  They are not held now either, and that is the point — a row is your only copy of
-  the words in it, and a box that goes dead in the middle of a sentence takes your
-  work away just as surely, with even less to show for it.
+  All five now wait too, so the row matches its own surroundings and there is no
+  longer a gap where an edit can be made and then thrown away.
 
-  So the steps you changed are **kept**, carried across the new plan and put at the
-  end of it. A step you deleted or dragged somewhere else cannot be carried — the
-  new plan is a fresh list, with no way back to the rows it replaced — so instead
-  you are **told**, once, above the list, in a message you can dismiss when you have
-  had a look. Nothing had reached the server in any of this; what was at stake was
-  the sentence you were part-way through.
+  The trade is deliberate and worth stating plainly: **for the few seconds an answer
+  takes, the steps are read-only.** If you reach for a field in that window it will
+  not respond. The ✕ stays selectable so there is always one place in the row that
+  can tell you why — it and the surrounding controls all point at the same sentence,
+  which names both reasons the list is held: a new plan must not land on top of an
+  edit, and a step must not end up in your plan and your inbox at once.
+
+  Everything unlocks the moment the answer arrives, **including when the answer never
+  comes** — a failed or fallen-back plan releases the list rather than leaving it
+  frozen. Nothing here ever reached the server; what was at stake was the sentence
+  you were part-way through.
 
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
