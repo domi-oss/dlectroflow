@@ -348,15 +348,28 @@ describe("logMedsDose — the date the client supplies", () => {
   it("accepts the neighbouring days, which a real timezone can produce", async () => {
     // The non-zero control for the bound above: too tight a window would refuse
     // the reader in Auckland at 09:00 or the one in Honolulu at 22:00.
+    // ⚠️ The offsets come from the SERVER'S UTC DATE, not the local one, because
+    // that is what the bound is defined against. Building them with `setDate` on
+    // a local `Date` was a latent flake: measured at 00:18 local in BST the UTC
+    // date is still yesterday, so "local tomorrow" is TWO days from the server's
+    // and is correctly refused. It had passed every earlier run only because
+    // those ran while the two dates agreed — the same shape as `#271`.
+    const utcNow = new Date();
+    const utcMidnight = Date.UTC(
+      utcNow.getUTCFullYear(),
+      utcNow.getUTCMonth(),
+      utcNow.getUTCDate(),
+    );
     for (const offset of [-1, 1]) {
-      const d = new Date();
-      d.setDate(d.getDate() + offset);
+      const date = new Date(utcMidnight + offset * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
       const result = await logMedsDose({
         medicationDoseId: "itest-269-dose",
         state: MedsDoseState.Taken,
-        date: localYmd(d),
+        date,
       });
-      expect(result).toEqual({ ok: true, state: MedsDoseState.Taken });
+      expect(result, date).toEqual({ ok: true, state: MedsDoseState.Taken });
     }
     expect(await db.medsDoseLog.count()).toBe(2);
   });

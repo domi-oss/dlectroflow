@@ -21,7 +21,9 @@
 --    is written AFTER the ADD COLUMN that gives every one of them 'dots', which
 --    is the value it permits, and the seeded-deploy harness
 --    (src/lib/migration-data-harness.integration.test.ts) runs it against
---    populated "Settings" rows rather than an empty table.
+--    populated "Settings" rows rather than an empty table. It is also the one
+--    statement that takes a LOCK worth thinking about — see below, where that is
+--    now acted on rather than merely noted.
 --
 -- ── Two CHECK constraints, and they need OPPOSITE arguments ────────────────
 --
@@ -184,7 +186,43 @@ ALTER TABLE "Settings"
   ADD COLUMN "medsNavMode" TEXT NOT NULL DEFAULT 'dots';
 
 -- Mirrors MedsNavMode in src/lib/constants.ts. After the ADD COLUMN above, so
--- every existing row already holds 'dots' when this re-validates them.
+-- every existing row already holds 'dots' when this validates them.
+--
+-- ── Two statements, because this is the one that touches a populated table ───
+--
+-- A plain `ADD CONSTRAINT … CHECK` takes an ACCESS EXCLUSIVE lock on "Settings"
+-- for the whole re-validation scan — it blocks reads as well as writes, and
+-- migrations run on CONTAINER START, so it lands while the previous pod may
+-- still be serving. `NOT VALID` records the constraint without scanning (a brief
+-- ACCESS EXCLUSIVE on the catalogue entry only), and `VALIDATE CONSTRAINT` then
+-- does the scan under SHARE UPDATE EXCLUSIVE, which readers and writers pass
+-- through.
+--
+-- ⚠️ This deliberately DIVERGES from 20260804120000_google_auth_user_id_not_null,
+-- which faced the same choice and took the plain form. Its reasoning does not
+-- transfer, and the difference is the bound rather than a change of mind:
+-- "GoogleAuth" is capped at one row per account by a UNIQUE column, so that
+-- table cannot outgrow "User" — two rows in this deployment. "Settings" is one
+-- row per WORKSPACE, and a workspace is created for every guest sandbox as well
+-- as every account. Guests are TTL-purged, so the table does not grow without
+-- limit, but its size is a function of traffic rather than of the account list.
+--
+-- **The honest position is that this row count is not one I can measure.** It is
+-- a production number, this branch has never run there, and "small today" is not
+-- a property a migration should depend on — which is the whole lesson of the
+-- P3009 outage on 2026-08-07. The two-statement form costs one extra line and
+-- removes the dependency on the number entirely, so the number does not have to
+-- be right.
+--
+-- ⚠️ The objection to `NOT VALID` is real and is closed separately: a constraint
+-- that is added and never validated does not bite, and until now
+-- src/lib/enum-constraint-sync.integration.test.ts could not have told —
+-- it reads `pg_get_constraintdef` and never looked at `convalidated`, so an
+-- unvalidated constraint passed every assertion. That test now requires every
+-- registered constraint to be VALIDATED, which is why this form is safe to use
+-- here and safe for whoever copies it next.
 ALTER TABLE "Settings"
   ADD CONSTRAINT "Settings_medsNavMode_check"
-  CHECK ("medsNavMode" IN ('dots', 'next'));
+  CHECK ("medsNavMode" IN ('dots', 'next')) NOT VALID;
+
+ALTER TABLE "Settings" VALIDATE CONSTRAINT "Settings_medsNavMode_check";

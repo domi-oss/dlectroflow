@@ -543,23 +543,78 @@ function calledFunctions(def: string): Set<string> {
   );
 }
 
-type CheckRow = { conname: string; def: string };
+type CheckRow = { conname: string; def: string; convalidated: boolean };
 let checks: Map<string, string>;
+/**
+ * Which constraints Postgres has actually VALIDATED against existing rows.
+ *
+ * ⚠️ **This file could not previously tell.** It read `pg_get_constraintdef`,
+ * which renders a `NOT VALID` constraint identically to a validated one — so a
+ * constraint added `NOT VALID` and never validated passed every assertion here
+ * while **not biting on a single existing row**. That is precisely the failure
+ * class this repo keeps meeting: a guard reading green on something it never
+ * examined.
+ *
+ * It became reachable when `20260816120000_meds_tracker` adopted the
+ * `NOT VALID` → `VALIDATE CONSTRAINT` pair to avoid an ACCESS EXCLUSIVE lock on
+ * a populated `Settings`. That form is only safe if forgetting the second
+ * statement is a red build, so this is the assertion that makes it safe — for
+ * that migration and for whoever copies the pattern next.
+ */
+let validated: Map<string, boolean>;
 
 beforeAll(async () => {
   const schema = connectedSchema();
   const rows = await prisma.$queryRawUnsafe<CheckRow[]>(
-    `SELECT conname, pg_get_constraintdef(oid) AS def
+    `SELECT conname, pg_get_constraintdef(oid) AS def, convalidated
        FROM pg_constraint
       WHERE contype = 'c'
         AND connamespace = (SELECT oid FROM pg_namespace WHERE nspname = $1)`,
     schema,
   );
   checks = new Map(rows.map((r) => [r.conname, r.def]));
+  validated = new Map(rows.map((r) => [r.conname, r.convalidated]));
 });
 
 afterAll(async () => {
   await prisma.$disconnect();
+});
+
+/**
+ * Every managed constraint, across all four registries — the one property that
+ * is not about a value set.
+ */
+describe("every managed CHECK constraint is VALIDATED, not merely declared", () => {
+  const everyManaged = [
+    ...REGISTRY,
+    ...ARRAY_REGISTRY,
+    ...RANGE_REGISTRY,
+    ...LENGTH_REGISTRY,
+  ].map((r) => r.constraint);
+
+  it("finds the managed constraints at all", () => {
+    // The non-zero control. An empty list would satisfy the assertion below
+    // while proving nothing was looked at — the shape this whole file exists to
+    // refuse.
+    expect(everyManaged.length).toBeGreaterThan(25);
+  });
+
+  it.each(everyManaged)("%s is validated", (constraint) => {
+    // ⚠️ A `NOT VALID` constraint applies to FUTURE writes and has never been
+    // checked against the rows already stored, so it can sit on a table full of
+    // values it forbids. `pg_get_constraintdef` renders it identically to a
+    // validated one, so every other assertion in this file passes on it.
+    //
+    // `20260816120000_meds_tracker` deliberately uses `NOT VALID` →
+    // `VALIDATE CONSTRAINT` on `Settings` to avoid an ACCESS EXCLUSIVE lock
+    // during a re-validation scan, which is only a safe pattern because
+    // forgetting the second statement reds this.
+    expect(
+      validated.get(constraint),
+      `${constraint} exists but is NOT VALID — it does not bite on rows that ` +
+        `already existed. Add "ALTER TABLE … VALIDATE CONSTRAINT" to its migration.`,
+    ).toBe(true);
+  });
 });
 
 describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
