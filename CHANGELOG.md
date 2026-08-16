@@ -772,6 +772,30 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Editing a step while a new plan is on its way no longer loses what you typed
+  (#238).** Asking for fewer or more steps, or sending feedback in your own words,
+  gets you a whole new list — and it is worked out from the list as it stood when
+  you asked, so anything you changed in the seconds before it arrived was quietly
+  written over. No warning, nothing saved anywhere, just a plan that no longer said
+  what you had just told it.
+
+  Every control **around** the list already waited for the answer. The five **inside
+  a row** did not: the emoji, the step text, the minutes, the ✕ and the drag handle.
+  All five now wait too, so the row matches its own surroundings and there is no
+  longer a gap where an edit can be made and then thrown away.
+
+  The trade is deliberate and worth stating plainly: **for the few seconds an answer
+  takes, the steps are read-only.** If you reach for a field in that window it will
+  not respond. The ✕ stays selectable so there is always one place in the row that
+  can tell you why — it and the surrounding controls all point at the same sentence,
+  which names both reasons the list is held: a new plan must not land on top of an
+  edit, and a step must not end up in your plan and your inbox at once.
+
+  Everything unlocks the moment the answer arrives, **including when the answer never
+  comes** — a failed or fallen-back plan releases the list rather than leaving it
+  frozen. Nothing here ever reached the server; what was at stake was the sentence
+  you were part-way through.
+
 - **A stalled Google no longer holds a request for five minutes (#211).** Node's
   `fetch` defaults to a 300 s header timeout, and only one of the seven calls this
   app makes to Google set a deadline of its own. An endpoint that accepted the
@@ -1380,6 +1404,19 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
+
+- **The weekly ops digest can no longer report a security posture it did not read
+  (#203).** Reading the Vulnerability Report needs a permission, and a caller that
+  lacks it is not refused — the query resolves to an *empty* result rather than an
+  error, so "nothing was found" and "nobody was allowed to look" arrived as the
+  same bytes and the digest could publish **0 active findings**
+  under a ✅. A count of zero is now only printed once the same query has been
+  shown returning something; when it cannot be, the digest says the count could
+  not be read and marks the section ⚠️ undetermined instead. Two other counts in
+  the same note had a matching fault — a denied request answers with a JSON object,
+  and asking it for its length reported the object's **key count**, so a rejected
+  read rendered as "1 failed pipeline" — and now degrade to `?`. No effect on a
+  self-hosted instance; this is this project's own maintenance reporting.
 
 ## [0.5.0] - 2026-08-01
 

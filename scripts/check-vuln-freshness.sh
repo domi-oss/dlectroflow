@@ -173,6 +173,16 @@ undetermined() {
   exit 2
 }
 
+# The #203 sibling of undetermined(): the count could not be READ, which is a
+# different question from how old it is, and a reader told the wrong one goes
+# and checks the wrong thing. Same exit 2 and the same "not an all-clear" tail,
+# because a caller that treats 2 as 0 has reintroduced the bug either way.
+unread() {
+  printf -- '- ⚠️ **the vulnerability count could not be read, so none is printed** — %s\n' "$1"
+  printf -- '- This is an unknown, not an all-clear. A zero nobody can show came from a real read is the failure #203 is about.\n'
+  exit 2
+}
+
 for tool in curl jq; do
   command -v "$tool" >/dev/null 2>&1 ||
     undetermined "\`$tool\` is not installed on this image"
@@ -396,6 +406,84 @@ while :; do
     undetermined "the vulnerability connection said there was another page but returned no cursor"
 done
 
+# ── 2b. A zero has to be DEMONSTRATED, not merely returned (#203) ─────────────
+# Reading the Vulnerability Report requires `read_security_resource`, and a
+# caller that does not have it is NOT refused.
+#
+# Which role carries that ability is deliberately not asserted here, because
+# GitLab's own documentation gives two answers — the permissions matrix lists
+# "View vulnerability report" at Reporter, while the vulnerability report page's
+# own prerequisites say "Security Manager, Developer, Maintainer, or Owner"
+# (both read 2026-08-16). That disagreement is itself the argument for this
+# check: a defence that depends on knowing the answer is only correct while the
+# answer holds, and nobody consuming the digest can see which one is in force.
+#
+# What IS measured, 2026-08-16, against this project's own endpoint with no
+# credential at all and the walk's query verbatim:
+#
+#   {"data":{"project":{"vulnerabilities":
+#     {"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}
+#
+# HTTP 200, no `errors` array, `data.project` present, the connection non-null
+# and empty. Every guard above passes it, the walk terminates after one page,
+# and the block below then prints "**0 active** findings" — under a ✅, in a
+# weekly digest, about security posture. A green, confident, wrong answer, and
+# the sixth instance on this project of a zero that means "nothing was looked
+# at" being indistinguishable from a zero that means "nothing is wrong".
+#
+# So a zero is not published until the same connection has been shown returning
+# something. The control is this project's own house rule mechanised — a
+# reported zero names the surface it queried AND shows that query returning
+# non-zero somewhere — and it is deliberately the SAME field with only the state
+# filter widened, so it shares the authorization path it is testing. Anything
+# else would be a control on a different question.
+#
+# `first: 1`, because the question is whether the connection answers at all, not
+# how many records it holds. Issued only when the active set came back empty: a
+# non-zero count is already its own proof that the connection resolved, and a
+# weekly job should not pay for a round trip that can only confirm what it
+# already read.
+#
+# When the control comes back empty too, that is NOT a pass. A project that has
+# genuinely never recorded a finding and a token that cannot see the report emit
+# the same bytes on this surface, and the honest reading of "the same bytes" is
+# that the count could not be read. (Control on this project, 2026-08-16: for a
+# caller that can definitely read the report, the active set is genuinely 0
+# while the four-state set is 885 — so the zero the digest prints today is real,
+# and it is exactly the reading that had no way to prove itself. It also means
+# the two-token comparison #203 proposed could not have settled anything: both
+# would have read 0.)
+# shellcheck disable=SC2016  # `$path` is a GRAPHQL variable — see the queries
+# above.
+CONTROL_QUERY='query($path: ID!) {
+  project(fullPath: $path) {
+    vulnerabilities(state: [DETECTED, CONFIRMED, DISMISSED, RESOLVED], first: 1) {
+      nodes { id }
+    }
+  }
+}'
+
+if [ ! -s "$WORK/vulns.jsonl" ]; then
+  jq -n --arg q "$CONTROL_QUERY" --arg path "$CI_PROJECT_PATH" \
+    '{query: $q, variables: {path: $path}}' >"$WORK/control-req.json" ||
+    undetermined "the zero-control request could not be built"
+
+  code="$(post_graphql "$WORK/control-req.json" "$WORK/control.json")"
+  check_response "$WORK/control.json" "$code" "the zero-control query"
+  jq -e '.data.project.vulnerabilities' "$WORK/control.json" >/dev/null 2>&1 ||
+    undetermined "the zero-control response carried no \`vulnerabilities\` connection (token scope, or Ultimate not enabled?)"
+
+  control_records="$(jq -r '.data.project.vulnerabilities.nodes | length' \
+    "$WORK/control.json" 2>/dev/null || echo '')"
+  case "$control_records" in
+    '' | *[!0-9]*)
+      undetermined "the zero-control query returned a record count that is not a number" ;;
+  esac
+
+  [ "$control_records" -gt 0 ] || unread \
+    "\`project.vulnerabilities(state: [DETECTED, CONFIRMED])\` returned no records, and neither did the control \`project.vulnerabilities(state: [DETECTED, CONFIRMED, DISMISSED, RESOLVED])\` on the same connection. A caller without \`read_security_resource\` is not refused — it gets an EMPTY connection, HTTP 200, no error — so \"clean\" and \"not allowed to look\" are the same bytes here and no count can be published from them"
+fi
+
 # ── 3. Verdict ───────────────────────────────────────────────────────────────
 # All of the reasoning is in jq rather than bash, deliberately: it needs date
 # arithmetic, and portable `date` is a trap this repo has already paid for once
@@ -591,6 +679,18 @@ def code(s): "`" + s + "`";
       + (if ($all | length) == 0
          then " A count of zero has no `detectedAt` of its own, so a scan is the only thing that can date it."
          else "" end),
+    # #203 — a zero carries its own proof that it was READ, or it is not printed
+    # at all (the script exits 2 before reaching here). The control is the same
+    # connection with the state filter widened, because a caller without
+    # `read_security_resource` gets an empty connection rather than an error, and
+    # an empty one is byte-for-byte what a clean project returns.
+    (if ($all | length) == 0
+     then "- This zero was **read**, not inferred from silence: the same connection with "
+            + code("state: [DETECTED, CONFIRMED, DISMISSED, RESOLVED]")
+            + " returned a record, so this token can see the Vulnerability Report. Without that control a token lacking "
+            + code("read_security_resource")
+            + " would report the same empty connection and be published as a clean bill of health. (#203)"
+     else empty end),
     "- Every scanner, oldest evidence first: "
       + ($dated | sort_by(.evidence)
          | map("\(.type) \(age(since(.evidence)))"
