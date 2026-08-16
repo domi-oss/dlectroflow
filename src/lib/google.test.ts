@@ -1059,4 +1059,154 @@ describe("#211 — every Google call carries a deadline", () => {
       await expect(failure).rejects.not.toBeInstanceOf(GoogleTimeoutError);
     });
   });
+
+  /**
+   * A stall AFTER the headers, i.e. during the body read (Duo review, !368).
+   *
+   * ── The measurement this rests on ───────────────────────────────────────────
+   * Against a server that writes the status line and one byte of JSON and then
+   * goes silent forever, on `node:22-alpine` (v22.23.1 / undici 6.27.0, the CI
+   * image):
+   *
+   *   headers at 9ms, then `res.json()` rejected at 609ms on a 600ms budget
+   *     constructor DOMException | name TimeoutError
+   *     message "The operation was aborted due to timeout"
+   *     instanceof Error true | isDeadlineRejection(err) === true
+   *
+   * `res.text()` is identical. Three things follow, and each of them matters
+   * here:
+   *
+   *  1. **The signal stays live through body consumption**, so the body read is
+   *     already bounded. Nothing needs a second timer, and the budget does not
+   *     change — the deadline covers headers AND body from one clock started at
+   *     signal creation, which is what the constant's docblock already claims.
+   *     So the inequality with the client budgets is untouched.
+   *  2. **The rejection is the same shape**, so one classifier covers both
+   *     phases. `isDeadlineRejection` needs no widening.
+   *  3. **But the body read sat OUTSIDE the try**, so that correctly-shaped
+   *     rejection was never classified. It escaped as a raw `DOMException` —
+   *     and since that satisfies `instanceof Error`, the OAuth callback's
+   *     `err.message` fallback put "The operation was aborted due to timeout"
+   *     into the redirect URL and the inbox banner printed it. The exact
+   *     guarantee this MR exists to make, defeated by a stall nine milliseconds
+   *     later than the one it was tested against.
+   *
+   * So these cases pin the WHOLE call, not the connection: every function's
+   * decided outcome has to be the same whether Google stalls before the headers
+   * or during the body.
+   */
+  describe("a stall during the body read decides the same way (!368)", () => {
+    /** Headers arrived; the body never does. Faithful to the measurement above:
+     *  the rejection object is the one a real mid-body abort produces. */
+    function bodyStalls(rest: Record<string, unknown> = {}) {
+      return vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw deadlineRejection();
+        },
+        text: async () => {
+          throw deadlineRejection();
+        },
+        ...rest,
+      });
+    }
+
+    it("exchangeCode: still reconnectable, and still not the raw abort text", async () => {
+      stubFetch(bodyStalls());
+      const { exchangeCode, GoogleTimeoutError } = await import("./google");
+      const failure = exchangeCode(USER, "code", "verifier", "https://app/cb");
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      await expect(failure).rejects.not.toThrow(/aborted/i);
+      // Half a token response is not a token. Nothing may be stored.
+      expect(prismaMock.googleAuth.upsert).not.toHaveBeenCalled();
+    });
+
+    it("refreshAccessToken: still transient — null, no reconnect flag", async () => {
+      prismaMock.googleAuth.findUnique.mockResolvedValue(refreshingRow());
+      stubFetch(bodyStalls());
+      const { getValidAccessToken } = await import("./google");
+      expect(await getValidAccessToken(USER)).toBeNull();
+      expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
+      expect(prismaMock.googleAuth.upsert).not.toHaveBeenCalled();
+    });
+
+    it("listTaskLists: still says nothing was scheduled", async () => {
+      stubFetch(bodyStalls());
+      const { listTaskLists, GoogleTimeoutError } = await import("./google");
+      const failure = listTaskLists("tok");
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      await expect(failure).rejects.toThrow(/nothing was scheduled/i);
+    });
+
+    it("createGoogleTask: still admits the task may exist", async () => {
+      // The most dangerous of the four to get wrong. A stall here means the
+      // POST reached Google and Google began answering — so the task almost
+      // certainly EXISTS, and a generic error is what sends someone into a
+      // duplicate.
+      stubFetch(bodyStalls());
+      const { createGoogleTask, GoogleTimeoutError } = await import("./google");
+      const failure = createGoogleTask("tok", "list-9", { title: "t" });
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      await expect(failure).rejects.toThrow(/may/i);
+    });
+
+    it("upsertGoogleTask: a stalled create body still does not double-create", async () => {
+      // The PATCH branch reads no body, so the exposure is the fall-through:
+      // 404 → create → body stalls. One POST, and it must not be retried here.
+      const fetchMock = vi.fn();
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        text: async () => "",
+      });
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw deadlineRejection();
+        },
+      });
+      stubFetch(fetchMock);
+      const { upsertGoogleTask, GoogleTimeoutError } = await import("./google");
+      await expect(
+        upsertGoogleTask("tok", "list-9", "gtask-9", { title: "t" }),
+      ).rejects.toBeInstanceOf(GoogleTimeoutError);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // the PATCH, then ONE create
+    });
+
+    it("a non-deadline body failure still keeps its own identity", async () => {
+      // The guard against over-reaching: widening the try must not turn a
+      // malformed JSON body into "Google was slow".
+      stubFetch(
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new SyntaxError("Unexpected token < in JSON");
+          },
+        }),
+      );
+      const { listTaskLists, GoogleTimeoutError } = await import("./google");
+      const failure = listTaskLists("tok");
+      await expect(failure).rejects.toThrow(/Unexpected token/);
+      await expect(failure).rejects.not.toBeInstanceOf(GoogleTimeoutError);
+    });
+
+    it("a refused response still reports its status, not a deadline", async () => {
+      // The other over-reach: the `!res.ok` throw now sits inside the widened
+      // try, so it passes through the classifier. It must come out unchanged.
+      stubFetch(
+        vi
+          .fn()
+          .mockResolvedValue({ ok: false, status: 400, text: async () => "" }),
+      );
+      const { exchangeCode, GoogleTimeoutError } = await import("./google");
+      const failure = exchangeCode(USER, "code", "verifier", "https://app/cb");
+      await expect(failure).rejects.toThrow(
+        /Google token exchange failed \(400\)/,
+      );
+      await expect(failure).rejects.not.toBeInstanceOf(GoogleTimeoutError);
+    });
+  });
 });

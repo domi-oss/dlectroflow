@@ -46,7 +46,11 @@ const RECLAIM_LIST_MATCH = (
  * `focus-catalog-source.ts`: that shape exists to avoid truncating a long body,
  * and the largest response here is the task-list read — capped at
  * `maxResults=100` — so every response is small JSON. A server that answers
- * promptly and then trickles the body should hit this deadline too.
+ * promptly and then trickles the body hits this deadline too, which is measured
+ * rather than hoped for — see {@link isDeadlineRejection}. **This is a
+ * WHOLE-CALL budget, not a per-phase one:** the clock starts at signal creation
+ * and covers the headers and the body together, so a call that spends 6 s on
+ * headers has 2 s left for its body.
  *
  * ── Why 8 s and not the house 10 s ──────────────────────────────────────────
  *
@@ -126,10 +130,31 @@ export const GOOGLE_TIMEOUT_REASON = "timed_out";
  * on — `node:22-alpine` (v22.23.1, the CI image) and v26.4.0 — with no wrapping
  * `TypeError` and no `cause` chain in either.
  *
- * Everything else keeps its own identity on purpose. A dropped socket and an
- * unresolvable host are different faults with different first moves, and
- * relabelling them "Google was slow" sends the reader looking for the wrong
- * thing.
+ * ── It covers the BODY read too, and that was measured rather than assumed ──
+ *
+ * Duo review, `!368`, asked whether a stall *after* the headers is classified.
+ * Against a server that writes the status line and one byte of JSON and then
+ * goes silent, on `node:22-alpine`:
+ *
+ *   headers at 9ms; `res.json()` rejected at 609ms on a 600ms budget
+ *   DOMException / TimeoutError / "The operation was aborted due to timeout"
+ *
+ * `res.text()` is identical. So the signal stays live through body consumption,
+ * one clock covers headers AND body from signal creation, and the rejection has
+ * the same shape — this predicate needs no widening and the budget needs no
+ * second timer.
+ *
+ * ⚠️ **What DID need fixing is where the `try` ends.** The body reads sat
+ * outside it, so a correctly-shaped rejection escaped unclassified as a raw
+ * `DOMException` — and because that satisfies `instanceof Error`, the OAuth
+ * callback's `err.message` fallback printed the abort text onto the banner.
+ * Every body read is now inside its call site's guard, and
+ * `google.test.ts` pins the decided outcome for a mid-body stall per call site.
+ *
+ * Everything else keeps its own identity on purpose. A dropped socket, an
+ * unresolvable host and a malformed JSON body are different faults with
+ * different first moves, and relabelling them "Google was slow" sends the
+ * reader looking for the wrong thing.
  */
 function isDeadlineRejection(err: unknown): boolean {
   return err instanceof Error && err.name === "TimeoutError";
@@ -245,14 +270,26 @@ export async function exchangeCode(
     client_secret: clientSecret,
     code_verifier: codeVerifier,
   });
-  let res: Response;
+  let tokens: TokenResponse;
+  // The body read is INSIDE, and that is the point (Duo review, !368) — see
+  // {@link isDeadlineRejection} for the measurement. The signal covers headers
+  // and body from one clock, so a mid-body stall rejects with the same
+  // `TimeoutError`; leaving `res.json()` outside meant that rejection escaped
+  // unclassified, and because a `DOMException` satisfies `instanceof Error` the
+  // callback's `err.message` fallback printed "The operation was aborted due to
+  // timeout" straight onto the banner. `storeTokens` stays outside: a database
+  // failure is not a deadline and must not be reported as one.
   try {
-    res = await fetch(TOKEN_ENDPOINT, {
+    const res = await fetch(TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
       signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     });
+    if (!res.ok) {
+      throw new Error(`Google token exchange failed (${res.status})`);
+    }
+    tokens = (await res.json()) as TokenResponse;
   } catch (err) {
     // The worst of the six, and the one with no client-side bound of any kind:
     // this runs inside a browser navigation to /api/google/oauth/callback, so
@@ -262,7 +299,8 @@ export async function exchangeCode(
     // Nothing has been written at this point, so the state is exactly what it
     // was before the attempt — which is what makes "try connecting again" a
     // safe thing to offer rather than a guess. The route turns this into
-    // `reason=timed_out` and the banner offers the affordance.
+    // `reason=timed_out` and the banner offers the affordance. The refusal
+    // thrown just above passes through unchanged, because it is not a deadline.
     if (isDeadlineRejection(err)) {
       throw new GoogleTimeoutError(
         "nothing was connected. Try connecting again.",
@@ -270,10 +308,7 @@ export async function exchangeCode(
     }
     throw err;
   }
-  if (!res.ok) {
-    throw new Error(`Google token exchange failed (${res.status})`);
-  }
-  await storeTokens(userId, (await res.json()) as TokenResponse);
+  await storeTokens(userId, tokens);
 }
 
 async function refreshAccessToken(userId: string): Promise<string | null> {
@@ -287,14 +322,41 @@ async function refreshAccessToken(userId: string): Promise<string | null> {
     client_id: clientId,
     client_secret: clientSecret,
   });
-  let res: Response;
+  let data: TokenResponse;
+  // Body read inside the guard, same as `exchangeCode` and for the same
+  // measured reason (!368). The `invalid_grant` branch stays inside too, and
+  // that is safe: it either returns null or throws a database error, and a
+  // database error is not a deadline so the classifier below rethrows it whole.
   try {
-    res = await fetch(TOKEN_ENDPOINT, {
+    const res = await fetch(TOKEN_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
       signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     });
+    if (!res.ok) {
+      let errCode: string | undefined;
+      try {
+        errCode = ((await res.json()) as { error?: string }).error;
+      } catch {
+        /* non-JSON error body — treat as transient */
+      }
+      if (errCode === "invalid_grant") {
+        // The refresh token is dead (revoked/expired). Presence of stale tokens
+        // is what makes `connected` lie — clear them and flag for reconnect.
+        await prisma.googleAuth.update({
+          where: { userId },
+          data: {
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+            needsReconnect: true,
+          },
+        });
+      }
+      return null;
+    }
+    data = (await res.json()) as TokenResponse;
   } catch (err) {
     // A deadline is TRANSIENT, and that distinction is the whole point of
     // handling it here. This function's one destructive branch — clearing the
@@ -319,29 +381,6 @@ async function refreshAccessToken(userId: string): Promise<string | null> {
     if (isDeadlineRejection(err)) return null;
     throw err;
   }
-  if (!res.ok) {
-    let errCode: string | undefined;
-    try {
-      errCode = ((await res.json()) as { error?: string }).error;
-    } catch {
-      /* non-JSON error body — treat as transient */
-    }
-    if (errCode === "invalid_grant") {
-      // The refresh token is dead (revoked/expired). Presence of stale tokens
-      // is what makes `connected` lie — clear them and flag for reconnect.
-      await prisma.googleAuth.update({
-        where: { userId },
-        data: {
-          accessToken: null,
-          refreshToken: null,
-          expiresAt: null,
-          needsReconnect: true,
-        },
-      });
-    }
-    return null;
-  }
-  const data = (await res.json()) as TokenResponse;
   await storeTokens(userId, data);
   return data.access_token;
 }
@@ -558,12 +597,18 @@ function tasksUrl(...segments: string[]): string {
 type TaskList = { id: string; title: string };
 
 export async function listTaskLists(token: string): Promise<TaskList[]> {
-  let res: Response;
+  let data: { items?: TaskList[] };
+  // Body read inside the guard (!368): the response is a list of up to a
+  // hundred lists, so it is the largest body this module reads and the likeliest
+  // of the four to stall part-way through.
   try {
-    res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
+    const res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     });
+    if (!res.ok)
+      throw new Error(`Google Tasks list fetch failed (${res.status})`);
+    data = (await res.json()) as { items?: TaskList[] };
   } catch (err) {
     // A read, and the first call a push makes — so nothing has been written
     // anywhere yet and the message can say so without qualification.
@@ -580,9 +625,6 @@ export async function listTaskLists(token: string): Promise<TaskList[]> {
     }
     throw err;
   }
-  if (!res.ok)
-    throw new Error(`Google Tasks list fetch failed (${res.status})`);
-  const data = (await res.json()) as { items?: TaskList[] };
   return data.items ?? [];
 }
 
@@ -600,9 +642,13 @@ export async function createGoogleTask(
   listId: string,
   input: { title: string; notes?: string; due?: string },
 ): Promise<{ id: string }> {
-  let res: Response;
+  // Body read inside the guard (!368), and this is the site where it changes
+  // the ANSWER rather than only the wording. A stall while reading the create
+  // response means Google accepted the POST and had begun replying, so the task
+  // very likely exists — leaking a raw abort here loses precisely the warning
+  // that stops the reader making a second one.
   try {
-    res = await fetch(tasksUrl("lists", listId, "tasks"), {
+    const res = await fetch(tasksUrl("lists", listId, "tasks"), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -615,6 +661,11 @@ export async function createGoogleTask(
       }),
       signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Google Tasks create failed (${res.status}) ${detail}`);
+    }
+    return (await res.json()) as { id: string };
   } catch (err) {
     // The one message that must NOT claim nothing happened. The deadline fires
     // at this end; the POST may already have reached Google and created the
@@ -628,11 +679,6 @@ export async function createGoogleTask(
     }
     throw err;
   }
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Google Tasks create failed (${res.status}) ${detail}`);
-  }
-  return (await res.json()) as { id: string };
 }
 
 /**
