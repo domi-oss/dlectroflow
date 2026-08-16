@@ -24,6 +24,12 @@ vi.mock("@/lib/workspace", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/rewards", () => ({
+  // #233 — "this item credited no day", so the streak revocation below is
+  // handed an empty set and is a no-op. A file asking about the ledger sets
+  // these up; every other file asserts the untouched-streak path.
+  engagementDaysOfItem: vi.fn().mockResolvedValue([]),
+  engagementDaysNowEmpty: vi.fn().mockResolvedValue([]),
+  revokeUnqualifiedStreakBadges: vi.fn().mockResolvedValue([]),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   // #251 — stubbed, not exercised. This file's question is the #64 cascade, and
   // the reversal's own arithmetic, floor guard and concurrency are proved against

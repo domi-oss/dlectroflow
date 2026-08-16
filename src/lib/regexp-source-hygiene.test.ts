@@ -451,16 +451,42 @@ describe("the real tree", () => {
     // very three findings this MR cites as the footer's. Re-count, never assume a
     // delta. The message below is what turns the failure from a puzzle into a
     // one-line fix, so keep it attached to the assertion.
+    //
+    // 28 → 29 on #233: `FROM_OR_JOIN_TABLE` in `migration-data-harness.ts`, which
+    // classifies as `constant` like every other pattern in that module — its source
+    // is assembled once at module load from the file-level `IDENT` literal and
+    // nothing a caller passes ever reaches it. Taken from the scanner's OWN recount
+    // rather than from 28 + 1, which is what this comment asks for.
+    //
+    // ⚠️ 29 → 30 when #233 merged `main` in, and the WAY it broke is the thing to
+    // read, because this is the one failure mode an exact count cannot warn about
+    // from the diff. Both sides had independently gone 28 → 29 — this branch for
+    // `FROM_OR_JOIN_TABLE` above, `main` for the `new RegExp(source, …)` in
+    // `renovate-hygiene.ts` — so both wrote the SAME literal `29` on this line.
+    // Git's three-way merge saw byte-identical text on both sides, reported no
+    // conflict, and kept `29` while the merged tree genuinely held 30. The comment
+    // above anticipates an unrelated MR failing loudly HERE; it did not anticipate
+    // two of them cancelling out silently.
+    //
+    // So the recurring cost, stated once: any two branches that each add one
+    // construction merge clean and land a red `main`. Neither MR is wrong and
+    // neither pipeline can see it, because each is green against the base it was
+    // tested on. The only place it is visible is a tree that holds both — which is
+    // why the number is re-counted after a `main` sync and not only after an edit
+    // to a pattern. Recounted here from the scanner's own output (30), with `main`'s
+    // 29 and this branch's single addition as the two-sided control.
     expect(
       sites.length,
       "A `new RegExp` was added to or removed from src/ or e2e/. That is fine — " +
         "re-count and bump this number to match, and do not assume the delta " +
-        "(it was +3 on the last rebase, from a file nobody expected). It is " +
+        "(it was +3 on the last rebase, from a file nobody expected; and a `main` " +
+        "sync can land a wrong number here with NO merge conflict, when both " +
+        "sides bumped it to the same value for different constructions). It is " +
         "exact on purpose: a floor would let the scanner silently go blind and " +
         "stay green. If the count went DOWN and you did not delete a " +
         "construction, the tokeniser has stopped seeing one, which is the bug " +
         "this guard exists to prevent.",
-    ).toBe(29);
+    ).toBe(30);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);

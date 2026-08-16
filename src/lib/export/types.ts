@@ -4,6 +4,7 @@ import type {
   BreakdownTurn,
   DailySpark,
   DayRollup,
+  EngagementDay,
   FocusPlaylist,
   FocusSession,
   RewardEvent,
@@ -191,6 +192,18 @@ export type ExportGamification = {
   streakRecords: StreakRecord[];
   badges: Badge[];
   rewardEvents: RewardEvent[];
+  /**
+   * #233 — the per-day engagement ledger.
+   *
+   * It sits in `gamification` rather than beside the inbox because it is derived
+   * from the person's activity rather than typed by them, which is this group's
+   * whole definition. It is still exported, and for the reason the group's
+   * docblock gives for `rewardEvents`: `export.json` is the lossless tier, and a
+   * workspace-scoped table left out of it is one an Art. 15/20 archive silently
+   * misses (#199, and `FocusPlaylist` is the precedent that reached `main` absent
+   * from all three files).
+   */
+  engagementDays: EngagementDay[];
   dayRollups: DayRollup[];
   dailySparks: DailySpark[];
 };

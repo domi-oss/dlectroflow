@@ -329,14 +329,32 @@ describe("the deliberately-bundled exception list stays complete", () => {
     readFileSync(join(__dirname, p), "utf8").replace(/\r\n/g, "\n");
 
   /** Callees that are themselves a bundle — see their docblocks in `rewards.ts`. */
-  const BUNDLING = ["rewardStepDone", "touchStreakOnEngagement"];
+  const BUNDLING = [
+    "rewardStepDone",
+    "touchStreakOnEngagement",
+    // #265 — `completeItem`'s step payout: the `step_done` rows plus the
+    // ten-steps badge that counts them. Added here in the same commit as its
+    // wrapper, for the reason the note below gives.
+    "rewardCompletedSteps",
+  ];
 
   /** `bestEffort("tag", ws, () => …)`, capturing the tag and the thunk body. */
   const CALL_SITE =
     /bestEffort\(\s*"([a-z0-9_]+)"\s*,\s*\w+\s*,\s*(?:async\s*)?\(\)\s*=>\s*([\s\S]{0,200}?)\)[,;]/g;
 
+  /**
+   * ⚠️ **Every action file holding a `bestEffort(` has to be here, and #233 is why
+   * this is now a list of three rather than two.** `!352` added a wrapper to
+   * `braindump.ts`, and the bijection below is between union members and sites *in
+   * these files* — so a site in an unlisted file does not merely go unchecked, it
+   * makes its own union member look ORPHANED and reds the bijection. That is the
+   * guard working, and it is the reason a new file gets added here in the same
+   * commit as the wrapper rather than afterwards.
+   */
   const actionSources = () =>
-    read("../app/actions/focus.ts") + read("../app/actions/breakdown.ts");
+    read("../app/actions/focus.ts") +
+    read("../app/actions/breakdown.ts") +
+    read("../app/actions/braindump.ts");
 
   /** Every parsed call site, as [tag, thunk body] pairs. */
   const parsedSites = () => [...actionSources().matchAll(CALL_SITE)];
@@ -448,8 +466,15 @@ describe("the deliberately-bundled exception list stays complete", () => {
   it("finds the call sites that wrap a bundling callee", () => {
     const sites = callSites();
     expect(sites.length).toBeGreaterThanOrEqual(3);
+    // Four since #233: `completeItem`'s streak touch wraps
+    // `touchStreakOnEngagement`, the same bundling callee as `confirmBreakdown`'s.
+    // Five since #265: `completeItem`'s step payout wraps `rewardCompletedSteps`,
+    // a new bundling callee. Re-derived from the guard's own output rather than
+    // from 4 + 1, which is what this file asks for elsewhere.
     expect(sites.map((s) => s.tag).sort()).toEqual([
       "breakdown_streak_touch_failed",
+      "complete_item_step_payout_failed",
+      "complete_item_streak_touch_failed",
       "focus_step_reward_failed",
       "step_done_bookkeeping_failed",
     ]);
@@ -463,7 +488,10 @@ describe("the deliberately-bundled exception list stays complete", () => {
    * terminator, so a site it cannot parse is simply **absent** — and every
    * assertion here is about the three bundling tags, which a missing FOURTH site
    * would not disturb. `sites.length >= 3` cannot see that either. So: every
-   * `bestEffort(` in the two action files must be one the parser saw.
+   * `bestEffort(` in the action files listed by `actionSources` must be one the
+   * parser saw. (Two files when this was written, three since #233 — the count is
+   * deliberately not restated here, because it is the kind of number that goes
+   * stale in a comment while the list next to it stays right.)
    *
    * The second half pins the property `DEFECT_TAG`'s docblock in `best-effort.ts`
    * says `!339` restored and wants to keep — one union member per call site,

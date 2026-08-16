@@ -103,6 +103,7 @@ export async function collectExport(input: {
     streakRecords,
     badges,
     rewardEvents,
+    engagementDays,
     dayRollups,
     dailySparks,
   ] = await prisma.$transaction(
@@ -166,6 +167,15 @@ export async function collectExport(input: {
       prisma.rewardEvent.findMany({
         where: { workspaceId },
         orderBy: { createdAt: "asc" },
+      }),
+      // #233 — the per-day engagement ledger. Ordered on `(day, id)` rather than
+      // on `createdAt` alone: `day` is the key the table exists to be read by,
+      // and the `id` tie-break is what makes two exports of unchanged data
+      // byte-identical, which is the property every other read here maintains
+      // and what makes an export diffable and assertable.
+      prisma.engagementDay.findMany({
+        where: { workspaceId },
+        orderBy: [{ day: "asc" }, { id: "asc" }],
       }),
       prisma.dayRollup.findMany({
         where: { workspaceId },
@@ -300,6 +310,7 @@ export async function collectExport(input: {
       streakRecords,
       badges,
       rewardEvents,
+      engagementDays,
       dayRollups,
       dailySparks,
     },

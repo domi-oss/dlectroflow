@@ -4,24 +4,29 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import {
   maybeAwardInboxZero,
-  maybeAwardTenStepsDay,
+  rewardCompletedSteps,
   logReward,
   awardBadge,
-  touchStreakOnCompletion,
+  touchStreakOnEngagement,
   reverseItemCompletionRewards,
   revokeUnqualifiedBadges,
+  revokeUnqualifiedStreakBadges,
+  engagementDaysOfItem,
+  engagementDaysNowEmpty,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskStatus,
   RewardType,
   BadgeKey,
+  EngagementKind,
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { countsTowardInboxZero } from "@/lib/inbox-zero-queue";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { resolveInlineNoteEdit } from "@/lib/braindump-note-syntax";
 import { writeCapture } from "@/lib/capture-write";
+import { bestEffort } from "@/lib/best-effort";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
 import {
@@ -339,6 +344,18 @@ export async function deleteBrainDumpItem(id: string) {
       data: { completedAt: null },
     }));
 
+    // #233 — the days this item's engagement credited, read BEFORE the delete
+    // because `EngagementDay` cascades with it and there would be nothing left to
+    // ask. Read inside the transaction and after the claim above, so it sees the
+    // row set the delete is actually about to destroy.
+    //
+    // Read unconditionally rather than only for a completed row: a capture is a
+    // qualifying engagement too, so an UNTRIAGED item deleted from the inbox can
+    // also be the last thing crediting a day. Gating this on `tookCompletion`
+    // would have made the whole mechanism invisible on the most ordinary delete in
+    // the app.
+    const creditedDays = await engagementDaysOfItem(workspaceId, id, tx);
+
     const { count } = await tx.brainDumpItem.deleteMany({
       where: { id, workspaceId },
     });
@@ -445,6 +462,32 @@ export async function deleteBrainDumpItem(id: string) {
     // is the early-out.
     if (reversed.stepDone > 0 || reversed.taskComplete)
       await revokeUnqualifiedBadges(workspaceId, reversed, tx);
+
+    // #233 — the streak half, and it is gated on a DIFFERENT fact from the two
+    // badges above, which is why it is a second call rather than another branch
+    // inside that function.
+    //
+    // Those two are decided by what the REVERSAL took back; the streak's are
+    // decided by which ledger days this delete EMPTIED. The two answers come
+    // apart in both directions: a delete can reverse a payout while every day it
+    // credited still holds another item's credit (nothing to revoke), and it can
+    // empty a day without reversing a single point — deleting the untriaged
+    // capture that was the day's only engagement does exactly that.
+    //
+    // The cascade has already run with the `deleteMany` above, so this asks which
+    // of the days that item credited now hold nothing at all. Inside the
+    // transaction for the reason every other write here is: a revocation that
+    // committed independently would survive a rollback that put the to-do back.
+    //
+    // Lock order is `BrainDumpItem` → `EngagementDay` (the cascade) → `Streak`
+    // (the `FOR UPDATE` inside the call). `touchStreakOnEngagement` takes the last
+    // two in the same order and never the first, so the two cannot deadlock; the
+    // note at `completeItem`'s payout block records the other half of that.
+    await revokeUnqualifiedStreakBadges(
+      workspaceId,
+      await engagementDaysNowEmpty(workspaceId, creditedDays, tx),
+      tx,
+    );
     // #251 review — the budget, on a transaction the repo's own gate cannot see.
     //
     // Every sibling writer that takes this same `BrainDumpItem` row lock is given
@@ -1014,20 +1057,96 @@ export async function completeItem(id: string) {
   // un-completed until something else happened to refresh it.
   if (closed) {
     // Outside the transaction, exactly as before this fix. These are reads and
-    // appends against `RewardEvent`, `Badge` and `Streak`, none of which the
-    // local writes depend on — and `touchStreakOnCompletion` opens its OWN
-    // interactive transaction with a `SELECT … FOR UPDATE` on `Streak`
-    // (`rewards.ts:596`, proved against real Postgres in
+    // appends against `RewardEvent`, `Badge`, `Streak` and — since #233 —
+    // `EngagementDay`, none of which the local writes depend on. And
+    // `touchStreakOnEngagement` opens its OWN interactive transaction with a
+    // `SELECT … FOR UPDATE` on `Streak` (proved against real Postgres in
     // `rewards.integration.test.ts`), which must not be nested inside this one
     // while it holds a `BrainDumpItem` lock. What makes them safe now is not a
     // transaction, it is `closed`.
-    for (const _step of closed.steps)
-      await logReward(workspaceId, RewardType.StepDone);
-    if (task) await maybeAwardTenStepsDay(workspaceId);
-    await logReward(workspaceId, RewardType.TaskComplete);
-    await touchStreakOnCompletion(workspaceId);
-    await awardBadge(workspaceId, BadgeKey.TaskComplete);
-    await maybeAwardInboxZero(workspaceId);
+    //
+    // ⚠️ #233 — being OUTSIDE the transaction is also what keeps the lock order
+    // acyclic. This function's transaction holds the `BrainDumpItem` row lock;
+    // `touchStreakOnEngagement` takes `EngagementDay` then `Streak`, and
+    // `deleteBrainDumpItem` takes `BrainDumpItem` then `EngagementDay` then
+    // `Streak`. Nothing ever holds `Streak` and then reaches for a
+    // `BrainDumpItem`, which is what a deadlock would need. Moving this call
+    // inside the transaction above would create exactly that cycle.
+    // #265 — every payout below is wrapped, because the completion has COMMITTED
+    // by the time any of them runs. The rule this file's module docblock records:
+    // the guard governs the write, and anything after it is a consequence of
+    // success that cannot un-write the row. A transient fault here used to throw
+    // out of the action, so the UI reported a completion that is in the database
+    // as failed — and because `revalidatePath` sits *below* this block, the throw
+    // stranded it too and the user's own tab went on rendering the to-do
+    // un-completed, corroborating the false failure.
+    //
+    // One `bestEffort` per consequence, so one failure cannot cancel the others
+    // and the log can tell them apart — except the first, which is bundled for a
+    // stated reason.
+    //
+    // ⚠️ Only `completeItem` is fixed here. The five other exported functions in
+    // this file with the same shape (`triageBrainDumpItem`, `requestBreakdown`,
+    // `snoozeBrainDumpItem`, `deleteBrainDumpItem`, `keepAsTask`) are #265's
+    // remaining legs and are deliberately untouched — including
+    // `deleteBrainDumpItem`, which #233 also edits. They are one same-file sweep,
+    // not five, and folding them in here would put an unrelated sweep inside a
+    // migration MR.
+    //
+    // **Bundled, and forced rather than sloppy:** `maybeAwardTenStepsDay` does
+    // `rewardEvent.count({ type: StepDone })`, counting the rows the loop above it
+    // has just written. Split them and the count is short by this completion's own
+    // steps, so on the tenth step of the day the badge is silently not awarded —
+    // wrong rather than merely missing. Same dependency `rewardStepDone`'s
+    // docblock records for its own bundle.
+    // Gated on the to-do having a task, which is behaviour-preserving: with no
+    // task `closed.steps` is empty, so the loop was already a no-op and
+    // `maybeAwardTenStepsDay` was already skipped by the same condition.
+    if (task)
+      await bestEffort(
+        "complete_item_step_payout_failed",
+        workspaceId,
+        async () => rewardCompletedSteps(workspaceId, closed.steps.length),
+      );
+    await bestEffort("complete_item_points_failed", workspaceId, async () =>
+      logReward(workspaceId, RewardType.TaskComplete),
+    );
+    // #233 — attributed to the to-do being completed, so deleting it withdraws
+    // the streak credit this completion supplied. `touchStreakOnEngagement`
+    // rather than the deprecated `touchStreakOnCompletion` alias, because the
+    // alias takes no engagement argument and a credit with no `itemId` would be
+    // permanent — silently un-revocable, which is the defect this closes.
+    //
+    // ⚠️ `bestEffort` and not a bare `await`, unlike its neighbours here, and the
+    // asymmetry is the point: #233 is what made this call able to fail on ANOTHER
+    // ROW. `itemId` is a foreign key to the to-do, so a delete from a second tab
+    // landing between this function's commit and this line raises 23503 — and
+    // unwrapped that threw out of an action whose writes were already committed,
+    // reporting a completion that succeeded as failed (#175). The neighbours can
+    // only fail on a generic fault, which is the pre-existing gap this file's
+    // module docblock records. Raised in review on !352.
+    //
+    // Losing the touch costs a streak day, which is the conservative direction:
+    // the day is un-credited rather than credited on evidence that no longer
+    // exists, and the to-do it would have pointed at has just been deleted.
+    await bestEffort(
+      "complete_item_streak_touch_failed",
+      workspaceId,
+      async () =>
+        touchStreakOnEngagement(workspaceId, {
+          kind: EngagementKind.TaskComplete,
+          itemId: id,
+        }),
+    );
+    await bestEffort("complete_item_badge_failed", workspaceId, async () =>
+      awardBadge(workspaceId, BadgeKey.TaskComplete),
+    );
+    // Independent of every payout above: `maybeAwardInboxZero` re-reads the
+    // needs-triage queue and decides for itself, so it neither reads nor is read
+    // by the reward rows this completion just wrote.
+    await bestEffort("complete_item_inbox_zero_failed", workspaceId, async () =>
+      maybeAwardInboxZero(workspaceId),
+    );
 
     // #195 + #209 — close every Google Task this to-do owns, at both grains.
     //

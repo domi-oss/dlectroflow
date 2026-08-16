@@ -116,6 +116,11 @@ vi.mock("@/lib/google", () => ({
 }));
 // Also neutralises `awardFirstSchedule`, whose only writes go through these two.
 vi.mock("@/lib/rewards", () => ({
+  // #233 — the ledger attributes a streak credit to the inbox item behind a
+  // task. `null` is the ordinary answer for a task with no item, and is what
+  // makes a credit permanent, so it is the right default for a file not asking
+  // about attribution.
+  itemIdForTask: vi.fn().mockResolvedValue(null),
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(undefined),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),

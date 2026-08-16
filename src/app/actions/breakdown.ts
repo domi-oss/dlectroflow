@@ -8,9 +8,15 @@ import {
   TaskStatus,
   RewardType,
   BadgeKey,
+  EngagementKind,
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
-import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
+import {
+  logReward,
+  awardBadge,
+  itemIdForTask,
+  touchStreakOnEngagement,
+} from "@/lib/rewards";
 import { bestEffort } from "@/lib/best-effort";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
@@ -265,8 +271,21 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   );
   // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
   // streak at most once per working day.
-  await bestEffort("breakdown_streak_touch_failed", workspaceId, () =>
-    touchStreakOnEngagement(workspaceId),
+  //
+  // #233 — attributed to the inbox item behind this task, so deleting that item
+  // withdraws the credit. `null` when the task has none (a manually created one),
+  // which makes the credit permanent; see `EngagementKind`.
+  //
+  // `itemIdForTask` is resolved INSIDE the thunk, so #257's swallow covers it too.
+  // It is a read on the same best-effort path: a failure there must not report the
+  // breakdown as failed when the steps are already committed, which is the whole
+  // point of the wrapper. The cost of it failing is an unattributed credit — a
+  // permanent one — and that is the conservative direction.
+  await bestEffort("breakdown_streak_touch_failed", workspaceId, async () =>
+    touchStreakOnEngagement(workspaceId, {
+      kind: EngagementKind.BreakdownConfirmed,
+      itemId: await itemIdForTask(workspaceId, taskId),
+    }),
   );
 
   revalidatePath(`/tasks/${taskId}`);

@@ -34,8 +34,12 @@ const {
   awardBadgeMock,
   rewardStepDoneMock,
   touchStreakOnEngagementMock,
+  itemIdForTaskMock,
   completeGoogleTaskForStepMock,
   completeGoogleTaskForTaskMock,
+  maybeAwardTenStepsDayMock,
+  maybeAwardInboxZeroMock,
+  rewardCompletedStepsMock,
 } = vi.hoisted(() => {
   const prismaMock = {
     task: { findFirst: vi.fn(), update: vi.fn() },
@@ -46,7 +50,7 @@ const {
       createMany: vi.fn(),
       count: vi.fn(),
     },
-    brainDumpItem: { updateMany: vi.fn() },
+    brainDumpItem: { updateMany: vi.fn(), findFirst: vi.fn() },
     focusSession: {
       findFirst: vi.fn(),
       create: vi.fn(),
@@ -55,6 +59,11 @@ const {
     },
     $transaction: vi.fn(),
   };
+  // #265 — `completeItem` needs `updateManyAndReturn`, which no other site here
+  // uses: its `step_done` payout is counted off what the write actually changed
+  // rather than off a pre-read snapshot (`!335`), so the returned rows ARE the
+  // payout's quantity.
+  (prismaMock.step as Record<string, unknown>).updateManyAndReturn = vi.fn();
   return {
     prismaMock,
     revalidatePathMock: vi.fn(),
@@ -63,8 +72,12 @@ const {
     awardBadgeMock: vi.fn(),
     rewardStepDoneMock: vi.fn(),
     touchStreakOnEngagementMock: vi.fn(),
+    itemIdForTaskMock: vi.fn().mockResolvedValue(null),
     completeGoogleTaskForStepMock: vi.fn(),
     completeGoogleTaskForTaskMock: vi.fn(),
+    maybeAwardTenStepsDayMock: vi.fn(),
+    maybeAwardInboxZeroMock: vi.fn(),
+    rewardCompletedStepsMock: vi.fn(),
   };
 });
 
@@ -85,13 +98,29 @@ vi.mock("@/lib/google-task-sync", () => ({
   completeGoogleTaskForStep: completeGoogleTaskForStepMock,
   completeGoogleTaskForTask: completeGoogleTaskForTaskMock,
   reopenGoogleTaskForStep: vi.fn(),
+  // #265 — `completeItem`'s Google leg, at both grains in one call. It swallows
+  // its own per-patch failures already, so it is mocked to a no-op rather than
+  // being part of what this file measures.
+  completeGoogleTasksForItem: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/rewards", () => ({
   logReward: logRewardMock,
   awardBadge: awardBadgeMock,
   rewardStepDone: rewardStepDoneMock,
   touchStreakOnEngagement: touchStreakOnEngagementMock,
+  // #233 — resolved INSIDE the `bestEffort` thunk at both sites, so its swallow
+  // covers this read too. `null` is the ordinary answer for a task with no inbox
+  // item behind it, and is what makes an engagement credit permanent.
+  itemIdForTask: itemIdForTaskMock,
   reverseStepCompletionRewards: vi.fn(),
+  // #265 — `completeItem`'s other two payouts. Absent from this mock until now
+  // because no site in `breakdown.ts` or `focus.ts` reaches them.
+  maybeAwardTenStepsDay: maybeAwardTenStepsDayMock,
+  maybeAwardInboxZero: maybeAwardInboxZeroMock,
+  // #265 — the bundling callee `completeItem`'s step payout wraps. The bundle
+  // lives here rather than in an inline thunk because `best-effort.test.ts`
+  // forbids a block-bodied thunk; see `rewardCompletedSteps`' docblock.
+  rewardCompletedSteps: rewardCompletedStepsMock,
 }));
 
 import {
@@ -102,6 +131,11 @@ import {
 } from "@/lib/constants";
 
 const WS = "ws-1";
+/** #233 — what a breakdown-confirm's streak credit carries. `itemId` is `null`
+ *  here because `itemIdForTaskMock` answers `null`: this file's question is what
+ *  happens when a post-commit payout FAILS, not attribution, and an unattributed
+ *  credit is the conservative shape to default to. */
+const ENGAGEMENT = { kind: "breakdown_confirmed", itemId: null };
 const BOOM = "reward store went away";
 /** A write that never reached the database — the control's failure. */
 const DEAD = "connection refused";
@@ -159,6 +193,9 @@ beforeEach(() => {
   touchStreakOnEngagementMock.mockResolvedValue(null);
   completeGoogleTaskForStepMock.mockResolvedValue(false);
   completeGoogleTaskForTaskMock.mockResolvedValue(false);
+  maybeAwardTenStepsDayMock.mockResolvedValue(undefined);
+  maybeAwardInboxZeroMock.mockResolvedValue(undefined);
+  rewardCompletedStepsMock.mockResolvedValue(undefined);
 
   prismaMock.task.findFirst.mockResolvedValue({ id: "task-1" });
   prismaMock.task.update.mockResolvedValue({ id: "task-1" });
@@ -171,6 +208,20 @@ beforeEach(() => {
   prismaMock.step.createMany.mockResolvedValue({ count: 1 });
   prismaMock.step.count.mockResolvedValue(1);
   prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
+  // #265 — a one-step to-do that is not yet complete, so `completeItem` takes the
+  // completion and owes the full payout.
+  prismaMock.brainDumpItem.findFirst.mockResolvedValue({
+    id: "item-1",
+    completedAt: null,
+    task: { id: "task-1", steps: [STEP] },
+  });
+  (
+    prismaMock.step as unknown as {
+      updateManyAndReturn: { mockResolvedValue: (v: unknown) => void };
+    }
+  ).updateManyAndReturn.mockResolvedValue([
+    { googleTaskId: null, googleTaskListId: null },
+  ]);
   prismaMock.focusSession.findFirst.mockResolvedValue({ id: "sess-1" });
   prismaMock.focusSession.updateMany.mockResolvedValue({ count: 0 });
   prismaMock.focusSession.create.mockResolvedValue({ id: "sess-1" });
@@ -209,7 +260,10 @@ describe("confirmBreakdown — a payout that fails after the steps committed", (
     await expect(confirm()).resolves.toBeUndefined();
     // Also proves the queued rejection was consumed — an unconsumed `Once`
     // shifts every later test in the file by one.
-    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(
+      WS,
+      ENGAGEMENT,
+    );
   });
 
   // Not an early return: the caller's own tab renders these two surfaces, and
@@ -272,7 +326,10 @@ describe("confirmBreakdown — a payout that fails after the steps committed", (
       WS,
       BadgeKey.FirstBreakdown,
     );
-    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(
+      WS,
+      ENGAGEMENT,
+    );
   });
 
   // The middle one failing must not cost the last one either.
@@ -283,7 +340,10 @@ describe("confirmBreakdown — a payout that fails after the steps committed", (
       WS,
       RewardType.BreakdownConfirmed,
     );
-    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(WS);
+    expect(touchStreakOnEngagementMock).toHaveBeenCalledExactlyOnceWith(
+      WS,
+      ENGAGEMENT,
+    );
   });
 
   it("emits three DIFFERENT tags when all three payouts fail", async () => {
@@ -326,7 +386,7 @@ describe("completeStep — a payout that fails after the step committed", () => 
   it("resolves, because the step is committed", async () => {
     rewardStepDoneMock.mockRejectedValueOnce(new Error(BOOM));
     await expect(complete()).resolves.toBeUndefined();
-    expect(rewardStepDoneMock).toHaveBeenCalledExactlyOnceWith(WS);
+    expect(rewardStepDoneMock).toHaveBeenCalledExactlyOnceWith(WS, null);
   });
 
   /**
@@ -715,5 +775,117 @@ describe("beginFocus — the badge awarded after the session row landed", () => 
     prismaMock.focusSession.create.mockRejectedValueOnce(new Error(DEAD));
     await expect(begin()).rejects.toThrow(DEAD);
     expect(awardBadgeMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── completeItem ────────────────────────────────────────────────────────────
+/**
+ * #265 — the SIXTH site of this shape, and the one folded into `!352` because
+ * that MR is already editing this block and already imports `bestEffort`.
+ *
+ * The interaction in the issue's own words: **press Complete on an inbox to-do.**
+ * The completion commits, a payout after it faults, and the action rejects — so
+ * the UI says the completion failed over a row that is completed in the database.
+ * It is worse here than at the five sites in `braindump.ts` left for their own MR,
+ * because `completeItem`'s `revalidatePath` calls sit AFTER the payout block: a
+ * throw strands them, so the user's own tab keeps rendering the to-do as
+ * un-completed and **corroborates the false failure**.
+ *
+ * ⚠️ The five siblings (`triageBrainDumpItem`, `requestBreakdown`,
+ * `snoozeBrainDumpItem`, `deleteBrainDumpItem`, `keepAsTask`) are deliberately NOT
+ * fixed here and are deliberately NOT covered below. `deleteBrainDumpItem` in
+ * particular is edited by `!352` and still has a bare payout `await`.
+ *
+ * Same two assertions as every block above: the consequence fails and the action
+ * still reports success, plus **the control** — the write itself fails and the
+ * action still rejects. Without the control this file passes an implementation
+ * that swallows everything.
+ */
+describe("completeItem — a payout that fails after the completion committed", () => {
+  const complete = async () => {
+    const { completeItem } = await import("./braindump");
+    return completeItem("item-1");
+  };
+
+  it("resolves, because the completion is committed", async () => {
+    rewardCompletedStepsMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    // Proves the queued rejection was consumed — an unconsumed `Once` shifts
+    // every later test in this file by one. One step closed, so the payout is
+    // owed exactly one row's worth.
+    expect(rewardCompletedStepsMock).toHaveBeenCalledExactlyOnceWith(WS, 1);
+  });
+
+  // The half that makes the false failure visible to the user. Not an early
+  // return: the caller's own tab renders these surfaces.
+  it("still revalidates the inbox and the dashboard", async () => {
+    rewardCompletedStepsMock.mockRejectedValueOnce(new Error(BOOM));
+    await complete();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    rewardCompletedStepsMock.mockRejectedValueOnce(new Error(BOOM));
+    await complete();
+    expect(loggedTag()).toBe("complete_item_step_payout_failed");
+    expect(loggedLine().workspaceId).toBe(WS);
+    expect(loggedLine().message).toContain(BOOM);
+  });
+
+  it("still pays the later payouts when the step payout fails", async () => {
+    rewardCompletedStepsMock.mockRejectedValueOnce(new Error(BOOM));
+    await complete();
+    // The TaskComplete badge and inbox-zero are separate consequences, so one
+    // failing must not cancel them.
+    expect(awardBadgeMock).toHaveBeenCalledWith(WS, BadgeKey.TaskComplete);
+    expect(maybeAwardInboxZeroMock).toHaveBeenCalledWith(WS);
+  });
+
+  it("still completes when the TaskComplete badge fails", async () => {
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("complete_item_badge_failed");
+  });
+
+  it("still completes when inbox-zero fails", async () => {
+    maybeAwardInboxZeroMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    expect(loggedTag()).toBe("complete_item_inbox_zero_failed");
+  });
+
+  it("emits DIFFERENT tags when all four payouts fail in one call", async () => {
+    rewardCompletedStepsMock.mockRejectedValueOnce(new Error(BOOM));
+    logRewardMock.mockRejectedValueOnce(new Error(BOOM));
+    awardBadgeMock.mockRejectedValueOnce(new Error(BOOM));
+    maybeAwardInboxZeroMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(complete()).resolves.toBeUndefined();
+    const tags = loggedTags();
+    // Four consequences, four DISTINCT tags. A single tag logged four times would
+    // satisfy a count assertion and tell whoever greps the log nothing.
+    expect(tags.sort()).toEqual([
+      "complete_item_badge_failed",
+      "complete_item_inbox_zero_failed",
+      "complete_item_points_failed",
+      "complete_item_step_payout_failed",
+    ]);
+  });
+
+  it("CONTROL: the completion write itself failing still rejects", async () => {
+    prismaMock.brainDumpItem.updateMany.mockRejectedValueOnce(new Error(DEAD));
+    await expect(complete()).rejects.toThrow(DEAD);
+    // Nothing was paid, because nothing committed. This is the half that stops
+    // the file passing an implementation which swallows everything.
+    expect(rewardCompletedStepsMock).not.toHaveBeenCalled();
+    expect(logRewardMock).not.toHaveBeenCalled();
+    expect(awardBadgeMock).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL: a loser that took no completion pays nothing but still revalidates", async () => {
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(complete()).resolves.toBeUndefined();
+    expect(rewardCompletedStepsMock).not.toHaveBeenCalled();
+    expect(logRewardMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

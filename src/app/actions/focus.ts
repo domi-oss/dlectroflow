@@ -22,6 +22,7 @@ import { isGuestWorkspace } from "@/lib/workspace-kind";
 import {
   awardBadge,
   logReward,
+  itemIdForTask,
   rewardStepDone,
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
@@ -315,8 +316,15 @@ export async function completeStep(stepId: string) {
 
   await completeGoogleTaskForStep(step);
   await prisma.step.update({ where: { id: stepId }, data: { done: true } });
-  await bestEffort("step_done_bookkeeping_failed", workspaceId, () =>
-    rewardStepDone(workspaceId),
+  // #233 — the streak credit is attributed to the inbox item behind this step's
+  // task, so deleting that item withdraws it. `null` for a task with no item.
+  //
+  // Resolved INSIDE #257's thunk, so its swallow covers this read too: the step is
+  // already marked done above, so no bookkeeping fault may report the completion
+  // as failed. A failure here costs an unattributed — therefore permanent — credit,
+  // which is the conservative direction.
+  await bestEffort("step_done_bookkeeping_failed", workspaceId, async () =>
+    rewardStepDone(workspaceId, await itemIdForTask(workspaceId, step.taskId)),
   );
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
@@ -620,10 +628,17 @@ export async function completeFocus(
   //
   // Both outcomes are kept, not just the step payout's value, because `points`
   // below may only claim what actually banked — see the return statement.
+  //
+  // #233 — same attribution as `completeStep`, resolved inside the thunk for the
+  // reason given there.
   const stepPayout = await bestEffort(
     "focus_step_reward_failed",
     workspaceId,
-    () => rewardStepDone(workspaceId),
+    async () =>
+      rewardStepDone(
+        workspaceId,
+        await itemIdForTask(workspaceId, step.taskId),
+      ),
   );
   const bonusPayout = await bestEffort(
     "focus_session_bonus_failed",

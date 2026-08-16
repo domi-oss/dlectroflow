@@ -55,6 +55,42 @@ export const RewardPoints: Record<RewardType, number> = {
   task_complete: 25,
 };
 
+/**
+ * The kinds of qualifying engagement recorded in the per-day ledger (#233).
+ *
+ * ── This is NOT a subset of `RewardType`, and the difference is the point ────
+ *
+ * The two vocabularies overlap and neither contains the other, which is why the
+ * ledger is its own table rather than a nullable column on `RewardEvent`:
+ *
+ *  * `Capture` writes NO `RewardEvent` at all — capturing earns a streak day and
+ *    no points — so a reward row cannot represent it.
+ *  * `inbox_zero`, `scheduled` and `session_finished` are rewards that are NOT
+ *    engagements: none of them calls `touchStreakOnEngagement`, so counting them
+ *    as engagement days would credit days the streak never advanced on.
+ *  * `RewardEvent` rows are REVERSED (deleted) by an undo — `reopenItem`,
+ *    `uncompleteStep` — while the engagement they record genuinely happened and
+ *    does not un-happen. `rewards.ts` states that rule for the streak in as many
+ *    words. Reusing the reward rows as the ledger would make every undo silently
+ *    withdraw a streak day.
+ *
+ * Mirrors `EngagementDay.kind`, CHECK-constrained by
+ * `20260815120000_engagement_day_ledger`; Prisma cannot express a CHECK, so the
+ * constraint is registered in `src/lib/enum-constraint-sync.integration.test.ts`.
+ */
+export const EngagementKind = {
+  /** A brain-dump capture that was actually written (`writeCapture`). */
+  Capture: "capture",
+  /** Confirming an AI breakdown into steps (`confirmBreakdown`). */
+  BreakdownConfirmed: "breakdown_confirmed",
+  /** Completing a single step, from the focus timer or directly. */
+  StepDone: "step_done",
+  /** Completing a whole to-do (`completeItem`). */
+  TaskComplete: "task_complete",
+} as const;
+export type EngagementKind =
+  (typeof EngagementKind)[keyof typeof EngagementKind];
+
 export const SparkSource = {
   AI: "ai",
   Fallback: "fallback",

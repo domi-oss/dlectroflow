@@ -126,6 +126,7 @@ model Workspace {
   focusPlaylists  FocusPlaylist[]
   dayRollups      DayRollup[]
   rewardEvents    RewardEvent[]
+  engagementDays  EngagementDay[]
   streakRecords   StreakRecord[]
   badges          Badge[]
   dailySparks     DailySpark[]
@@ -479,6 +480,9 @@ model BrainDumpItem {
   task                 Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId          String
   workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// #233 — the engagement credits this item is the evidence for. `Cascade` on
+  /// the far side, so deleting the item withdraws them; see `EngagementDay`.
+  engagementDays       EngagementDay[]
 
   @@unique([workspaceId, clientKey])
   @@index([status])
@@ -687,10 +691,101 @@ model RewardEvent {
   @@index([workspaceId])
 }
 
+/// A per-day engagement ledger, so a streak day can be RECOMPUTED and not only
+/// incremented (#233).
+///
+/// ── What it is for ─────────────────────────────────────────────────────────
+///
+/// A streak day is earned by ANY qualifying engagement, and `Streak` below stores
+/// only a counter and the last day it moved. That made the counter monotonic in
+/// practice: nothing could answer *"would this day still have counted without the
+/// item the user just deleted?"*, so `revokeUnqualifiedBadges` in
+/// src/lib/rewards.ts had to keep `streak_5`, `comeback` and `beat_best_streak`
+/// on a delete that destroyed the work behind them (#251 took that decision, and
+/// recorded that closing it needed this table).
+///
+/// One row per qualifying engagement, keyed on the local workday it credited. The
+/// question then has an answer at the table grain: a day still counts while any
+/// row survives for it.
+///
+/// ── `itemId` is the whole mechanism, and NULL is meaningful ────────────────
+///
+/// `itemId` names the `BrainDumpItem` whose continued existence is the EVIDENCE
+/// for the credit, and the row cascades with it. So deleting a to-do withdraws
+/// exactly the engagement credits that to-do supplied, and leaves every other
+/// day's alone.
+///
+/// A NULL `itemId` means the credit's evidence is not an item, and such a row is
+/// therefore PERMANENT. Two things produce one, and both want that:
+///
+///  * an engagement with no item behind it, and
+///  * every row written by the backfill in
+///    `20260815120100_engagement_day_backfill`, which can date a pre-existing
+///    engagement but cannot attribute it — `RewardEvent` holds no item reference.
+///    Unattributed means a pre-migration day can never lose its last row, which
+///    is the conservative direction: it can only ever PREVENT a revocation, never
+///    cause a wrong one.
+///
+/// ── Not a unique constraint, deliberately ─────────────────────────────────
+///
+/// Two step completions of one item on one day write two rows. That is harmless,
+/// because every reader asks "does this day hold at least one row", and a unique
+/// key over a NULLable `itemId` would not dedupe the backfilled rows anyway
+/// (Postgres treats NULLs as distinct). `logReward` has the same property for the
+/// same reason.
+model EngagementDay {
+  id String @id @default(cuid())
+  /// The local workday this engagement credited, YYYY-MM-DD — the same key and
+  /// the same `ymd()` derivation as `Streak.lastActiveWorkday`, so the two are
+  /// directly comparable.
+  ///
+  /// Rows on a NON-working day are recorded and then ignored by the recompute,
+  /// exactly as `touchStreakOnEngagement` ignores them when advancing. Recording
+  /// them keeps the ledger a truthful log rather than a derived view.
+  day String
+  /// Mirrors `EngagementKind` in src/lib/constants.ts; CHECK-constrained by
+  /// `20260815120000_engagement_day_ledger` and registered in
+  /// src/lib/enum-constraint-sync.integration.test.ts.
+  kind        String
+  itemId      String?
+  item        BrainDumpItem? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  /// The recompute's only read shape: the distinct days of one workspace.
+  @@index([workspaceId, day])
+  /// The delete path's read shape: which days one item credited. Postgres does
+  /// not index a foreign key automatically, and without this the cascade itself
+  /// is a sequential scan per delete.
+  @@index([itemId])
+}
+
 model Streak {
   id                String    @id @default(cuid())
   current           Int       @default(0)
   lastActiveWorkday String? // YYYY-MM-DD
+  /// The instant from which `EngagementDay` records EVERY qualifying engagement
+  /// for this workspace (#233).
+  ///
+  /// It is what makes "this day has no ledger row" mean *"nothing happened"*
+  /// rather than *"the ledger was not keeping records yet"*, and the recompute
+  /// refuses to act on any run that begins before it. Rows written by the
+  /// backfill are best-effort archaeology from surviving `RewardEvent` and
+  /// `BrainDumpItem` rows; rows written after this instant are complete.
+  ///
+  /// An INSTANT and not a `YYYY-MM-DD` day, deliberately: comparing a day's local
+  /// midnight against it is a JS comparison using the same `ymd()`/`Date` the
+  /// rest of the streak uses, whereas a day string would need the migration's SQL
+  /// to agree with the app process about which timezone "today" is in. It does
+  /// not, and cannot be made to.
+  ///
+  /// NOT NULL with `@default(now())`, so the column needs no null branch: the
+  /// migration stamps every existing row with the instant it ran, and a Streak
+  /// row created later is stamped when it is created. A workspace with no Streak
+  /// row has never recorded an engagement (`touchStreakOnEngagement` creates it
+  /// first), so nothing is missed by starting from creation.
+  ledgerFrom        DateTime  @default(now())
   workspaceId       String    @unique
   workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }

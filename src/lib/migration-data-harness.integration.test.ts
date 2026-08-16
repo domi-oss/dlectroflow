@@ -548,6 +548,108 @@ describe("the migrations applied to a database that already holds rows (#190)", 
     }
   });
 
+  /**
+   * #233 — the engagement-ledger backfill, asserted rather than merely survived.
+   *
+   * This is the sixth data-dependent shape and the only one that **cannot fail** on
+   * an empty source: `INSERT … SELECT` over nothing writes nothing and reports
+   * success. So "the migration applied" — the first test in this file — says almost
+   * nothing about it, and the coverage measurement could not see it at all until
+   * `backfill-insert-select` was added to the classifier. What it DID is here.
+   *
+   * The seed is `migration-seeds/20260811180000_braindump_item_client_key.sql`; its
+   * header explains each case. The counts below are written as explicit day lists
+   * rather than as totals, because a total is the one assertion a backfill that
+   * doubled every row would still satisfy.
+   */
+  it("backfills the engagement ledger from surviving rows, and only from the right ones (#233)", async () => {
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const daysOf = async (workspaceId: string) =>
+        (
+          await prisma.engagementDay.findMany({
+            where: { workspaceId },
+            orderBy: [{ day: "asc" }, { kind: "asc" }],
+            select: { day: true, kind: true, itemId: true },
+          })
+        ).map((r) => [r.day, r.kind, r.itemId]);
+
+      // Workspace A. 2026-08-01 carries THREE credits — one capture (the two
+      // items that day collapsed to one by DISTINCT) plus `step_done` and
+      // `task_complete`, which are different kinds on the same day and so must
+      // both survive. 2026-08-02 is a capture-only day, 2026-08-03 a
+      // reward-only day.
+      //
+      // ⚠️ 2026-08-05 is ABSENT, and that is the assertion this seed exists for:
+      // `inbox_zero`, `scheduled` and `session_finished` all landed on it, and
+      // none of them advances the streak. A backfill that copied every reward
+      // type would credit a day the app never counted.
+      //
+      // The three reward-kind rows below are also what pins the SHAPE of the
+      // backfill's second re-run guard, which is not obvious from reading it and
+      // was proposed for "tightening" in review on !352. Statement 2 is guarded
+      // on `kind <> 'capture'` rather than on the ledger being empty because it
+      // runs after statement 1 in the same transaction and therefore sees
+      // statement 1's capture rows. Changing it to
+      // `NOT EXISTS (SELECT 1 FROM "EngagementDay")` makes all three vanish —
+      // measured, and the reason this assertion lists kinds rather than counting
+      // them.
+      expect(await daysOf("seed-ledger-ws-a")).toEqual([
+        ["2026-08-01", "capture", null],
+        ["2026-08-01", "step_done", null],
+        ["2026-08-01", "task_complete", null],
+        ["2026-08-02", "capture", null],
+        ["2026-08-03", "breakdown_confirmed", null],
+      ]);
+
+      // Workspace B shares 2026-08-01 with A and owns 2026-08-09 alone. The
+      // control for `workspaceId` travelling through the DISTINCT: drop it and
+      // the shared day collapses across tenants.
+      expect(await daysOf("seed-ledger-ws-b")).toEqual([
+        ["2026-08-01", "capture", null],
+        ["2026-08-09", "capture", null],
+      ]);
+
+      // Every backfilled row is UNATTRIBUTED, the captures included. That is the
+      // conservative choice the migration argues for at length: `RewardEvent`
+      // holds no item reference, so a day whose only other engagement was a
+      // completion later reversed by a reopen leaves no trace — and attributing
+      // the capture would let deleting it empty a day that really did hold other
+      // work, revoking a badge somebody earned.
+      expect(
+        await prisma.engagementDay.count({ where: { itemId: { not: null } } }),
+      ).toBe(0);
+
+      // The coverage boundary moved to the start of the day after tomorrow, so no
+      // run beginning before the rollout finished can ever be trusted. Asserted
+      // as a bound rather than an equality, because `now()` is the migration's
+      // instant and not this assertion's.
+      const tomorrow = new Date();
+      tomorrow.setHours(0, 0, 0, 0);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const streaks = await prisma.streak.findMany({
+        where: { workspaceId: { startsWith: "seed-ledger-ws-" } },
+        orderBy: { workspaceId: "asc" },
+        select: { workspaceId: true, current: true, ledgerFrom: true },
+      });
+      expect(streaks.map((s) => s.workspaceId)).toEqual([
+        "seed-ledger-ws-a",
+        "seed-ledger-ws-b",
+      ]);
+      for (const s of streaks) {
+        expect(s.ledgerFrom.getTime()).toBeGreaterThanOrEqual(
+          tomorrow.getTime(),
+        );
+      }
+      // …and the counters were NOT touched. The backfill dates history; it does
+      // not restate the streak, and a statement that recomputed `current` here
+      // would be doing arithmetic on data it has just admitted is incomplete.
+      expect(streaks.map((s) => s.current)).toEqual([3, 1]);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   // ── The close condition of #190 ─────────────────────────────────────────────
   // "Do not close this on a harness that passes. Close it on a harness
   // demonstrated to fail against the pre-fix 20260806100000 migration with

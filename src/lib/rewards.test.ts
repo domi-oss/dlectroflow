@@ -16,7 +16,16 @@ const { prismaMock } = vi.hoisted(() => ({
     // `delete` is mocked even though nothing should call it any more, for the
     // same reason `badge.create` is: a silent regression back to the raising
     // shape is exactly what this file guards. See the lost-race test below.
-    rewardEvent: { findFirst: vi.fn(), delete: vi.fn(), deleteMany: vi.fn() },
+    // #265 — `create` and `count` are what `rewardCompletedSteps` reaches: one
+    // `step_done` row per step the completion closed, then the ten-steps badge
+    // counting those same rows.
+    rewardEvent: {
+      findFirst: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn(),
+      create: vi.fn(),
+      count: vi.fn(),
+    },
   },
 }));
 
@@ -31,6 +40,7 @@ import {
   awardBadge,
   reverseStepCompletionRewards,
   reverseItemCompletionRewards,
+  rewardCompletedSteps,
 } from "./rewards";
 import { BadgeKey, RewardType } from "./constants";
 
@@ -404,5 +414,55 @@ describe("reverseItemCompletionRewards — undoing a whole to-do (#196)", () => 
         includeTaskComplete: false,
       }),
     ).rejects.toMatchObject({ code: "P1001" });
+  });
+});
+
+/**
+ * #265 — the bundling callee `completeItem`'s step payout wraps.
+ *
+ * The quantity property lives here now. It used to be asserted at the call site
+ * in `complete.test.ts` by counting `logReward` calls, and moving the bundle into
+ * a callee moved that assertion one level out — so it is proved directly here
+ * rather than left to a mock's argument.
+ */
+describe("rewardCompletedSteps — one step_done per step the WRITE closed (#265)", () => {
+  beforeEach(() => {
+    prismaMock.rewardEvent.create.mockResolvedValue({});
+    prismaMock.rewardEvent.count.mockResolvedValue(0);
+    prismaMock.badge.findUnique.mockResolvedValue(null);
+    prismaMock.badge.createMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("writes exactly one step_done row per step, and then reads the day's count", async () => {
+    await rewardCompletedSteps("ws", 3);
+    const stepDone = prismaMock.rewardEvent.create.mock.calls.filter(
+      (c) =>
+        (c[0] as { data: { type: string } }).data.type === RewardType.StepDone,
+    );
+    expect(stepDone).toHaveLength(3);
+    // The badge decision reads the rows just written — the dependency that makes
+    // this one tag rather than two.
+    expect(prismaMock.rewardEvent.count).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes NOTHING when the write closed no steps, and still checks the badge", async () => {
+    await rewardCompletedSteps("ws", 0);
+    expect(prismaMock.rewardEvent.create).not.toHaveBeenCalled();
+    expect(prismaMock.rewardEvent.count).toHaveBeenCalledTimes(1);
+  });
+
+  it("awards the ten-steps badge once the day's count reaches ten", async () => {
+    prismaMock.rewardEvent.count.mockResolvedValue(10);
+    await rewardCompletedSteps("ws", 1);
+    expect(prismaMock.badge.createMany).toHaveBeenCalledWith({
+      data: { key: BadgeKey.TenStepsDay, workspaceId: "ws" },
+      skipDuplicates: true,
+    });
+  });
+
+  it("CONTROL: does not award it below ten, so the assertion above is not vacuous", async () => {
+    prismaMock.rewardEvent.count.mockResolvedValue(9);
+    await rewardCompletedSteps("ws", 1);
+    expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
   });
 });
