@@ -888,6 +888,70 @@ describe("#211 — every Google call carries a deadline", () => {
       // And no second budget creeps back in beside the shared one.
       expect(code).not.toMatch(/AbortSignal\.timeout\((?!GOOGLE_FETCH)/);
     });
+
+    /**
+     * The deadline must fit STRICTLY INSIDE the client's wait, with room to
+     * return (Duo review, !368).
+     *
+     * These are two timers over one operation, and until this assertion existed
+     * they were the same number by coincidence. `completeItem`
+     * (`braindump.ts:1167`) awaits its Google sync, and the inbox row runs it
+     * through `withActionTimeout(fn(), INBOX_ACTION_TIMEOUT_MS)` — so an equal
+     * budget means a stalled Google releases the server at the same instant the
+     * client gives up, and the response still has to be serialised and sent
+     * after that. The client wins, and reports a completion that LANDED
+     * LOCALLY as a failed write with Retry armed.
+     *
+     * The relationship, not the number, is the thing being pinned: whatever
+     * either side is retuned to, one Google call plus its response must fit in
+     * the shortest wait a client surface will sit through. Asserted against all
+     * four rather than only the two that reach Google today, so a shopping or
+     * library action that starts syncing later is already covered.
+     *
+     * What this CANNOT promise, stated because the gap is real: a *pool* of
+     * Google calls (a bulk complete, a multi-step push) can still outlast any
+     * client wait, and no per-call budget can fix that. That is exactly why
+     * every Google leg behind a client-bounded action is best-effort and
+     * swallowed, while the surfaces that render a Google timeout message
+     * (`runSchedule`, `breakdown-chat.tsx`, `task-schedule.tsx`) carry no
+     * client-side wait at all.
+     */
+    it("fits strictly inside the shortest client-side wait, with margin", async () => {
+      const surfaces = [
+        "src/components/inbox/inbox-view.tsx",
+        "src/components/focus/focus-timer.tsx",
+        "src/components/library/library-done-delete.tsx",
+        "src/components/shopping/shopping-list.tsx",
+      ];
+      const budgets = new Map<string, number>();
+      for (const file of surfaces) {
+        const src = readFileSync(path.join(process.cwd(), file), "utf8");
+        // A file-level literal, not a built one: `regexp-source-hygiene`
+        // requires every `new RegExp` to come from a literal constant, and a
+        // literal here sidesteps the question entirely.
+        for (const [, name, raw] of src.matchAll(
+          /\b(\w*ACTION_TIMEOUT_MS)\s*=\s*([0-9_]+)/g,
+        )) {
+          budgets.set(`${file}:${name}`, Number(raw.replace(/_/g, "")));
+        }
+      }
+      // The non-zero control. A regex that matched nothing would make the
+      // inequality below vacuously true for every surface at once.
+      expect(budgets.size).toBe(surfaces.length);
+
+      const { GOOGLE_FETCH_TIMEOUT_MS } = await import("./google");
+      for (const [where, ms] of budgets) {
+        expect(ms, `${where} should be a real budget`).toBeGreaterThan(0);
+        expect(
+          GOOGLE_FETCH_TIMEOUT_MS,
+          `${where} must outlast one Google call plus its response`,
+        ).toBeLessThan(ms);
+      }
+      // Named margin rather than "smaller by any amount": the gap has to cover
+      // serialising the action's result and returning it over the network.
+      const shortest = Math.min(...budgets.values());
+      expect(shortest - GOOGLE_FETCH_TIMEOUT_MS).toBeGreaterThanOrEqual(2_000);
+    });
   });
 
   describe("what a timeout MEANS, per call site", () => {

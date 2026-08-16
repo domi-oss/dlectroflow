@@ -780,8 +780,11 @@ operators upgrading a self-hosted instance don't get surprised.
   else to bound it, so clicking **Connect Google** could mean five minutes of blank
   page.
 
-  Every call now shares one 10 s deadline, and **every call site decides what
-  hitting it means**, which is the part that separates a fix from a faster failure.
+  Every call now shares one 8 s deadline — deliberately shorter than the 10 s the
+  app is willing to wait on a server action, so a slow Google can no longer make a
+  completion that actually saved look like one that failed — and **every call site
+  decides what hitting it means**, which is the part that separates a fix from a
+  faster failure.
   A connect that times out says so in words and offers **Try connecting again**,
   because nothing was written and the retry is safe. A token refresh that times out
   is treated as transient: it does not clear your tokens and does not ask you to

@@ -178,8 +178,8 @@ export async function reopenGoogleTaskForStep(
  * #209 asked whether the patches run in parallel, and both extremes are wrong.
  *
  * **Sequential** costs one round trip per step, and `GOOGLE_FETCH_TIMEOUT_MS`
- * (`src/lib/google.ts`) allows each 10 s — so a twenty-step breakdown could hold
- * a server action open for over three minutes, and `bulkBrainDumpAction` loops
+ * (`src/lib/google.ts`) allows each 8 s — so a twenty-step breakdown could hold
+ * a server action open for over two minutes, and `bulkBrainDumpAction` loops
  * over items on top of that. `!288` bounded the blast radius of one stalled
  * connection; it did not make the loop fast, and said so.
  *

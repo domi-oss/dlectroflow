@@ -39,15 +39,8 @@ const RECLAIM_LIST_MATCH = (
  * each other so a new call site cannot quietly skip it.
  *
  * `TASKS_PATCH_TIMEOUT_MS` folded into this. It was 10 s for the bulk-complete
- * loop, this is 10 s for everything, and two equal numbers with two rationales
- * is the state the issue exists to end.
- *
- * `PROVIDER_FETCH_TIMEOUT_MS` is also 10 s and is still deliberately NOT
- * imported (Duo review, `!288`). Equal by coincidence, not by requirement: that
- * one bounds how long a person stares at a sign-in callback, this one bounds how
- * long Google Tasks may hold a schedule push. Sharing it would mean tuning for a
- * slow identity provider silently retuning this module, and would point
- * `google.ts` at the auth module for no other reason.
+ * loop, and two numbers with two rationales for one module is the state the
+ * issue exists to end.
  *
  * `AbortSignal.timeout` rather than the hand-owned timer in
  * `focus-catalog-source.ts`: that shape exists to avoid truncating a long body,
@@ -55,15 +48,41 @@ const RECLAIM_LIST_MATCH = (
  * `maxResults=100` — so every response is small JSON. A server that answers
  * promptly and then trickles the body should hit this deadline too.
  *
- * 10 s: well above a slow mobile round trip to Google, far below anything a
- * person would sit through. It is also the number every wait a PERSON sits
- * through here already uses — `INBOX_ACTION_TIMEOUT_MS`,
- * `SHOPPING_ACTION_TIMEOUT_MS`, `LIBRARY_ACTION_TIMEOUT_MS`, `focus-timer.tsx`'s
- * `ACTION_TIMEOUT_MS` and `AUDIO_HEADER_TIMEOUT_MS`. `MANIFEST_TIMEOUT_MS` is
- * the one deliberate outlier at 5 s, and it is not a counter-example: nobody is
- * waiting on it, because the fallback is the bundled catalog and it is instant.
+ * ── Why 8 s and not the house 10 s ──────────────────────────────────────────
+ *
+ * **It has to fit strictly inside the client's own wait, with room to return**
+ * (Duo review, `!368`). Four surfaces bound a server action at 10 s with
+ * `withActionTimeout` — `INBOX_ACTION_TIMEOUT_MS` and its three siblings — and
+ * one of those actions reaches Google inside that bound: `completeItem`
+ * (`braindump.ts:1167`) awaits its Google sync, and the inbox row runs it
+ * through the wrapper. At an equal 10 s a stalled Google releases the server at
+ * the same instant the client gives up, and the response still has to be
+ * serialised and sent after that — so the client wins and reports a completion
+ * that LANDED LOCALLY as a failed write, with Retry armed on it.
+ *
+ * 8 s keeps 2 s of margin for that return trip, and is still far above a slow
+ * mobile round trip to Google. `google.test.ts` asserts the inequality against
+ * all four client budgets rather than trusting this paragraph, so retuning
+ * either side cannot silently invert it.
+ *
+ * What the margin does NOT buy, because no per-call budget can: a POOL of calls
+ * (a bulk complete, a multi-step push) still outlasts any client wait. That is
+ * why every Google leg behind a client-bounded action is best-effort and
+ * swallowed, while the surfaces that actually render a Google timeout message —
+ * `runSchedule` in `inbox-view.tsx`, `breakdown-chat.tsx`, `task-schedule.tsx` —
+ * carry no client-side wait at all.
+ *
+ * ── And why `PROVIDER_FETCH_TIMEOUT_MS` is separate ─────────────────────────
+ *
+ * Still deliberately NOT imported (Duo review, `!288`), and now for a stated
+ * reason rather than "equal by coincidence": that one bounds a **browser
+ * navigation** through the sign-in callback, where nothing else is holding a
+ * timer, so it has no inequality to satisfy and 10 s is right for it. This one
+ * has to fit under a client wrapper. Two different constraints, so two
+ * constants — and sharing them would let a slow identity provider's retune
+ * silently break this module's margin.
  */
-export const GOOGLE_FETCH_TIMEOUT_MS = 10_000;
+export const GOOGLE_FETCH_TIMEOUT_MS = 8_000;
 
 /**
  * The deadline above fired, expressed as something a caller can act on.
