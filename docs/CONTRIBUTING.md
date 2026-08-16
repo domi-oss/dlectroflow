@@ -134,6 +134,42 @@ place a reference is read is rarely the place it was written. This is the other
 half of the 60-character budget: short titles are what make quoting them inline
 practical.
 
+### Which milestone a closed issue belongs to
+
+**A closed issue never stays in `Backlog`.** `Backlog` is the undated parking lot for
+work that has not been scheduled — so a closed item sitting there is a contradiction:
+if it was handled, it was handled while some milestone was open, and leaving it in the
+park hides that from every count anyone reads.
+
+When you close an issue that carries the `Backlog` milestone, move it to the milestone
+that was open at the time, and **write a note on the item saying what actually
+happened**. The note matters more than the milestone field, because the field cannot
+express the distinction the next reader needs:
+
+- **Work shipped.** Say so and give the date. If it shipped inside that milestone's
+  window, the milestone is now both non-`Backlog` and chronologically true.
+- **Work shipped, but before the currently open milestone began.** File it against the
+  open milestone rather than reopening a closed one, and say plainly in the note that
+  **the note is the ship date, not the milestone.** Reopening closed history to
+  re-file one issue costs more than it clarifies.
+- **Nothing shipped** — the issue closed as a decision, a duplicate, or because its
+  premise was falsified on measurement. Say that explicitly, with no ship date,
+  because the item now sits in a release it contributed nothing to.
+
+**The consequence, and it is the part that is easy to get wrong: a milestone's closed
+count is not a delivery figure.** Once decisions, duplicates and falsified premises
+are recorded against a release, the only place that separates *delivered* from merely
+*closed here* is the milestone description. So a milestone that absorbs closed items
+must say which ones delivered something — otherwise its own count misreports it, and
+the next person to read it has no way to tell.
+
+Why this is worth the ceremony: measured on 2026-08-16, `Backlog` had completed **6 of
+59** items ever filed against it — **10%** — while the current release milestone had
+completed **94%**. A parking lot with closed items in it looks like it has throughput
+it does not have, and that reading is what stops anyone noticing the pile is
+write-only. `Backlog` holding **zero** closed issues is a checkable invariant; "the
+backlog looks about right" is not.
+
 ## 🔒 Security issues — don't open a public issue
 
 Found a vulnerability? **Do not file a public issue.** Follow
