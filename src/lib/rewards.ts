@@ -17,6 +17,7 @@ import { getSettings, getStreak } from "@/lib/db";
 // strings and two derivations differing by an hour would make a streak silently
 // unrecomputable. See that module's docblock.
 import {
+  MAX_LEDGER_LOOKBACK_DAYS,
   isoWeekday,
   parseWorkingDays,
   parseYmd,
@@ -841,8 +842,48 @@ export async function revokeUnqualifiedStreakBadges(
   // legitimately have no Settings row yet, and the default IS its working week.
   const workingDays = parseWorkingDays(settings?.workingDays ?? "1,2,3,4,5");
 
-  const dayRows = await db.engagementDay.findMany({
+  // The ledger read is bounded, and the bound is anchored on the NEWEST day the
+  // ledger actually holds — never on today. Raised in review on !361: this read
+  // ran unbounded while holding the `FOR UPDATE` above, so lock duration grew with
+  // ledger size forever, even though `recomputeRun` never consults more than
+  // `MAX_LEDGER_LOOKBACK_DAYS` of it. It was the outlier — the two sibling reads
+  // are bounded by `{ itemId, workspaceId }` and by `day: { in: … }`.
+  //
+  // ⚠️ **`today - MAX_LEDGER_LOOKBACK_DAYS` is the wrong floor, and it is the
+  // obvious one.** `recomputeRun`'s first loop scans the whole set to find
+  // `lastActiveWorkday`, and says in its own comment that *"the gap between today
+  // and the last active day can be arbitrarily large"* — so a today-relative
+  // floor can exclude the genuine `lastActiveWorkday`. That is not a harmless
+  // loss of precision: dropping the oldest days makes the walk stop at a gap that
+  // is not there, returning a SHORTER run with a LATER `runStart`, and a later
+  // `runStart` is *more* likely to satisfy `runIsFullyLedgered` — so the function
+  // acts where it would have refused, on a run it has understated. That is the one
+  // input that revokes a badge somebody still qualifies for.
+  //
+  // ⚠️ **`streak.ledgerFrom` is the wrong floor too**, for the same reason and
+  // more sharply, even though it is already in hand. Filtering to the covered span
+  // drops pre-coverage days, so the walk stops at the coverage boundary and
+  // `runStart` lands exactly ON it — which turns gate 3's *"this run began before
+  // the ledger was complete, so refuse"* into *"this run began at coverage, so
+  // act"*. It would convert the module's most conservative refusal into its most
+  // dangerous action.
+  //
+  // So: read the newest day first (one indexed row off `@@index([workspaceId,
+  // day])`), then take the window below it. Two bounded queries under the lock
+  // instead of one unbounded scan, and the date arithmetic is done in JS because
+  // `day` is a `String`.
+  const newest = await db.engagementDay.findFirst({
     where: { workspaceId },
+    select: { day: true },
+    orderBy: { day: "desc" },
+  });
+  if (!newest) return []; // empty ledger: nothing to recompute, nothing to revoke
+  const readFloorAt = parseYmd(newest.day);
+  readFloorAt.setDate(readFloorAt.getDate() - MAX_LEDGER_LOOKBACK_DAYS);
+  const readFloor = ymd(readFloorAt);
+
+  const dayRows = await db.engagementDay.findMany({
+    where: { workspaceId, day: { gte: readFloor } },
     select: { day: true },
     distinct: ["day"],
   });
@@ -851,6 +892,23 @@ export async function revokeUnqualifiedStreakBadges(
     workingDays,
     ymd(new Date()),
   );
+
+  // The window's own edge is treated exactly like `truncated`, and for the same
+  // reason. If the run walked all the way down to `readFloor` then the read may
+  // have hidden the day that would have continued it, so `current` is a floor
+  // rather than an answer and acting on it could understate a real run. Refusing
+  // is the safe direction — it keeps a badge — which is the direction every other
+  // gate in this function errs toward.
+  //
+  // In practice this is unreachable without also setting `truncated`: when the
+  // newest day IS `lastActiveWorkday` (the ordinary case) the window is exactly
+  // the walk's own reach, so a run that touches the floor has taken all
+  // `MAX_LEDGER_LOOKBACK_DAYS` steps and is truncated anyway. It bites only when
+  // `lastActiveWorkday` sits far below the newest day — i.e. every engagement for
+  // ten years landed on a non-working day — and there it fails closed instead of
+  // silently short.
+  const runReachedReadFloor =
+    run.runStart !== null && run.runStart <= readFloor;
 
   // gates 2 and 3. `runStart === null` is tested here as well as inside
   // `runIsFullyLedgered`, which is redundant at runtime and deliberate at the type
@@ -862,6 +920,7 @@ export async function revokeUnqualifiedStreakBadges(
   // checking.
   if (
     run.truncated ||
+    runReachedReadFloor ||
     run.runStart === null ||
     !runIsFullyLedgered(run.runStart, streak.ledgerFrom)
   ) {

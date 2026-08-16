@@ -654,6 +654,93 @@ describe("streak-badge revocation on delete (#233, closing #251's residual)", ()
   });
 });
 
+describe("the ledger read is bounded relative to the MAX day, never to today (#233)", () => {
+  /**
+   * Review on !361 (the review-only sibling of !352). The ledger read inside
+   * `revokeUnqualifiedStreakBadges` ran unbounded while holding
+   * `SELECT … FOR UPDATE` on `Streak`, so lock duration grew with ledger size
+   * forever even though `recomputeRun` never consults more than
+   * `MAX_LEDGER_LOOKBACK_DAYS` of it. Not a correctness defect — the computed
+   * answer was right — so the bound must not change any answer.
+   *
+   * ⚠️ **This test exists to catch the OBVIOUS fix, which is wrong.** Bounding by
+   * `today - MAX_LEDGER_LOOKBACK_DAYS` looks correct and passes every other case
+   * in this file. It is wrong because `recomputeRun`'s first loop deliberately
+   * scans the whole set to find `lastActiveWorkday`, and its own comment says
+   * *"the gap between today and the last active day can be arbitrarily large"*.
+   * A today-relative floor can therefore exclude the genuine `lastActiveWorkday`.
+   *
+   * And excluding it is not a harmless loss of precision — it is the dangerous
+   * direction. Dropping the oldest days makes the walk stop at a gap that is not
+   * really there, which returns a run that is SHORTER with a LATER `runStart`;
+   * a later `runStart` is *more* likely to satisfy `runIsFullyLedgered`, so the
+   * function acts where it would have refused, on a run it has understated. That
+   * is the one input that revokes a badge somebody still qualifies for — the
+   * defect class `4178d58` had just finished closing.
+   *
+   * The seed puts the workspace's ONLY surviving engagement further into the past
+   * than the lookback window, so a today-relative floor drops it and the
+   * recompute sees an empty ledger — `runStart: null`, refuse, badge kept. The
+   * correct max-day-relative bound keeps it, and the revocation goes ahead.
+   * `ledgerFrom` is older still, so gate 3 genuinely passes and the difference
+   * shows up as a different DECISION rather than as two refusals that agree by
+   * accident.
+   */
+  it("still finds a lastActiveWorkday older than the lookback window, and acts on it", async () => {
+    await seedWorkspace(WS, { current: 5, ledgerFromDaysAgo: 5000 });
+    // 4000 > MAX_LEDGER_LOOKBACK_DAYS (3660), so this day is outside any
+    // today-relative window and inside a max-day-relative one.
+    await itemCrediting(WS, "ancient", [dayAgo(4000)]);
+    const doomed = await itemCrediting(WS, "doomed", [dayAgo(0)]);
+    await prisma.badge.create({
+      data: {
+        workspaceId: WS,
+        key: BadgeKey.Streak5,
+        earnedAt: midnightAgo(0),
+      },
+    });
+
+    const { deleteBrainDumpItem } = await import("@/app/actions/braindump");
+    await deleteBrainDumpItem(doomed);
+
+    // The surviving ancient day IS the run: one day long, starting and ending on
+    // itself. So the counter comes down from 5 to 1 and `streak_5` goes.
+    expect(await badgeKeys(WS)).toEqual([]);
+    const streak = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
+    expect(streak?.current).toBe(1);
+    // The control that pins WHY it acted: the recompute found the ancient day
+    // rather than seeing an empty ledger. A today-relative bound leaves this at
+    // today's date, because it refuses and writes nothing at all.
+    expect(streak?.lastActiveWorkday).toBe(dayAgo(4000));
+  });
+
+  /**
+   * The other direction, so the bound is exercised both ways: a ledger whose
+   * relevant days are entirely INSIDE the window still measures normally, with an
+   * out-of-window row also present to prove the bound does not simply return
+   * everything.
+   */
+  it("measures a run entirely inside the window, with an older row present too", async () => {
+    await seedWorkspace(WS, { current: 5, ledgerFromDaysAgo: 5000 });
+    await itemCrediting(WS, "ancient", [dayAgo(4000)]);
+    await itemCrediting(WS, "keeper", [dayAgo(2), dayAgo(1)]);
+    const doomed = await itemCrediting(WS, "doomed", [dayAgo(0)]);
+
+    const { deleteBrainDumpItem } = await import("@/app/actions/braindump");
+    await deleteBrainDumpItem(doomed);
+
+    // `lastActiveWorkday` is the recent one, not the ancient one, and the run is
+    // the two surviving recent days — the ancient row is irrelevant to it.
+    const streak = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
+    expect(streak?.current).toBe(2);
+    expect(streak?.lastActiveWorkday).toBe(dayAgo(1));
+  });
+});
+
 describe("the recompute never RAISES a streak (#233)", () => {
   /**
    * Review round 10 on !352. The counter and the run's END DATE are two separate
