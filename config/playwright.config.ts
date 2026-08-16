@@ -9,6 +9,8 @@ import {
   MEMBER_BASE_URL,
   TOKEN_ENC_KEY,
 } from "../e2e/constants";
+import { expectedBuildSha } from "../e2e/build-identity";
+import { EXPECTED_BUILD_SHA_ENV } from "../src/lib/e2e-build-identity";
 
 // #133 — this file lives in `config/`, not the repo root. Playwright resolves
 // `testDir` and `globalSetup` against THIS FILE's directory, and — the one that
@@ -19,6 +21,49 @@ import {
 // boot `config/.next/standalone/server.js` and fail the preflight check with a
 // message about a missing build rather than about a misconfigured path.
 const REPO_ROOT = path.resolve(__dirname, "..");
+
+// ── #266 — the server on 3000 may belong to a different branch ───────────────
+// `reuseExistingServer` below is on outside CI, and the ports are fixed. With
+// this project's default working mode being many concurrent worktrees, the
+// server already listening on 3000 frequently belongs to another one, and
+// Playwright attaches to it with nothing checking what it was built from.
+// Observed twice inside one review of !349: an all-red run in which
+// `data-theme` was absent everywhere — exactly what a pre-#85 build looks like
+// — clean on an immediate re-run with no change to the tree.
+//
+// The false red costs ten minutes; the false GREEN is why this is code, because
+// a spec that should fail can pass against a build that happens to satisfy it
+// and nothing announces it.
+//
+// Two halves. Here, the checkout's commit is handed to BOTH servers as
+// `BUILD_SHA`, which /api/health has reported since #135; in `e2e/global-setup.ts`
+// the servers are asked what they are and the run is aborted before any spec
+// reports a result if either answers something else.
+//
+// `null` when the checkout cannot be identified at all (no git, no
+// `CI_COMMIT_SHA`). That is not a pass — it switches `reuseExistingServer` off
+// below, so Playwright starts its own server and fails with its own
+// unmistakable "port is already used" rather than attaching to something it
+// cannot verify.
+// Resolved exactly ONCE per run, here, and threaded to `e2e/global-setup.ts`
+// through the environment (Duo review on !370). It used to be resolved a second
+// time inside the assertion, by a second `git` shellout — two answers to one
+// question, and if they disagreed the failure was silent in the worse
+// direction: reuse enabled from the first answer while the second made the
+// guard skip itself. `src/lib/e2e-build-identity.ts` carries the full note at
+// EXPECTED_BUILD_SHA_ENV, including why the environment rather than a shared
+// module instance.
+const EXPECTED_BUILD_SHA = expectedBuildSha(REPO_ROOT);
+
+// Written UNCONDITIONALLY, empty when the checkout has no identity, so that
+// "could not identify" is a value global setup can read rather than an absence
+// it has to interpret. An absent variable then means only one thing — the value
+// did not survive the trip — and that is an error there rather than a guess.
+process.env[EXPECTED_BUILD_SHA_ENV] = EXPECTED_BUILD_SHA ?? "";
+
+// Reuse is a LOCAL convenience — in CI Playwright always boots its own — and it
+// is only safe once the server can be asked to prove which build it is.
+const reuseExistingServer = !process.env.CI && EXPECTED_BUILD_SHA !== null;
 
 // ── The server under test is the artefact that ships (#97) ───────────────────
 // `next.config.ts` sets `output: "standalone"`, so production runs
@@ -159,6 +204,13 @@ const bootGuardEnv = {
   // does not answer on localhost. Not a test workaround — it is the production
   // value. src/lib/dockerfile-hygiene.test.ts asserts all three agree.
   HOSTNAME: "0.0.0.0",
+  // #266 — what /api/health reports back, and therefore the only thing that can
+  // tell this server apart from the one another worktree left on the same port.
+  // Spread conditionally rather than defaulted to "": `shortBuildSha` rejects a
+  // non-SHA, so an empty string would report `sha: null` exactly as an absent
+  // key does, while also tripping the diagnostic warning that module reserves
+  // for a value someone actually set wrongly.
+  ...(EXPECTED_BUILD_SHA ? { BUILD_SHA: EXPECTED_BUILD_SHA } : {}),
   // Only when there is one to forward — otherwise leave the key unset rather
   // than handing the server an empty connection string.
   ...(DATABASE_URL ? { DATABASE_URL } : {}),
@@ -369,7 +421,7 @@ export default defineConfig({
       // #133: defaults to the CONFIG's directory, which is `config/` now.
       cwd: REPO_ROOT,
       url: `${BASE_URL}/api/health`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer,
       timeout: 180_000,
       env: bootGuardEnv,
     },
@@ -377,7 +429,7 @@ export default defineConfig({
       command: memberServerCommand,
       cwd: REPO_ROOT,
       url: `${MEMBER_BASE_URL}/api/health`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer,
       timeout: 180_000,
       env: memberServerEnv,
     },

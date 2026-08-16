@@ -796,6 +796,20 @@ operators upgrading a self-hosted instance don't get surprised.
   frozen. Nothing here ever reached the server; what was at stake was the sentence
   you were part-way through.
 
+- **A local end-to-end run can no longer test the wrong branch (#266).** Playwright
+  reuses an existing server outside CI, on fixed ports, and this project's default
+  working mode is many concurrent worktrees — so the server it attached to
+  frequently belonged to a different branch, with nothing checking which. It was
+  seen twice inside one review as an all-red run that came back clean on an
+  immediate re-run with no change to the tree; the more expensive direction is the
+  opposite, a spec that should fail passing against a build that happens to satisfy
+  it. The checkout's commit is now handed to the servers under test, `/api/health`
+  is asked for it back before any spec runs, and a mismatch aborts the run naming
+  both commits and the port to free, so it can never be read as a failing feature.
+  When the commit cannot be established at all, server reuse is switched off rather
+  than left unverified. No effect on a self-hosted instance or on CI, where
+  Playwright always starts its own server — this is this project's own test harness.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
