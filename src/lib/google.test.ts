@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { decryptToken, encryptToken } from "@/lib/crypto/token-cipher";
 
@@ -733,5 +735,266 @@ describe("Google Tasks URL construction (#79)", () => {
         expect(fetchMock).not.toHaveBeenCalled();
       },
     );
+  });
+});
+
+// ── #211 — a deadline on every call, and a decided meaning for hitting it ────
+//
+// Node's fetch defaults to a 300 s header timeout, so a Google endpoint that
+// accepts the connection and then goes quiet held six of this module's seven
+// calls open for five minutes with no error and nothing on screen. !288 covered
+// the seventh (the PATCH, the one call inside a loop) and deliberately did not
+// widen; this is the widening.
+//
+// Two halves, and the second is the one that makes it a fix rather than a
+// faster failure: every call gets a deadline, and every call site DECIDES what
+// hitting it means. A timeout is not a dead grant, is not a missing task, and
+// on the create path is not even proof that nothing was written.
+describe("#211 — every Google call carries a deadline", () => {
+  /**
+   * A rejection shaped exactly like the one a real deadline produces.
+   *
+   * Measured rather than assumed, on both Node majors in play — `node:22-alpine`
+   * (the CI image, v22.23.1) and the local v26.4.0 — against a server that
+   * accepts the connection and never answers: `fetch` rejects with the signal's
+   * own reason, a `DOMException` whose `name` is `TimeoutError` and whose
+   * `message` is "The operation was aborted due to timeout". It is an `Error`
+   * (`instanceof Error === true`), which is exactly why the OAuth callback used
+   * to put that sentence in a URL: its `err instanceof Error ? err.message`
+   * branch accepts it.
+   */
+  function deadlineRejection(): DOMException {
+    return new DOMException(
+      "The operation was aborted due to timeout",
+      "TimeoutError",
+    );
+  }
+
+  /** A live credential whose access token expires imminently, so every read
+   *  goes down the refresh path. */
+  function refreshingRow() {
+    return connectedRow({ refreshToken: encryptToken("live-rt") });
+  }
+
+  function stubFetch(impl: ReturnType<typeof vi.fn>) {
+    vi.stubGlobal("fetch", impl);
+    return impl;
+  }
+
+  /** The `init` object handed to the Nth `fetch` call. */
+  function initOf(fetchMock: ReturnType<typeof vi.fn>, n = 0) {
+    return fetchMock.mock.calls[n][1] as { signal?: AbortSignal };
+  }
+
+  describe("the signal reaches every call site", () => {
+    it("exchangeCode — the OAuth callback, the worst of the six", async () => {
+      const fetchMock = stubFetch(
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ access_token: "g-at", expires_in: 3600 }),
+        }),
+      );
+      prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+      const { exchangeCode } = await import("./google");
+      await exchangeCode(USER, "code", "verifier", "https://app/cb");
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("refreshAccessToken — reached by every path that syncs", async () => {
+      prismaMock.googleAuth.findUnique.mockResolvedValue(refreshingRow());
+      const fetchMock = stubFetch(
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ access_token: "fresh-at", expires_in: 3600 }),
+        }),
+      );
+      prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+      const { getValidAccessToken } = await import("./google");
+      await getValidAccessToken(USER);
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("disconnectGoogle's revoke — the Disconnect button waits on it", async () => {
+      prismaMock.googleAuth.findUnique.mockResolvedValue(
+        connectedRow({ expiresAt: null }),
+      );
+      const fetchMock = stubFetch(vi.fn().mockResolvedValue({ ok: true }));
+      const { disconnectGoogle } = await import("./google");
+      await disconnectGoogle(USER);
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("listTaskLists — the list read behind every push", async () => {
+      const fetchMock = stubFetch(
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+      );
+      const { listTaskLists } = await import("./google");
+      await listTaskLists("tok");
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("createGoogleTask — a schedule push", async () => {
+      const fetchMock = stubFetch(
+        vi
+          .fn()
+          .mockResolvedValue({ ok: true, json: async () => ({ id: "g-1" }) }),
+      );
+      const { createGoogleTask } = await import("./google");
+      await createGoogleTask("tok", "list-9", { title: "t" });
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("upsertGoogleTask's PATCH branch — a re-schedule", async () => {
+      const fetchMock = stubFetch(vi.fn().mockResolvedValue({ ok: true }));
+      const { upsertGoogleTask } = await import("./google");
+      await upsertGoogleTask("tok", "list-9", "gtask-9", { title: "t" });
+      expect(initOf(fetchMock).signal).toBeInstanceOf(AbortSignal);
+    });
+
+    /**
+     * The checkbox that says "one shared constant, not seven literals".
+     *
+     * Read off the source because that is the only surface on which "every
+     * fetch" is a countable claim — a per-call test can only see the calls
+     * somebody remembered to write one for, which is precisely how six of seven
+     * went uncovered for a release. #155 and #194 add callers here next, and
+     * this is what tells them.
+     *
+     * What it can see: a `fetch(` with no `AbortSignal.timeout(
+     * GOOGLE_FETCH_TIMEOUT_MS)` anywhere, and any second timeout literal
+     * reappearing in the module. What it cannot: two deadlines on one call and
+     * none on another, which would keep the totals equal. The per-call tests
+     * above are what cover that half, and both halves are needed.
+     */
+    it("one shared constant covers every fetch in the module", async () => {
+      const source = readFileSync(
+        path.join(process.cwd(), "src/lib/google.ts"),
+        "utf8",
+      );
+      // Block comments and line comments go first: this file's prose says
+      // "fetch" a great many times. `//` only opens a comment at a line start
+      // or after whitespace, which leaves `https://…` in the endpoint
+      // constants alone.
+      const code = source
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|\s)\/\/.*$/gm, "$1");
+      const calls = code.match(/\bfetch\(/g) ?? [];
+      const deadlines =
+        code.match(/AbortSignal\.timeout\(GOOGLE_FETCH_TIMEOUT_MS\)/g) ?? [];
+      // The non-zero control. A regex that silently matched nothing would
+      // report a module with no fetches at all as fully covered.
+      expect(calls.length).toBeGreaterThanOrEqual(7);
+      expect(deadlines).toHaveLength(calls.length);
+      // And no second budget creeps back in beside the shared one.
+      expect(code).not.toMatch(/AbortSignal\.timeout\((?!GOOGLE_FETCH)/);
+    });
+  });
+
+  describe("what a timeout MEANS, per call site", () => {
+    it("exchangeCode: a connect that timed out is reconnectable, not a raw abort", async () => {
+      // The callback route turns this into `?google=error&reason=…`, which the
+      // banner prints. Leaving the DOMException to escape put "The operation
+      // was aborted due to timeout" in front of the person who clicked Connect.
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const { exchangeCode, GoogleTimeoutError } = await import("./google");
+      const failure = exchangeCode(USER, "code", "verifier", "https://app/cb");
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      await expect(failure).rejects.toThrow(/did not respond/i);
+      await expect(failure).rejects.not.toThrow(/aborted/i);
+      // Nothing was stored, so there is nothing to undo — which is what makes
+      // "try connecting again" a safe thing to offer.
+      expect(prismaMock.googleAuth.upsert).not.toHaveBeenCalled();
+    });
+
+    it("refreshAccessToken: a timeout is transient — no reconnect flag, no cleared tokens", async () => {
+      // The sibling of the 503 case above, and the distinction that matters: a
+      // deadline says nothing about whether the grant is alive, so writing
+      // needsReconnect here would send a connected user to re-consent for a
+      // network blip. Only `invalid_grant` means the grant is dead.
+      prismaMock.googleAuth.findUnique.mockResolvedValue(refreshingRow());
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const { getValidAccessToken } = await import("./google");
+      expect(await getValidAccessToken(USER)).toBeNull();
+      expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
+      expect(prismaMock.googleAuth.upsert).not.toHaveBeenCalled();
+    });
+
+    it("disconnectGoogle: a timed-out revoke still deletes the tokens and says the grant may stand", async () => {
+      // No new branch — the existing catch already draws this line, and the
+      // deadline just makes the Disconnect button answer in seconds instead of
+      // minutes. Locked here because it is the one call site where "we asked
+      // and got no answer" must NOT block the local clean-up.
+      prismaMock.googleAuth.findUnique.mockResolvedValue(
+        connectedRow({ expiresAt: null }),
+      );
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { disconnectGoogle } = await import("./google");
+      await expect(disconnectGoogle(USER)).resolves.toBe(false);
+      expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+        where: { userId: USER },
+      });
+      expect(JSON.parse(String(errorSpy.mock.calls[0][0])).reason).toBe(
+        "revoke_rejected",
+      );
+      errorSpy.mockRestore();
+    });
+
+    it("listTaskLists: says Google was slow, and that nothing was scheduled", async () => {
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const { listTaskLists, GoogleTimeoutError } = await import("./google");
+      const failure = listTaskLists("tok");
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      // `pushStepsToGoogleTasks` renders this message verbatim.
+      await expect(failure).rejects.toThrow(/nothing was scheduled/i);
+    });
+
+    it("createGoogleTask: admits the task may exist, because the request may have landed", async () => {
+      // The honest half. A deadline fires on OUR side; Google may well have
+      // created the task before going quiet, so telling the user "nothing
+      // happened" would send them into a duplicate.
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const { createGoogleTask, GoogleTimeoutError } = await import("./google");
+      const failure = createGoogleTask("tok", "list-9", { title: "t" });
+      await expect(failure).rejects.toBeInstanceOf(GoogleTimeoutError);
+      await expect(failure).rejects.toThrow(/may/i);
+    });
+
+    it("upsertGoogleTask: a timed-out PATCH does not fall through and create a duplicate", async () => {
+      // The 404 branch recreates the task on purpose. A deadline is not a 404 —
+      // the task is probably still there — so the fall-through must not be
+      // reached, or a re-schedule of a stalled connection leaves the user with
+      // two Google tasks and Reclaim with two calendar blocks.
+      const fetchMock = stubFetch(
+        vi.fn().mockRejectedValue(deadlineRejection()),
+      );
+      const { upsertGoogleTask, GoogleTimeoutError } = await import(
+        "./google"
+      );
+      await expect(
+        upsertGoogleTask("tok", "list-9", "gtask-9", { title: "t" }),
+      ).rejects.toBeInstanceOf(GoogleTimeoutError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("patchGoogleTask: rejects, which every best-effort caller already reads as not-synced", async () => {
+      stubFetch(vi.fn().mockRejectedValue(deadlineRejection()));
+      const { patchGoogleTask, GoogleTimeoutError } = await import("./google");
+      await expect(
+        patchGoogleTask("tok", "list-9", "gtask-9", { status: "completed" }),
+      ).rejects.toBeInstanceOf(GoogleTimeoutError);
+    });
+
+    it("a rejection that is NOT our deadline keeps its own identity", async () => {
+      // The classifier keys on the name a real abort carries. A DNS failure or
+      // a dropped socket is a different fault with a different message, and
+      // dressing it up as a timeout would send the reader looking for a slow
+      // network instead of an unreachable one.
+      stubFetch(vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+      const { listTaskLists, GoogleTimeoutError } = await import("./google");
+      const failure = listTaskLists("tok");
+      await expect(failure).rejects.toThrow(/fetch failed/);
+      await expect(failure).rejects.not.toBeInstanceOf(GoogleTimeoutError);
+    });
   });
 });
