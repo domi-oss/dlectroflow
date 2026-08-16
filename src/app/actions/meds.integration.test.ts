@@ -65,8 +65,14 @@ function localYmd(d: Date = new Date()): string {
 
 const TODAY = localYmd();
 
-async function seedWorkspace(id: string, doseId: string) {
+async function seedWorkspace(id: string, doseId: string, medsTracker = true) {
   await db.workspace.create({ data: { id, kind: "user" } });
+  // ⚠️ A `Settings` row with the tracker ON, because that is what an opted-in
+  // workspace looks like and every spec below except the refusals is about one.
+  // Before the flag gate landed there was no settings row here at all, which is
+  // exactly the state the gate now refuses — so the fixture had to say out loud
+  // what it had been assuming.
+  await db.settings.create({ data: { id, workspaceId: id, medsTracker } });
   await db.medication.create({
     data: {
       id: `${id}-med`,
@@ -138,6 +144,154 @@ describe("logMedsDose — workspace scoping", () => {
     expect(
       await logMedsDose({
         medicationDoseId: "no-such-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: false, reason: "unknown-dose" });
+    expect(await db.medsDoseLog.count()).toBe(0);
+  });
+});
+
+/**
+ * #269 — the feature gate on the write path, and why it is not tidiness.
+ *
+ * ⚠️ `Settings.medsTracker` defaults to `false` and `#269`'s own reasoning for
+ * that is legal, not product: *"a workspace that has not opted in genuinely has
+ * no health field"*. `!372` publishes that on /privacy as the Art. 9(2)(a)
+ * position — the switch IS the consent act. **A write path that does not check
+ * the switch makes the published sentence false**, because a stale client, a
+ * cached page or a direct POST could store special-category data for a workspace
+ * that never consented.
+ *
+ * `Medication` and `MedicationDose` rows outlive the toggle (hide-not-delete), so
+ * a valid dose id for an opted-OUT workspace is not an exotic input — it is the
+ * ordinary state of any workspace that has ever turned the tracker off.
+ */
+describe("logMedsDose — the feature gate", () => {
+  it("REFUSES a valid own-workspace dose when the tracker is off, and writes NOTHING", async () => {
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: false },
+    });
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: false, reason: "tracker-off" });
+    // The row count, not just the return value: an action that reported a
+    // refusal and wrote anyway would satisfy a return-value assertion while
+    // storing the health record the refusal exists to prevent.
+    expect(await db.medsDoseLog.count()).toBe(0);
+  });
+
+  it("REFUSES when the workspace has no Settings row at all", async () => {
+    // Fail closed. `getSettings()` creates the row on first use, so a workspace
+    // that has never opened Settings has none — and "no row" is the strongest
+    // possible statement that nobody opted in. A relation filter on a nullable
+    // to-one matches nothing, which is the behaviour wanted rather than a
+    // coincidence, so it is pinned.
+    await db.settings.delete({ where: { workspaceId: WS } });
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: false, reason: "tracker-off" });
+    expect(await db.medsDoseLog.count()).toBe(0);
+  });
+
+  it("does not DELETE anything when the tracker is off — it only refuses", async () => {
+    // ⚠️ Turning the tracker off HIDES and deletes nothing; that is settled and
+    // it is in the privacy copy. So the gate must be a refusal on the way in,
+    // never a sweep. History written while opted in survives opting out.
+    await logMedsDose({
+      medicationDoseId: "itest-269-dose",
+      state: MedsDoseState.Taken,
+      date: TODAY,
+    });
+    expect(await db.medsDoseLog.count()).toBe(1);
+
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: false },
+    });
+    await logMedsDose({
+      medicationDoseId: "itest-269-dose",
+      state: MedsDoseState.Skipped,
+      date: TODAY,
+    });
+    const rows = await db.medsDoseLog.findMany({ where: { workspaceId: WS } });
+    expect(rows).toHaveLength(1);
+    // Untouched, not merely un-deleted: the refused write must not have
+    // overwritten the state either.
+    expect(rows[0].state).toBe(MedsDoseState.Taken);
+  });
+
+  it("writes again once the tracker is switched back on", async () => {
+    // The non-zero control. A gate that refused everything would pass all three
+    // specs above while making the feature inert.
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: false },
+    });
+    await logMedsDose({
+      medicationDoseId: "itest-269-dose",
+      state: MedsDoseState.Taken,
+      date: TODAY,
+    });
+    expect(await db.medsDoseLog.count()).toBe(0);
+
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: true },
+    });
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await db.medsDoseLog.count()).toBe(1);
+  });
+
+  it("answers `tracker-off` distinctly from `unknown-dose`", async () => {
+    // The two refusals are told apart deliberately. A reader whose tracker is off
+    // needs to be sent to Settings; a caller holding a foreign id must learn
+    // nothing. Collapsing them would either leak or mislead.
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: false },
+    });
+    const off = await logMedsDose({
+      medicationDoseId: "itest-269-dose",
+      state: MedsDoseState.Taken,
+      date: TODAY,
+    });
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: true },
+    });
+    const foreign = await logMedsDose({
+      medicationDoseId: "itest-269-dose-other",
+      state: MedsDoseState.Taken,
+      date: TODAY,
+    });
+    expect(off).toEqual({ ok: false, reason: "tracker-off" });
+    expect(foreign).toEqual({ ok: false, reason: "unknown-dose" });
+  });
+
+  it("still refuses a FOREIGN dose whose own workspace has the tracker on", async () => {
+    // The gate must not become the only check. `OTHER_WS` is opted in, so a
+    // gate that asked "is the tracker on for the dose's owner" instead of "for
+    // the caller" would let this through — the two questions look alike and only
+    // one of them is scoping.
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose-other",
         state: MedsDoseState.Taken,
         date: TODAY,
       }),

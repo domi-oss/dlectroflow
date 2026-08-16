@@ -45,7 +45,12 @@ import { MedsDoseState } from "@/lib/constants";
  */
 
 /** Why a log was refused. Every reason is a caller bug, not a reader error. */
-export type MedsLogRefusal = "unknown-dose" | "bad-date" | "bad-state";
+export type MedsLogRefusal =
+  | "unknown-dose"
+  | "bad-date"
+  | "bad-state"
+  /** `Settings.medsTracker` is off, or the workspace has no settings row. */
+  | "tracker-off";
 
 export type MedsLogResult =
   { ok: true; state: MedsDoseState } | { ok: false; reason: MedsLogRefusal };
@@ -152,13 +157,85 @@ export async function logMedsDose(input: {
    * who supplied a foreign id — the answer to "is this yours" must not itself
    * leak the contents.
    */
+  /**
+   * ⚠️ **Scope AND the feature gate, in ONE query.**
+   *
+   * Duo review round 2 of `!364`, grounded: this action validated the state, the
+   * date and the dose's workspace, and never asked whether the workspace had the
+   * tracker **on**. A server action is a POST endpoint the client can reach
+   * without loading any page, so a gate only in Settings makes the switch
+   * cosmetic — "off" would mean "the controls are hidden" rather than "the
+   * feature is not running". `shoppingWorkspace()` in
+   * `src/app/actions/shopping.ts` makes exactly that argument for its own column,
+   * and `Settings.medsTracker`'s schema comment says it follows `shoppingList`
+   * exactly.
+   *
+   * **Here it is more than defence in depth, and the difference is worth
+   * naming.** `#269` defaults the column `false` for a legal reason — *"a
+   * workspace that has not opted in genuinely has no health field"* — and `!372`
+   * publishes that on /privacy as the Art. 9(2)(a) position, with the switch as
+   * the consent act. A write path that skips the check makes the published
+   * sentence false: special-category data could be stored for a workspace that
+   * never consented. Nor is it exotic input — `Medication` and `MedicationDose`
+   * rows outlive the toggle, because turning it off HIDES rather than deletes,
+   * so a valid dose id belonging to an opted-out workspace is the ordinary state
+   * of anyone who has ever switched it off.
+   *
+   * **One query rather than a settings read beside a dose read**, so there is no
+   * window between deciding the dose is in scope and deciding the workspace is
+   * opted in. It also forces the question to be asked the right way round: the
+   * filter walks `medication → workspace → settings` from the CALLER's
+   * `workspaceId`, so it answers "does the caller's own workspace have this on",
+   * never "does the dose's owner" — those look alike and only one of them is
+   * scoping. A spec logs a foreign dose whose own workspace IS opted in, which is
+   * the input that tells the two apart.
+   *
+   * `Settings` is a nullable to-one, so a workspace with no row matches nothing
+   * and fails CLOSED. That is wanted rather than incidental: `getSettings()`
+   * creates the row on first use, so no row means the reader has never opened
+   * Settings, which is the strongest possible statement that nobody opted in.
+   *
+   * ⚠️ **It refuses; it never deletes.** Off hides the history and removes no
+   * row — a sweep here would make /privacy, /help and the archive's README false
+   * at once, about a health record.
+   *
+   * The residual read→write gap is real and unchanged: this is still a check
+   * before an upsert, exactly as the dose-scoping check always was. Closing it
+   * would mean denormalising the flag onto a column the write's own `where`
+   * could carry, and that is not worth a column — the rows are the caller's own
+   * either way, so what this protects is the switch's PROMISE. The boundary
+   * between one person's data and another's is the `workspaceId` filter, and it
+   * is inside this same `where`.
+   */
   const dose = await prisma.medicationDose.findFirst({
-    where: { id: medicationDoseId, medication: { workspaceId } },
+    where: {
+      id: medicationDoseId,
+      medication: {
+        workspaceId,
+        workspace: { settings: { medsTracker: true } },
+      },
+    },
     select: { id: true },
   });
-  // The same answer for "not yours" and "does not exist", deliberately: telling
-  // the two apart is an existence oracle over another workspace's ids.
-  if (!dose) return { ok: false, reason: "unknown-dose" };
+
+  if (!dose) {
+    /**
+     * Which of the two refusals it was.
+     *
+     * Only on the failure path, so the happy path stays at one query. The two
+     * are told apart because the right response differs: a reader whose tracker
+     * is off needs sending to Settings, while a caller holding an id that is not
+     * theirs must learn nothing — so "not yours" and "does not exist" still
+     * answer identically to each other, and neither is an existence oracle over
+     * another workspace's ids. Reporting the caller's OWN switch back to them
+     * discloses nothing they did not set.
+     */
+    const optedIn = await prisma.settings.findFirst({
+      where: { workspaceId, medsTracker: true },
+      select: { workspaceId: true },
+    });
+    return { ok: false, reason: optedIn ? "unknown-dose" : "tracker-off" };
+  }
 
   await prisma.medsDoseLog.upsert({
     where: {
