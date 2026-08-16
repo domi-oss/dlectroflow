@@ -124,21 +124,20 @@ function renderChat(initial: Proposal = proposal) {
  * on purpose because that MR was about a row surviving in the snapshot; this one
  * needs the opposite.
  */
-function heldReplan(
-  answer: Proposal = {
-    parentEmoji: "📋",
-    steps: [
-      { text: "Planned A", estMinutes: 20, subtaskEmoji: "🎯" },
-      { text: "Planned B", estMinutes: 25, subtaskEmoji: "📝" },
-    ],
-  },
-) {
+const ANSWER: Proposal = {
+  parentEmoji: "📋",
+  steps: [
+    { text: "Planned A", estMinutes: 20, subtaskEmoji: "🎯" },
+    { text: "Planned B", estMinutes: 25, subtaskEmoji: "📝" },
+  ],
+};
+
+function heldReplan(event: StreamEvent = { type: "steps", data: ANSWER }) {
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
   const encoder = new TextEncoder();
-  const event: StreamEvent = { type: "steps", data: answer };
   const fetchMock = vi.fn(async () => {
     let delivered = false;
     return {
@@ -354,6 +353,47 @@ describe("#238 — an edit made while a re-plan streams", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Add a step" }),
     );
+  });
+
+  it("treats a fallback plan the same way — it replaces the list just as wholesale", async () => {
+    renderChat();
+    // The provider gave up, so the server sends a hand-built starter plan. It
+    // arrives down the same stream, replaces the list identically, and has had
+    // a LONGER edit window — the fallback is sent after the attempt failed.
+    const { fetchMock, release } = heldReplan({
+      type: "fallback",
+      reason: "quota",
+      data: {
+        parentEmoji: "🗂️",
+        steps: [{ text: "Starter step", estMinutes: 10, subtaskEmoji: "•" }],
+      },
+    });
+    await openStream(fetchMock);
+
+    const user = userEvent.setup();
+    await user.type(screen.getAllByLabelText("Step text")[0], " (revised)");
+    await release();
+
+    expect(stepTexts()).toContain("First step (revised)");
+    expect(stepTexts()).toContain("Starter step");
+    expect(replanNotice()).not.toBeNull();
+  });
+
+  it("withdraws the notice when the next re-plan goes out", async () => {
+    renderChat();
+    const first = heldReplan();
+    await openStream(first.fetchMock);
+    const user = userEvent.setup();
+    await user.type(screen.getAllByLabelText("Step text")[0], " (revised)");
+    await first.release();
+    expect(replanNotice()).not.toBeNull();
+
+    // A notice reports something already finished. Left up while a new answer
+    // is being computed it would be explaining a list about to be replaced.
+    const second = heldReplan();
+    await openStream(second.fetchMock);
+    expect(replanNotice()).toBeNull();
+    await second.release();
   });
 
   it("stays quiet when nothing was touched during the stream", async () => {
