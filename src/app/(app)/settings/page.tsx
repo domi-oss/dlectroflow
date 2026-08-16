@@ -153,8 +153,6 @@ export default async function SettingsPage({
       <div className="border-t pt-4">
         <AgingSection
           settings={{
-            agingThresholdMinutes: settings.agingThresholdMinutes,
-            demoOverrideSeconds: settings.demoOverrideSeconds,
             agingHours: settings.agingHours,
             overdueHours: settings.overdueHours,
             wayOverdueHours: settings.wayOverdueHours,

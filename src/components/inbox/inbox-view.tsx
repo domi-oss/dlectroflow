@@ -35,7 +35,6 @@ import {
 } from "@/components/inbox/drag-announce";
 import {
   isAging,
-  effectiveAgingMs,
   freshnessTier,
   shouldPrompt24h,
   type AgingSettings,
@@ -161,6 +160,20 @@ export const INBOX_ACTION_TIMEOUT_MS = 10_000;
 
 /** How long "captured ✓" stays on screen after a write resolves. */
 const CAPTURE_CONFIRM_MS = 1500;
+
+/**
+ * How often the rendered clock re-reads the wall clock, so relative ages and
+ * freshness tiers tick without a navigation.
+ *
+ * #261 — a constant now. It used to be `max(1000, min(agingBoundaryMs, 15_000) / 4)`,
+ * which existed for `demoOverrideSeconds`: an aging boundary ten SECONDS away
+ * needs a tick faster than the boundary or the pill changes late. With the demo
+ * override gone the boundary is at minimum one hour — `updateAgingSettings`
+ * floors every threshold at a whole hour — so the `min` clamped to 15 s and the
+ * `max` never fired, and the expression could only ever produce this number.
+ * A computation with one possible result is a setting that isn't one.
+ */
+const CLOCK_TICK_MS = 3750;
 
 /**
  * #175 — the one-slot capture failure notice is GONE, and this note records what
@@ -1018,10 +1031,9 @@ export function InboxView({
   // interval below keeps ages ticking from here on.
   const [now, setNow] = useState(initialNow);
   useEffect(() => {
-    const ms = Math.min(effectiveAgingMs(settings), 15_000);
-    const id = setInterval(() => setNow(Date.now()), Math.max(1000, ms / 4));
+    const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
     return () => clearInterval(id);
-  }, [settings]);
+  }, []);
 
   // "/" focuses the capture bar (unless already typing in a field).
   useEffect(() => {
@@ -1076,10 +1088,13 @@ export function InboxView({
   const untriagedCount = needsReview.length;
   // #105 — from the render's own clock, not a fresh Date.now(): this count is
   // RENDERED ("· 3 aging 🟡" in NavBadge), so a threshold crossed between the
-  // server's render and hydration is another text mismatch. `demoOverrideSeconds`
-  // puts that threshold seconds away rather than half an hour.
+  // server's render and hydration is another text mismatch. Rarer than it was
+  // now the demo override is gone (#261) and no less of a mismatch when it fires.
+  //
+  // #261 — `freshenedAt` is passed, so an item somebody has confirmed is still
+  // needed leaves this count at the same moment it leaves the amber tier.
   const agingCount = needsReview.filter((i) =>
-    isAging(i.createdAt, settings, now),
+    isAging(i.createdAt, i.freshenedAt, settings, now),
   ).length;
 
   // Fire a desktop reminder once per aging, not-yet-reminded item, then persist
@@ -1087,12 +1102,20 @@ export function InboxView({
   // The inline 24h "still needed?" prompt is the canonical review nudge, so an
   // item whose prompt has been dismissed is excluded here too — dismissing it
   // once means "stop bugging me about this," not just "don't show the banner."
+  //
+  // #261 — `freshenedAt` for the same reason, and this is the surface where it
+  // matters most: "yes, still needed" used to reset the pill and keep sending
+  // desktop notifications, because this predicate read `createdAt` alone.
+  // Nothing else was reachable to stop them but `promptDismissedAt`.
+  //
+  // No render clock here on purpose: this runs in an effect, which is client-only,
+  // so there is no server output for it to disagree with (#105).
   useEffect(() => {
     if (permission !== "granted") return;
     if (!notifyAging) return; // Phase 6 — per-type notification preference
     const due = needsReview.filter(
       (i) =>
-        isAging(i.createdAt, settings) &&
+        isAging(i.createdAt, i.freshenedAt, settings) &&
         i.remindedAt == null &&
         i.promptDismissedAt == null &&
         !notifiedRef.current.has(i.id),
@@ -4333,15 +4356,19 @@ function ItemRow({
   // three feed rendered output (the amber age tint, the StatusPill's WORDS, and
   // whether the "still needed?" nudge exists at all), so a boundary crossed
   // between the server's render and hydration was a structural mismatch, not
-  // just a stale label. In demo mode (`demoOverrideSeconds`) those boundaries
-  // are seconds apart, which is well inside the server↔hydration gap.
-  const aging = isAging(item.createdAt, settings, now);
+  // just a stale label. `demoOverrideSeconds` used to put those boundaries
+  // seconds apart, which is well inside the server↔hydration gap; #261 removed
+  // it, which makes the mismatch rarer and not one bit less of a mismatch.
+  //
+  // #261 — `aging` and `tier` are now the SAME reading, which is the whole point
+  // of the issue: the tint read `agingThresholdMinutes` and the pill read
+  // `agingHours`, so this row could paint an amber age beside a "recent" pill.
+  const aging = isAging(item.createdAt, item.freshenedAt, settings, now);
   const tier = freshnessTier(item.createdAt, item.freshenedAt, settings, now);
   const showStillNeededPrompt = shouldPrompt24h(
     item.createdAt,
     item.freshenedAt,
     item.promptDismissedAt,
-    settings,
     now,
   );
   // ⚠️ `ItemRow`'s OWN delete factory — a different function from `InboxView`'s

@@ -22,7 +22,6 @@ import {
 
 export type RoundupSettings = {
   workdayEndTime: string;
-  roundupDemoOverride: boolean;
   roundupEmailEnabled: boolean;
   roundupEmail: string | null;
   // Phase 6 — gates the round-up's *browser notification* (the in-app recap is
@@ -103,31 +102,27 @@ export function RoundupCard({
     run(true);
   };
 
-  // Workday-end firing. Demo override → fires ~4s after load (once per mount,
-  // ignores the daily guard so you can re-demo). Otherwise fires once when the
-  // clock passes the workday-end time (guarded per day via localStorage).
+  // Workday-end firing: once, when the clock passes the workday-end time,
+  // guarded per day via localStorage.
+  //
+  // #261 — `roundupDemoOverride` used to sit in front of both halves of that
+  // sentence, firing ~4s after mount and skipping the daily guard so a demo
+  // could be re-run. Both branches are gone with the column, which is what
+  // leaves `mountedAt` with no reader: the mount clock existed ONLY to measure
+  // the demo countdown from (#23 moved it out of the render for purity, it did
+  // not give it a second job).
   const firedRef = useRef(false);
-  // #23 — the mount clock is read in the effect, not during render (reading
-  // Date.now() in a `useRef` initialiser is an impure render, react-hooks/
-  // purity). Assigned once, so the ~4s demo countdown is still measured from
-  // the card's first mount even if this effect re-runs on a settings change.
-  const mountRef = useRef<number | null>(null);
   useEffect(() => {
-    mountRef.current ??= Date.now();
-    const mountedAt = mountRef.current;
     const dayKey = `dlectroflow-roundup-fired-${ymd(new Date())}`;
-    if (!settings.roundupDemoOverride && localStorage.getItem(dayKey)) {
+    if (localStorage.getItem(dayKey)) {
       firedRef.current = true;
       return;
     }
     const tick = () => {
       if (firedRef.current) return;
-      const target = settings.roundupDemoOverride
-        ? mountedAt + 4000
-        : targetTimeToday(settings.workdayEndTime);
-      if (Date.now() < target) return;
+      if (Date.now() < targetTimeToday(settings.workdayEndTime)) return;
       firedRef.current = true;
-      if (!settings.roundupDemoOverride) localStorage.setItem(dayKey, "1");
+      localStorage.setItem(dayKey, "1");
       (async () => {
         if (notificationPermission() === "granted" && settings.notifyRoundup) {
           await showReminder(
@@ -144,12 +139,7 @@ export function RoundupCard({
     tick();
     const id = setInterval(tick, 5000);
     return () => clearInterval(id);
-  }, [
-    settings.roundupDemoOverride,
-    settings.workdayEndTime,
-    settings.notifyRoundup,
-    router,
-  ]);
+  }, [settings.workdayEndTime, settings.notifyRoundup, router]);
 
   return (
     <section className="rounded-xl border bg-gradient-to-br from-orange-50 to-amber-50 p-5 dark:from-orange-950/20 dark:to-amber-950/20">
@@ -230,7 +220,6 @@ function RoundupSettingsPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [endTime, setEndTime] = useState(settings.workdayEndTime);
-  const [demo, setDemo] = useState(settings.roundupDemoOverride);
   const [emailOn, setEmailOn] = useState(settings.roundupEmailEnabled);
   const [email, setEmail] = useState(settings.roundupEmail ?? "");
 
@@ -238,7 +227,6 @@ function RoundupSettingsPanel({
     startTransition(async () => {
       await updateRoundupSettings({
         workdayEndTime: endTime,
-        roundupDemoOverride: demo,
         roundupEmailEnabled: emailOn,
         roundupEmail: email.trim() || null,
       });
@@ -249,15 +237,6 @@ function RoundupSettingsPanel({
     <details className="mt-4 border-t pt-3 text-sm">
       <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-xs">
         ⚙️ Round-up settings
-        {settings.roundupDemoOverride && (
-          // #109 — 3.01:1 on the light --background, inheriting the summary's
-          // 12px, and only rendered with the round-up demo override set. Same
-          // amber-700/amber-400 pair the "still needed?" link 60 lines above
-          // already uses.
-          <span className="ml-2 text-amber-700 dark:text-amber-400">
-            demo: auto-fires on load
-          </span>
-        )}
       </summary>
       <div className="mt-3 space-y-3">
         <div className="flex flex-wrap items-end gap-4">
@@ -269,14 +248,6 @@ function RoundupSettingsPanel({
               onChange={(e) => setEndTime(e.target.value)}
               className="border-input rounded-md border px-2 py-1"
             />
-          </label>
-          <label className="flex items-center gap-2 pb-1.5 text-xs">
-            <input
-              type="checkbox"
-              checked={demo}
-              onChange={(e) => setDemo(e.target.checked)}
-            />
-            Demo: fire a few seconds after load
           </label>
         </div>
 

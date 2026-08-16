@@ -102,8 +102,6 @@ import {
 import { dropPlan } from "@/components/inbox/move-dispatch";
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 30,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

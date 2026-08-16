@@ -147,11 +147,9 @@ export default async function LibraryPage({
   const activeTab = TABS.find((it) => it.param === active)!;
   const rows = buckets[activeTab.bucket];
   // Mirrors the Inbox's own AgingSettings slice (inbox/page.tsx) — the same
-  // five fields, threaded down to both LibraryRows and LibraryMultistep so
+  // three fields, threaded down to both LibraryRows and LibraryMultistep so
   // "added Xh ago" aging agrees everywhere in the hub.
   const agingSettings = {
-    agingThresholdMinutes: settings.agingThresholdMinutes,
-    demoOverrideSeconds: settings.demoOverrideSeconds,
     agingHours: settings.agingHours,
     overdueHours: settings.overdueHours,
     wayOverdueHours: settings.wayOverdueHours,
