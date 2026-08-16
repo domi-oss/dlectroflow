@@ -772,6 +772,26 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Editing a step while a new plan is on its way no longer loses what you typed
+  (#238).** Asking for fewer or more steps, or sending feedback in your own words,
+  gets you a whole new list — and it is worked out from the list as it stood when
+  you asked, so anything you changed in the seconds before it arrived was quietly
+  written over. No warning, nothing saved anywhere, just a plan that no longer said
+  what you had just told it.
+
+  Every control **around** the list already waits for the answer. The five **inside
+  a row** did not: the emoji, the step text, the minutes, the ✕ and the drag handle.
+  They are not held now either, and that is the point — a row is your only copy of
+  the words in it, and a box that goes dead in the middle of a sentence takes your
+  work away just as surely, with even less to show for it.
+
+  So the steps you changed are **kept**, carried across the new plan and put at the
+  end of it. A step you deleted or dragged somewhere else cannot be carried — the
+  new plan is a fresh list, with no way back to the rows it replaced — so instead
+  you are **told**, once, above the list, in a message you can dismiss when you have
+  had a look. Nothing had reached the server in any of this; what was at stake was
+  the sentence you were part-way through.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
