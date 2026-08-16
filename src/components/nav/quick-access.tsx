@@ -72,7 +72,14 @@ function QuickAccessLink({
       // `controlSurface` is the theme toggle's own class string, imported rather
       // than copied: three bordered icon buttons in one cluster have to read as
       // one set, and #117 is what happens when two of a set keep private copies.
-      // `touchTarget` squares a 20px glyph up to the 44px WCAG 2.5.5 minimum.
+      // `touchTarget` squares a 20px glyph up to the app's 44px floor, which is
+      // WCAG 2.5.5 Target Size (Enhanced), AAA — a house convention rather than
+      // the conformance bar. The AA one is 2.5.8 Target Size (Minimum) at 24x24,
+      // met regardless. (#268 — this line said "the 44px WCAG 2.5.5 minimum",
+      // which is the right number wearing the wrong word: it makes a voluntary
+      // AAA floor read as a mandatory AA one, and a legitimate 32x32 control
+      // then looks like a regression. `a11y-class-hygiene` cannot see the
+      // lower-case form, which is why the guard built to catch these missed it.)
       className={cn(controlSurface, touchTarget)}
       aria-label={label}
       title={label}
