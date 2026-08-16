@@ -56,9 +56,12 @@ const RECLAIM_LIST_MATCH = (
  * promptly and then trickles the body should hit this deadline too.
  *
  * 10 s: well above a slow mobile round trip to Google, far below anything a
- * person would sit through. It is also the number every other wait in the app
- * already uses (`INBOX_ACTION_TIMEOUT_MS`, `SHOPPING_ACTION_TIMEOUT_MS`,
- * `LIBRARY_ACTION_TIMEOUT_MS`, `AUDIO_HEADER_TIMEOUT_MS`).
+ * person would sit through. It is also the number every wait a PERSON sits
+ * through here already uses — `INBOX_ACTION_TIMEOUT_MS`,
+ * `SHOPPING_ACTION_TIMEOUT_MS`, `LIBRARY_ACTION_TIMEOUT_MS`, `focus-timer.tsx`'s
+ * `ACTION_TIMEOUT_MS` and `AUDIO_HEADER_TIMEOUT_MS`. `MANIFEST_TIMEOUT_MS` is
+ * the one deliberate outlier at 5 s, and it is not a counter-example: nobody is
+ * waiting on it, because the fallback is the bundled catalog and it is instant.
  */
 export const GOOGLE_FETCH_TIMEOUT_MS = 10_000;
 
