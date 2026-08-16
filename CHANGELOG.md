@@ -796,6 +796,25 @@ operators upgrading a self-hosted instance don't get surprised.
   frozen. Nothing here ever reached the server; what was at stake was the sentence
   you were part-way through.
 
+- **One setting decides when an item is going stale, and it is in hours (#261).**
+  The app answered "is this aging?" two different ways, from two different settings
+  that meant the same thing in different units — an aging threshold in minutes
+  defaulting to 240, and an aging value in hours defaulting to 4. Set one to 240 and
+  the other to 8 and you got different answers depending on which part of the app
+  asked; most visibly, moving the aging threshold did not change when the amber
+  "still needed?" prompt appeared, because that prompt read the other setting. The
+  hours trio is now the single source of truth and the minutes field is gone. **A
+  value you had customised is converted rather than dropped** — 90 minutes becomes
+  2 hours, rounded to the nearest whole hour and never below 1, and only where the
+  hours control was still at its default, so an explicit setting on either control
+  is left exactly as you set it. The demo overrides that made hours of behaviour
+  happen in seconds on stage are removed now that talk has happened, which also
+  retires the ×2/×3/×4 tier scaling that existed only to serve them.
+
+  Also dropped: five database indexes made redundant by a composite key already
+  covering the same leading column (#208). No behaviour change — every read path
+  still resolves through the composite.
+
 - **A local end-to-end run can no longer test the wrong branch (#266).** Playwright
   reuses an existing server outside CI, on fixed ports, and this project's default
   working mode is many concurrent worktrees — so the server it attached to
