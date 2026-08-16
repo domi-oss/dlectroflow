@@ -94,8 +94,25 @@ esac
 # then be invisible behind the monitor's own alarms, which is the failure this
 # monitor exists to prevent, reintroduced one layer up. The filter also excludes
 # the weekly rescan's scanner flakes, which were never merge breakage either.
+#
+# `type == "array"` before `length`, and #203 is why. `curl -s` exits 0 on a 401
+# or a 403 — the transfer SUCCEEDED, the answer is just a JSON object like
+# `{"message":"401 Unauthorized"}` — so `set -o pipefail` never fires and the
+# `?` fallback below is unreachable. `jq 'length'` then reports that object's
+# KEY COUNT:
+#
+#   $ echo '{"message":"401 Unauthorized"}' | jq -r 'length'
+#   1
+#
+# and the digest published "Failed `main` pipelines (last 7d): **1**". A wrong
+# number under a confident label, which is the same failure as the 1969 window
+# above and as #203's empty vulnerability connection — a count printed from
+# bytes nobody checked were a count. The `:-?` guard on the next line covers the
+# other shape: an empty body gives jq no input at all, so it prints nothing and
+# exits 0, leaving the count blank rather than unknown.
 failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&source=push&status=failed${WINDOW}&per_page=100" \
-  | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
+  | jq -r 'if type == "array" then (length | if . == 100 then "100+" else . end) else "?" end' 2>/dev/null || echo '?')"
+failed_pipes="${failed_pipes:-?}"
 
 # ── 2b. Is production actually running `main`? (#147) ─────────────────────────
 # The on-failure alert (alert_pipeline_failure) covers divergence caused by a red
@@ -171,9 +188,18 @@ esac
 # `renovate/` client-side. If the fetched page is full (100 open MRs), Renovate
 # MRs could sit beyond page 1 → suffix the count with `+` to flag the undercount
 # rather than silently understating it.
+#
+# The `type == "array"` guard the two counts either side of this one carry, for
+# the reason given at section 2 (#203). This site already degraded correctly by
+# accident — `.[] | select(.source_branch …)` raises on a JSON object, so jq
+# exits non-zero and the `?` fallback fires — but "it happens to raise" is not a
+# guard, and the empty-body case still left it blank. Stated, not relied upon.
 renovate_mrs="$(curl -s -H "$AUTH" "${API}/merge_requests?state=opened&per_page=100" \
-  | jq -r '([.[] | select(.source_branch | startswith("renovate/"))] | length) as $r
-           | if length == 100 then "\($r)+" else "\($r)" end' 2>/dev/null || echo '?')"
+  | jq -r 'if type != "array" then "?" else
+             ([.[] | select(.source_branch | startswith("renovate/"))] | length) as $r
+             | if length == 100 then "\($r)+" else "\($r)" end
+           end' 2>/dev/null || echo '?')"
+renovate_mrs="${renovate_mrs:-?}"
 
 # ── 4. Security signal — and how old it is (#166) ────────────────────────────
 # This section used to print one number: "Active Vulnerability Report findings
@@ -198,8 +224,13 @@ case "$vuln_status" in
 *) vuln_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
 esac
 
+# Same `type == "array"` guard as section 2, same reason (#203) — and this one
+# sits in the SECURITY section, next to a count that #203 is specifically about,
+# so a denied read rendering as "**1** open security-labelled issues" is the
+# wrong number in the worst place for it.
 sec_issues="$(curl -s -H "$AUTH" "${API}/issues?state=opened&labels=security&per_page=100" \
-  | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
+  | jq -r 'if type == "array" then (length | if . == 100 then "100+" else . end) else "?" end' 2>/dev/null || echo '?')"
+sec_issues="${sec_issues:-?}"
 
 # ── 5. Digest body ───────────────────────────────────────────────────────────
 # Heredoc into a file, then read it back — NOT `$(cat <<EOF …)`. bash 3.2 (the
