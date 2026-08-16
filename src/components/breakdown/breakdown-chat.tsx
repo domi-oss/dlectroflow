@@ -935,7 +935,19 @@ export function BreakdownChat({
   )} ${t("breakdown.ejectHeld", voice)}`;
   /**
    * #212 (!304 review) — the reverse hold, painted: is the plan out, AND is
-   * there an eject affordance for that to be about?
+   * there a row (or a notice) for that to be about?
+   *
+   * #238 widened what it governs without changing what it MEANS. It used to
+   * hold the two eject affordances; it now holds every control inside a row as
+   * well — the emoji, the step text, the minutes, the ✕ and the drag grip —
+   * because a re-plan replaces the step list wholesale with an answer computed
+   * from a snapshot taken when the request went out, so an edit made in the gap
+   * is overwritten with nothing said. Those five were the only controls in the
+   * editor that were not already waiting; the seven around the list have read
+   * `busy` since before #212. The name kept `eject` because renaming it would
+   * churn `!304`'s specs for no behavioural difference, and the second clause
+   * below is why it still reads correctly: it asks whether there is anything on
+   * screen for the hold to be ABOUT, and a row is exactly that.
    *
    * `busy` is the same fact as `planInFlight`, held as state — the ref decides,
    * this paints, exactly the split `ejectsInFlight`/`ejecting` uses. It is read
@@ -1400,8 +1412,17 @@ export function BreakdownChat({
                 key={s.key}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => {
-                  if (dragIndex !== null && dragIndex !== i)
+                  // #238 — the drop half of the hold. Guarding only the grip
+                  // would leave a drag STARTED before the stream able to land
+                  // after it: `dragIndex` survives the transition, and the drop
+                  // is what actually calls `moveStep`. Both ends, or neither.
+                  if (
+                    !ejectHeldByPlan &&
+                    dragIndex !== null &&
+                    dragIndex !== i
+                  ) {
                     moveStep(dragIndex, i);
+                  }
                   setDragIndex(null);
                 }}
                 className={cn(
@@ -1419,27 +1440,61 @@ export function BreakdownChat({
                 )}
               >
                 <div className="flex min-w-0 flex-1 items-center gap-2">
+                  {/* #238 — held while the plan is out, like everything else in
+                      this row. `draggable={false}` is the mechanism: the
+                      element is not focusable and has no key handling, so there
+                      is no press to refuse the way the ✕ below refuses one, and
+                      no state a keyboard user could land on to read a reason
+                      from. `aria-disabled` is still set, because a pointer user
+                      on a screen reader can route to it and the grab cursor
+                      going away is the only other signal it has. */}
                   <span
-                    draggable
+                    draggable={!ejectHeldByPlan}
                     onDragStart={() => setDragIndex(i)}
                     onDragEnd={() => setDragIndex(null)}
                     title="Drag to reorder"
                     aria-label="Drag to reorder"
-                    className="text-muted-foreground hover:text-foreground shrink-0 cursor-grab text-xs select-none active:cursor-grabbing"
+                    aria-disabled={ejectHeldByPlan}
+                    className={cn(
+                      "text-muted-foreground shrink-0 text-xs select-none",
+                      ejectHeldByPlan
+                        ? "opacity-50"
+                        : "hover:text-foreground cursor-grab active:cursor-grabbing",
+                    )}
                   >
                     ⠿
                   </span>
                   <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                     {i + 1}/{proposal.steps.length}
                   </span>
+                  {/* #238 — the three that carry the user's own content, all
+                      held on the same fact as the seven controls around the
+                      list, and all with plain `disabled` to match them.
+
+                      `disabled` rather than the `aria-disabled` its ✕ neighbour
+                      takes, and the difference is not inconsistency: a disabled
+                      element cannot hold focus, which is the whole reason the
+                      eject controls refuse `disabled` — the browser would drop
+                      the user to <body> mid-press. None of these three can be
+                      pressed at all. Every route into a stream (the two quick
+                      replies, the free-text form, the error banner's "Try
+                      again", the mount-time propose) puts focus on the control
+                      that started it, so no caret is ever inside one of these
+                      when the hold arrives, and nothing is dropped anywhere.
+                      What a keyboard user gets instead is these three leaving
+                      the tab order while the ✕ stays in it carrying the reason,
+                      which is one reachable explanation per row rather than
+                      four. */}
                   <EmojiPicker
                     value={s.subtaskEmoji}
                     onSelect={(emoji) => updateStep(i, { subtaskEmoji: emoji })}
+                    disabled={ejectHeldByPlan}
                   />
                   <input
                     value={s.text}
                     onChange={(e) => updateStep(i, { text: e.target.value })}
-                    className="border-input min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
+                    disabled={ejectHeldByPlan}
+                    className="border-input min-w-0 flex-1 rounded-md border px-2 py-1 text-sm disabled:opacity-50"
                     aria-label="Step text"
                   />
                 </div>
@@ -1452,7 +1507,8 @@ export function BreakdownChat({
                       onChange={(e) =>
                         updateStep(i, { estMinutes: Number(e.target.value) })
                       }
-                      className="border-input w-16 rounded-md border px-1 py-1 text-right text-sm"
+                      disabled={ejectHeldByPlan}
+                      className="border-input w-16 rounded-md border px-1 py-1 text-right text-sm disabled:opacity-50"
                       aria-label="Estimated minutes"
                     />
                     <span className="text-muted-foreground text-xs">min</span>
@@ -1525,17 +1581,39 @@ export function BreakdownChat({
                         ? t("breakdown.eject.sending", voice)
                         : t("action.backToInbox", voice)}
                     </button>
+                    {/* #238 — held on the same fact as "Back to inbox" above
+                        it, and by the same mechanism, because until now this
+                        was the odd one out in its own control group: its
+                        neighbour has waited for the plan since `!304` and this
+                        one, one line away, took the press and had it undone by
+                        the answer.
+
+                        `aria-disabled`, never `disabled`, for the reason that
+                        neighbour gives — the control has to stay focusable or
+                        the reason below is unreachable, and a keyboard user
+                        meeting a greyed ✕ with no explanation is #169's harm.
+                        It is also the one control in this row that keeps the
+                        reason for all five: the other four leave the tab order,
+                        so this is where a keyboard user arrives to be told why
+                        the row has gone quiet. The press is refused in the
+                        handler, so nothing slips through. */}
                     <button
                       title="Remove this step"
                       aria-label="Remove this step"
-                      onClick={() => removeStep(i)}
+                      aria-disabled={ejectHeldByPlan}
+                      aria-describedby={
+                        ejectHeldByPlan ? planHeldId : undefined
+                      }
+                      onClick={() => {
+                        if (!ejectHeldByPlan) removeStep(i);
+                      }}
                       // #205 / WCAG 2.5.8 — the worst of the pair at 86.3x16px:
                       // `px-1 text-xs` gave it no vertical padding at all, and it
                       // DELETES a step. Bare `touchTarget`, no `justify-start`: a
                       // centred glyph should stay centred in its 44px box.
                       className={cn(
                         touchTarget,
-                        "text-muted-foreground hover:text-destructive rounded px-1 text-xs",
+                        "text-muted-foreground hover:text-destructive rounded px-1 text-xs aria-disabled:opacity-50",
                       )}
                     >
                       ✕
