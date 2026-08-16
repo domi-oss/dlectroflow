@@ -255,6 +255,50 @@ describe("#238 — the five row controls are held while a re-plan streams", () =
     expect(rowEmoji(0)).not.toBeDisabled();
   });
 
+  /**
+   * #238 (Duo review of `!365`) — the route that has no `mousedown` to close the
+   * grid incidentally.
+   *
+   * `EmojiPicker` closes on an outside `mousedown` or on Escape, and a keyboard
+   * activation of "More steps" fires neither: `click` arrives without a pointer
+   * event, so a picker opened by keyboard is still open when the stream starts.
+   * Every mouse route closes it by accident, which is exactly why this one is
+   * the spec — the first cut withheld the grid without resetting `open`, and
+   * the reappearance and the `aria-expanded` lie were both reachable only here.
+   */
+  it("closes a keyboard-opened picker when the stream starts, and leaves it closed", async () => {
+    renderChat();
+    const user = userEvent.setup();
+
+    rowEmoji(0).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("listbox", { name: "Emoji" })).toBeInTheDocument();
+    expect(rowEmoji(0)).toHaveAttribute("aria-expanded", "true");
+
+    const { fetchMock, release } = heldReplan();
+    vi.stubGlobal("fetch", fetchMock);
+    // Keyboard activation, deliberately: no `mousedown` lands anywhere, so
+    // nothing closes the grid on the way past.
+    screen.getByRole("button", { name: "More steps" }).focus();
+    await act(async () => {
+      await user.keyboard("{Enter}");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // DURING the hold — the window the end-state-only version of this spec
+    // would sail straight through.
+    expect(screen.queryByRole("listbox", { name: "Emoji" })).toBeNull();
+    expect(rowEmoji(0)).toHaveAttribute("aria-expanded", "false");
+    expect(rowEmoji(0)).toBeDisabled();
+
+    await release();
+
+    // And it does not spring back as the row is handed over.
+    expect(screen.queryByRole("listbox", { name: "Emoji" })).toBeNull();
+    expect(rowEmoji(0)).toHaveAttribute("aria-expanded", "false");
+    expect(rowEmoji(0)).not.toBeDisabled();
+  });
+
   it("refuses the ✕ press without dropping the user to <body>", async () => {
     renderChat();
     const { fetchMock, release } = heldReplan();

@@ -68,16 +68,47 @@ export function EmojiPicker({
    * nothing of its own to say, and the shared reason is reachable from the ✕
    * beside it, which stays focusable precisely so it can carry it.
    *
-   * The grid is withdrawn as well as the trigger, and that is not belt and
-   * braces — the popover can be OPEN when the hold starts (the caller's stream
-   * may begin without a click landing outside this component), and a held
-   * trigger with a live grid floating over it is a control that is both
-   * unavailable and operable at the same time.
+   * The grid is CLOSED as well as the trigger held, and the distinction is the
+   * whole of Duo's finding on `!365` — the first cut merely stopped drawing it.
+   * The popover really can be open when the hold arrives: this component closes
+   * on an outside `mousedown` or on Escape, and the keyboard route into the
+   * caller's stream fires neither, so a picker opened with the keyboard is
+   * still open when the row freezes. Every mouse route closes it by accident,
+   * which is why the reachable case is the keyboard one.
    */
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  /**
+   * #238 (Duo review of `!365`) — becoming disabled CLOSES the picker.
+   *
+   * The first cut withheld the grid with `{open && !disabled && …}`, which is a
+   * rendering condition: it draws nothing and leaves `open` exactly as it was.
+   * Two things followed, and the second is worse than the defect #238 exists to
+   * fix — the grid sprang back the instant the hold lifted, with no user action
+   * and at the precise moment the rest of the row was handed back (WCAG 3.2.2);
+   * and `aria-expanded` reported `true` throughout, which is a screen reader
+   * being told a listbox exists that is not in the DOM.
+   *
+   * Adjusted DURING RENDER rather than in an effect, which is React's own
+   * pattern for reacting to a changed prop and what `react-hooks/set-state-in-
+   * effect` requires. It is also the stronger of the two: React re-runs the
+   * component immediately and discards this pass's output, so nothing
+   * inconsistent is ever committed. An effect runs after the commit, so it
+   * would leave that `aria-expanded` lie standing for a render — briefly, but
+   * a screen reader reads the commit, not the intention.
+   *
+   * Keyed on the prop's transition, not on its value: resetting whenever
+   * `disabled` is merely true would slam the picker shut on any re-render
+   * during a hold, which is the same class of bug pointing the other way.
+   */
+  const [wasDisabled, setWasDisabled] = useState(disabled);
+  if (disabled !== wasDisabled) {
+    setWasDisabled(disabled);
+    if (disabled) setOpen(false);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -109,7 +140,7 @@ export function EmojiPicker({
       >
         {value || "🙂"}
       </button>
-      {open && !disabled && (
+      {open && (
         <div
           role="listbox"
           aria-label="Emoji"
