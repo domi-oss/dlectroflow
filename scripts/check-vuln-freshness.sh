@@ -407,10 +407,19 @@ while :; do
 done
 
 # ── 2b. A zero has to be DEMONSTRATED, not merely returned (#203) ─────────────
-# Reading the Vulnerability Report requires `read_security_resource`, and
-# `ops_digest` runs on a dedicated Reporter token, which does not have it. The
-# failure is not a refusal. Measured 2026-08-16 against this project's own
-# endpoint, anonymously, with the walk's query verbatim:
+# Reading the Vulnerability Report requires `read_security_resource`, and a
+# caller that does not have it is NOT refused.
+#
+# Which role carries that ability is deliberately not asserted here, because
+# GitLab's own documentation gives two answers — the permissions matrix lists
+# "View vulnerability report" at Reporter, while the vulnerability report page's
+# own prerequisites say "Security Manager, Developer, Maintainer, or Owner"
+# (both read 2026-08-16). That disagreement is itself the argument for this
+# check: a defence that depends on knowing the answer is only correct while the
+# answer holds, and nobody consuming the digest can see which one is in force.
+#
+# What IS measured, 2026-08-16, against this project's own endpoint with no
+# credential at all and the walk's query verbatim:
 #
 #   {"data":{"project":{"vulnerabilities":
 #     {"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}
@@ -438,10 +447,12 @@ done
 # When the control comes back empty too, that is NOT a pass. A project that has
 # genuinely never recorded a finding and a token that cannot see the report emit
 # the same bytes on this surface, and the honest reading of "the same bytes" is
-# that the count could not be read. (Control on this project, 2026-08-16: the
-# active set reads 0 for a Developer-scoped token while the four-state set reads
-# 885 — so the zero here is real, and it is exactly the reading that needed
-# proving.)
+# that the count could not be read. (Control on this project, 2026-08-16: for a
+# caller that can definitely read the report, the active set is genuinely 0
+# while the four-state set is 885 — so the zero the digest prints today is real,
+# and it is exactly the reading that had no way to prove itself. It also means
+# the two-token comparison #203 proposed could not have settled anything: both
+# would have read 0.)
 # shellcheck disable=SC2016  # `$path` is a GRAPHQL variable — see the queries
 # above.
 CONTROL_QUERY='query($path: ID!) {

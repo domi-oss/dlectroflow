@@ -459,9 +459,13 @@ describe("scripts/check-vuln-freshness.sh", () => {
   // ── #203: a zero has to be DEMONSTRATED, not merely returned ───────────────
 
   it("refuses to print a zero it cannot show the surface returning anything for", () => {
-    // THE #203 test. `ops_digest` runs on a dedicated Reporter token, and
-    // reading the Vulnerability Report needs `read_security_resource`. A caller
-    // without it is not refused — the connection resolves EMPTY. Measured
+    // THE #203 test. Reading the Vulnerability Report needs
+    // `read_security_resource`, and a caller without it is not refused — the
+    // connection resolves EMPTY. (Which role carries that ability is left
+    // unstated on purpose: GitLab's permissions matrix and the vulnerability
+    // report page's own prerequisites disagree, both read 2026-08-16, and a
+    // check that depends on knowing is only right while the answer holds.)
+    // Measured
     // 2026-08-16 against this project's own endpoint with the script's query
     // verbatim and no credential at all: HTTP 200, no `errors`, `data.project`
     // present, `data.project.vulnerabilities` non-null, `nodes: []`. Every

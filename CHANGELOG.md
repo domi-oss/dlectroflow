@@ -1358,10 +1358,10 @@ operators upgrading a self-hosted instance don't get surprised.
     rather than an image swap.
 
 - **The weekly ops digest can no longer report a security posture it did not read
-  (#203).** Reading the Vulnerability Report needs a permission the digest's token
-  does not have, and the refusal is silent — the query resolves to an *empty*
-  result rather than an error, so "nothing was found" and "nobody was allowed to
-  look" arrived as the same bytes and the digest published **0 active findings**
+  (#203).** Reading the Vulnerability Report needs a permission, and a caller that
+  lacks it is not refused — the query resolves to an *empty* result rather than an
+  error, so "nothing was found" and "nobody was allowed to look" arrived as the
+  same bytes and the digest could publish **0 active findings**
   under a ✅. A count of zero is now only printed once the same query has been
   shown returning something; when it cannot be, the digest says the count could
   not be read and marks the section ⚠️ undetermined instead. Two other counts in
