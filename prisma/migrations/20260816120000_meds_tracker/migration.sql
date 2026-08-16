@@ -22,8 +22,7 @@
 --    is the value it permits, and the seeded-deploy harness
 --    (src/lib/migration-data-harness.integration.test.ts) runs it against
 --    populated "Settings" rows rather than an empty table. It is also the one
---    statement that takes a LOCK worth thinking about — see below, where that is
---    now acted on rather than merely noted.
+--    statement whose duration grows with the table — see the lock note below it.
 --
 -- ── Two CHECK constraints, and they need OPPOSITE arguments ────────────────
 --
@@ -188,41 +187,48 @@ ALTER TABLE "Settings"
 -- Mirrors MedsNavMode in src/lib/constants.ts. After the ADD COLUMN above, so
 -- every existing row already holds 'dots' when this validates them.
 --
--- ── Two statements, because this is the one that touches a populated table ───
+-- ── One statement, and the two-statement version was measured to be ceremony ─
 --
--- A plain `ADD CONSTRAINT … CHECK` takes an ACCESS EXCLUSIVE lock on "Settings"
--- for the whole re-validation scan — it blocks reads as well as writes, and
--- migrations run on CONTAINER START, so it lands while the previous pod may
--- still be serving. `NOT VALID` records the constraint without scanning (a brief
--- ACCESS EXCLUSIVE on the catalogue entry only), and `VALIDATE CONSTRAINT` then
--- does the scan under SHARE UPDATE EXCLUSIVE, which readers and writers pass
--- through.
+-- ⚠️ This was briefly `ADD CONSTRAINT … NOT VALID` + `VALIDATE CONSTRAINT`, on
+-- the reasoning that a plain ADD holds ACCESS EXCLUSIVE across the validation
+-- scan while VALIDATE takes only SHARE UPDATE EXCLUSIVE. That reasoning is right
+-- about Postgres and **wrong about how this repo applies migrations**, which is
+-- the only thing that matters here. Both facts were measured rather than read:
 --
--- ⚠️ This deliberately DIVERGES from 20260804120000_google_auth_user_id_not_null,
--- which faced the same choice and took the plain form. Its reasoning does not
--- transfer, and the difference is the bound rather than a change of mind:
--- "GoogleAuth" is capped at one row per account by a UNIQUE column, so that
--- table cannot outgrow "User" — two rows in this deployment. "Settings" is one
--- row per WORKSPACE, and a workspace is created for every guest sandbox as well
--- as every account. Guests are TTL-purged, so the table does not grow without
--- limit, but its size is a function of traffic rather than of the account list.
+--   1. `prisma migrate deploy` runs each migration.sql inside ONE TRANSACTION.
+--      Probed on a scratch schema with a file whose first statement is a valid
+--      CREATE TABLE and whose second is invalid: after the failure the table is
+--      absent, so the first statement rolled back with the second. (It is also
+--      why CREATE INDEX CONCURRENTLY cannot be used in a Prisma migration.)
+--   2. `ALTER TABLE "Settings" ADD COLUMN` takes ACCESS EXCLUSIVE on "Settings"
+--      and, like every lock, holds it until COMMIT. Probed directly: mid-
+--      transaction, pg_locks reports `AccessExclusiveLock` on "Settings" for
+--      that backend.
 --
--- **The honest position is that this row count is not one I can measure.** It is
--- a production number, this branch has never run there, and "small today" is not
--- a property a migration should depend on — which is the whole lesson of the
--- P3009 outage on 2026-08-07. The two-statement form costs one extra line and
--- removes the dependency on the number entirely, so the number does not have to
--- be right.
+-- Together those mean the ADD COLUMNs above already hold ACCESS EXCLUSIVE across
+-- everything below them, so splitting the constraint changed the statement count
+-- and nothing else. Getting the real benefit would need THREE separate migration
+-- FILES — columns, then ADD … NOT VALID, then VALIDATE — which is a lot of
+-- machinery for one CHECK, and this table does not warrant it.
 --
--- ⚠️ The objection to `NOT VALID` is real and is closed separately: a constraint
--- that is added and never validated does not bite, and until now
--- src/lib/enum-constraint-sync.integration.test.ts could not have told —
--- it reads `pg_get_constraintdef` and never looked at `convalidated`, so an
--- unvalidated constraint passed every assertion. That test now requires every
--- registered constraint to be VALIDATED, which is why this form is safe to use
--- here and safe for whoever copies it next.
+-- ⚠️ Recorded because the split was the PREVIOUS review round's own suggestion,
+-- accepted here, and refuted by the next round. A comment explaining a benefit
+-- the execution model does not deliver is worse than no comment, and it is worst
+-- of all on a production-risk decision — so this says what actually happens.
+--
+-- ## What the lock costs, then
+--
+-- The whole file is one ACCESS EXCLUSIVE window on "Settings". Every statement
+-- in it is metadata-only except this validation scan, which is the only part
+-- whose duration grows with rows. "Settings" is one row per WORKSPACE — accounts
+-- plus guest sandboxes, the latter TTL-purged — so the scan is a sequential read
+-- of a table bounded by workspace count, and the window is that scan plus a
+-- handful of catalogue writes.
+--
+-- ⚠️ The production row count is still not a number this branch can measure, and
+-- it is NOT asserted here. What is asserted is the shape: if that table is ever
+-- large enough for this to matter, the fix is the three-file split above, and
+-- this comment is where the next person should start.
 ALTER TABLE "Settings"
   ADD CONSTRAINT "Settings_medsNavMode_check"
-  CHECK ("medsNavMode" IN ('dots', 'next')) NOT VALID;
-
-ALTER TABLE "Settings" VALIDATE CONSTRAINT "Settings_medsNavMode_check";
+  CHECK ("medsNavMode" IN ('dots', 'next'));

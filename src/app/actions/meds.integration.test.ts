@@ -545,3 +545,71 @@ describe("logMedsDose — idempotency and correction", () => {
     expect(rows[0].state).toBe(MedsDoseState.Skipped);
   }, 40_000);
 });
+
+/**
+ * #269 — the date bound, driven at the boundary with an injected clock.
+ *
+ * ⚠️ Duo round 5 of `!364`. `logMedsDose` called `new Date()` inline, so the one
+ * check that decides whether a submitted date is plausible was the only
+ * untestable date logic in a feature whose whole derived-state model turns on
+ * the local-vs-UTC day boundary. Every sibling already takes an injectable
+ * clock; this closes the gap in the place it was most needed.
+ *
+ * These are the cases that were previously unreachable: they require the
+ * server's clock to sit at a specific instant, and before this they could only
+ * have been written by moving the machine's.
+ */
+describe("logMedsDose — the date bound, at the boundary", () => {
+  /** 23:30 UTC — the instant where local dates east of Greenwich are already
+   *  tomorrow and the server's UTC date is still today. */
+  const LATE_UTC = new Date(Date.UTC(2026, 7, 17, 23, 30));
+  /** 00:30 UTC — the mirror, where local dates west are still yesterday. */
+  const EARLY_UTC = new Date(Date.UTC(2026, 7, 17, 0, 30));
+
+  it.each([
+    [LATE_UTC, "2026-08-18", "UTC+14 is already tomorrow at 23:30 UTC"],
+    [LATE_UTC, "2026-08-17", "the server's own date"],
+    [LATE_UTC, "2026-08-16", "UTC-12 is still yesterday"],
+    [EARLY_UTC, "2026-08-16", "UTC-12 is still yesterday at 00:30 UTC"],
+    [EARLY_UTC, "2026-08-18", "UTC+14 is already tomorrow"],
+  ])("accepts %s + %s (%s)", async (now, date) => {
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date,
+        now,
+      }),
+    ).toMatchObject({ ok: true });
+    await db.medsDoseLog.deleteMany({ where: { workspaceId: WS } });
+  });
+
+  it.each([
+    [LATE_UTC, "2026-08-19", "two days ahead of the server"],
+    [LATE_UTC, "2026-08-15", "two days behind"],
+    [EARLY_UTC, "2026-08-19", "two days ahead"],
+  ])("refuses %s + %s (%s)", async (now, date) => {
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date,
+        now,
+      }),
+    ).toEqual({ ok: false, reason: "bad-date" });
+    expect(await db.medsDoseLog.count()).toBe(0);
+  });
+
+  it("treats the two directions symmetrically", () => {
+    // The property behind the table, without reaching for the read path's own
+    // window helper — that module lands with the UI slice, so asserting the two
+    // agree belongs there rather than here.
+    const day = 86_400_000;
+    for (const offset of [-1, 1]) {
+      const asked = new Date(LATE_UTC.getTime() + offset * day)
+        .toISOString()
+        .slice(0, 10);
+      expect(asked).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
+});

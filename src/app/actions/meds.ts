@@ -119,8 +119,27 @@ export async function logMedsDose(input: {
   state: MedsDoseState;
   /** The reader's LOCAL `YYYY-MM-DD`. See {@link MAX_DATE_DRIFT_DAYS}. */
   date: string;
+  /**
+   * The server's clock, injectable.
+   *
+   * ⚠️ Every sibling in this slice already takes one — `deriveTodayDoses`,
+   * `targetTimeToday`, `collectExport` — precisely so the local-vs-UTC day
+   * boundary can be tested without moving the machine's clock. This function
+   * called `new Date()` inline, which made **the one check that decides whether
+   * a submitted date is plausible** the only untestable date logic in the
+   * feature.
+   *
+   * That is not theoretical here: a three-day-window bug lived in this exact
+   * seam, and a latent flake in this file's own spec turned out to be the local
+   * date and the UTC date disagreeing at 00:18 BST. Both were found by accident
+   * rather than by a test that could reach the boundary.
+   *
+   * Optional with a real default, so no caller changes and the production path
+   * is unchanged.
+   */
+  now?: Date;
 }): Promise<MedsLogResult> {
-  const { medicationDoseId, state, date } = input;
+  const { medicationDoseId, state, date, now = new Date() } = input;
 
   // Validated here rather than left to `MedsDoseLog_state_check`. The constraint
   // is the backstop and it stays the backstop — but a caller that reaches it gets
@@ -130,7 +149,7 @@ export async function logMedsDose(input: {
   if (!Object.values(MedsDoseState).includes(state)) {
     return { ok: false, reason: "bad-state" };
   }
-  if (!isPlausibleLocalDate(date, new Date())) {
+  if (!isPlausibleLocalDate(date, now)) {
     return { ok: false, reason: "bad-date" };
   }
 
