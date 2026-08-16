@@ -439,49 +439,91 @@ describe("logMedsDose — idempotency and correction", () => {
       { timeout: 20_000, maxWait: 10_000 },
     );
 
-    // Wait for the holder to have actually inserted, so the lock exists.
-    for (let i = 0; i < 200 && holderPid === 0; i += 1) {
-      await new Promise((r) => setTimeout(r, 25));
+    /**
+     * ⚠️ **Everything from here to the commit runs inside `try/finally`, and
+     * that matters more than it looks.**
+     *
+     * The overlap assertion below is the CONTROL — it exists because a
+     * concurrency test can pass without ever having raced. So its failure path
+     * is the path that runs on the day something is genuinely wrong, and on the
+     * first version that path threw before `release()`, leaving the holder's
+     * transaction parked open inside its `$transaction` callback and its
+     * dedicated client never disconnected. On a Postgres shared between
+     * worktrees, a leaked open transaction holding a row lock makes unrelated
+     * later suites HANG instead of failing fast.
+     *
+     * A control whose failure mode is worse than the defect it detects gets
+     * deleted by whoever is debugging at the time, which would cost the whole
+     * property. So it fails cleanly: one readable assertion, no residue.
+     *
+     * `second` is awaited in the `finally` too. It is a floating promise
+     * otherwise, and on the failure path it is a rejection nobody handles —
+     * blocked on a lock that is about to be released out from under it.
+     */
+    let released = false;
+    const releaseOnce = () => {
+      if (!released) {
+        released = true;
+        release();
+      }
+    };
+    let second: Promise<unknown> | undefined;
+
+    try {
+      // Wait for the holder to have actually inserted, so the lock exists.
+      for (let i = 0; i < 200 && holderPid === 0; i += 1) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(
+        holderPid,
+        "the holding transaction never reported a backend pid",
+      ).toBeGreaterThan(0);
+
+      second = logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Skipped,
+        date: TODAY,
+      });
+
+      // ⚠️ THE ASSERTION THAT MAKES THIS TEST MEAN ANYTHING. Without it the spec
+      // passes for a run in which the two writes never met. `pg_blocking_pids`
+      // names the holder's OWN backend rather than counting waiters, because
+      // this Postgres is shared between worktrees and a database-wide count of
+      // blocked sessions can be satisfied by somebody else's suite entirely.
+      let overlapped = false;
+      for (let i = 0; i < 200 && !overlapped; i += 1) {
+        const [row] = await db.$queryRaw<{ blocked: bigint }[]>`
+          SELECT count(*)::bigint AS blocked
+          FROM pg_stat_activity
+          WHERE pid <> ${holderPid}
+            AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
+        overlapped = Number(row.blocked) > 0;
+        if (!overlapped) await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(
+        overlapped,
+        "the second write never blocked on the first, so the two never raced " +
+          "and this spec proves nothing about a double-tap",
+      ).toBe(true);
+
+      releaseOnce();
+      await held;
+      await expect(second).resolves.toMatchObject({
+        ok: true,
+        state: MedsDoseState.Skipped,
+      });
+    } finally {
+      // Idempotent, so the happy path's own `release()` above is not undone and
+      // the failure path still unparks the transaction.
+      releaseOnce();
+      // Settled, not just released: leaving these pending would hand the next
+      // suite a connection still finishing someone else's work. `catch` on both
+      // because on the failure path they may legitimately reject, and a cleanup
+      // that throws would replace the real assertion message with its own.
+      await held.catch(() => undefined);
+      await second?.catch(() => undefined);
+      await holder.$disconnect();
     }
-    expect(
-      holderPid,
-      "the holding transaction never reported a backend pid",
-    ).toBeGreaterThan(0);
-
-    const second = logMedsDose({
-      medicationDoseId: "itest-269-dose",
-      state: MedsDoseState.Skipped,
-      date: TODAY,
-    });
-
-    // ⚠️ THE ASSERTION THAT MAKES THIS TEST MEAN ANYTHING. Without it the spec
-    // passes for a run in which the two writes never met. `pg_blocking_pids`
-    // names the holder's OWN backend rather than counting waiters, because this
-    // Postgres is shared between worktrees and a database-wide count of blocked
-    // sessions can be satisfied by somebody else's suite entirely.
-    let overlapped = false;
-    for (let i = 0; i < 200 && !overlapped; i += 1) {
-      const [row] = await db.$queryRaw<{ blocked: bigint }[]>`
-        SELECT count(*)::bigint AS blocked
-        FROM pg_stat_activity
-        WHERE pid <> ${holderPid}
-          AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
-      overlapped = Number(row.blocked) > 0;
-      if (!overlapped) await new Promise((r) => setTimeout(r, 25));
-    }
-    expect(
-      overlapped,
-      "the second write never blocked on the first, so the two never raced " +
-        "and this spec proves nothing about a double-tap",
-    ).toBe(true);
-
-    release();
-    await held;
-    await expect(second).resolves.toEqual({
-      ok: true,
-      state: MedsDoseState.Skipped,
-    });
-    await holder.$disconnect();
 
     // One row, and it carries the LATER press. The loser adopted rather than
     // duplicating, which is what the unique index buys.

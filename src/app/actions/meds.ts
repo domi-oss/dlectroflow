@@ -137,28 +137,27 @@ export async function logMedsDose(input: {
   const workspaceId = await currentWorkspaceId();
 
   /**
-   * ⚠️ **The filter that closes the hole the denormalised `workspaceId` opens.**
+   * ⚠️ **Scope AND the feature gate, in ONE query — and both are load-bearing.**
+   *
+   * Consolidated from two stacked docblocks that had accumulated across review
+   * rounds (`!364`); they described the same statement and read as though each
+   * were the last thing before it.
+   *
+   * ## The scoping half: the hole the denormalised `workspaceId` opens
    *
    * `MedsDoseLog` carries its own `workspaceId` so the today-strip can read by
    * date without joining through `Medication`. Nothing in
-   * `@@unique([workspaceId, date, medicationDoseId])` then stops this workspace's
-   * id being paired with ANOTHER workspace's dose: the foreign key proves the
-   * dose exists, not that it belongs here.
+   * `@@unique([workspaceId, date, medicationDoseId])` then stops this
+   * workspace's id being paired with ANOTHER workspace's dose: the foreign key
+   * proves the dose exists, not that it belongs here. So the dose is resolved
+   * through its scoped parent before anything is written — a filter on the
+   * relation, not a check on a value the caller supplied.
+   * `Settings.focusPlaylistIds`' schema comment records the identical reasoning
+   * for a scalar list: *"the write path filters to playlists the resolved
+   * workspace actually owns — so a foreign id cannot be stored even if one is
+   * posted."*
    *
-   * So the dose is resolved through its scoped parent before anything is written
-   * — `medication: { workspaceId }` is a filter on the relation, not a check on
-   * a value the caller supplied. `Settings.focusPlaylistIds`' schema comment
-   * records the identical reasoning for a scalar list: *"the write path filters
-   * to playlists the resolved workspace actually owns — so a foreign id cannot be
-   * stored even if one is posted."*
-   *
-   * `select: { id: true }` rather than the row: nothing below needs the label,
-   * and a narrow select is one fewer thing to accidentally return to a caller
-   * who supplied a foreign id — the answer to "is this yours" must not itself
-   * leak the contents.
-   */
-  /**
-   * ⚠️ **Scope AND the feature gate, in ONE query.**
+   * ## The gate half: the workspace must have opted in
    *
    * Duo review round 2 of `!364`, grounded: this action validated the state, the
    * date and the dose's workspace, and never asked whether the workspace had the
@@ -166,41 +165,44 @@ export async function logMedsDose(input: {
    * without loading any page, so a gate only in Settings makes the switch
    * cosmetic — "off" would mean "the controls are hidden" rather than "the
    * feature is not running". `shoppingWorkspace()` in
-   * `src/app/actions/shopping.ts` makes exactly that argument for its own column,
-   * and `Settings.medsTracker`'s schema comment says it follows `shoppingList`
-   * exactly.
+   * `src/app/actions/shopping.ts` makes exactly that argument for its own
+   * column, and `Settings.medsTracker`'s schema comment says it follows
+   * `shoppingList` exactly.
    *
-   * **Here it is more than defence in depth, and the difference is worth
-   * naming.** `#269` defaults the column `false` for a legal reason — *"a
-   * workspace that has not opted in genuinely has no health field"* — and `!372`
-   * publishes that on /privacy as the Art. 9(2)(a) position, with the switch as
-   * the consent act. A write path that skips the check makes the published
-   * sentence false: special-category data could be stored for a workspace that
-   * never consented. Nor is it exotic input — `Medication` and `MedicationDose`
-   * rows outlive the toggle, because turning it off HIDES rather than deletes,
-   * so a valid dose id belonging to an opted-out workspace is the ordinary state
-   * of anyone who has ever switched it off.
+   * Here it is more than defence in depth. `#269` defaults the column `false`
+   * for a stated legal reason — *"a workspace that has not opted in genuinely
+   * has no health field"* — and the legal amendment that publishes that on
+   * /privacy as the Art. 9(2)(a) position, with the switch as the consent act,
+   * merges before this feature ships. A write path that skips the check would
+   * make that published sentence false. Nor is it exotic input: `Medication`
+   * and `MedicationDose` rows outlive the toggle, because turning it off HIDES
+   * rather than deletes, so a valid dose id belonging to an opted-out workspace
+   * is the ordinary state of anyone who has ever switched it off.
    *
-   * **One query rather than a settings read beside a dose read**, so there is no
-   * window between deciding the dose is in scope and deciding the workspace is
-   * opted in. It also forces the question to be asked the right way round: the
-   * filter walks `medication → workspace → settings` from the CALLER's
-   * `workspaceId`, so it answers "does the caller's own workspace have this on",
-   * never "does the dose's owner" — those look alike and only one of them is
-   * scoping. A spec logs a foreign dose whose own workspace IS opted in, which is
-   * the input that tells the two apart.
+   * ## Why the two halves share one query
+   *
+   * There is no window between deciding the dose is in scope and deciding the
+   * workspace is opted in — and, more usefully, it forces the question to be
+   * asked the right way round. The filter walks `medication → workspace →
+   * settings` from the CALLER's `workspaceId`, so it answers "does the caller's
+   * own workspace have this on", never "does the dose's owner". Those look alike
+   * and only one of them is scoping; a spec logs a foreign dose whose own
+   * workspace IS opted in, which is the input that tells them apart.
    *
    * `Settings` is a nullable to-one, so a workspace with no row matches nothing
-   * and fails CLOSED. That is wanted rather than incidental: `getSettings()`
-   * creates the row on first use, so no row means the reader has never opened
-   * Settings, which is the strongest possible statement that nobody opted in.
+   * and fails CLOSED — wanted rather than incidental, since `getSettings()`
+   * creates the row on first use and no row therefore means nobody has ever
+   * opened Settings.
+   *
+   * `select: { id: true }` because `dose.id` is the only field anything below
+   * uses.
    *
    * ⚠️ **It refuses; it never deletes.** Off hides the history and removes no
    * row — a sweep here would make /privacy, /help and the archive's README false
    * at once, about a health record.
    *
    * The residual read→write gap is real and unchanged: this is still a check
-   * before an upsert, exactly as the dose-scoping check always was. Closing it
+   * before the upsert, exactly as the dose-scoping check always was. Closing it
    * would mean denormalising the flag onto a column the write's own `where`
    * could carry, and that is not worth a column — the rows are the caller's own
    * either way, so what this protects is the switch's PROMISE. The boundary
