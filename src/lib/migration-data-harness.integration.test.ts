@@ -682,19 +682,19 @@ describe("the migrations applied to a database that already holds rows (#190)", 
       });
 
       expect(rows.map((r) => [r.workspaceId, r.agingHours])).toEqual([
-        // 90 min → 2h. Also the row that fails if the division is written
-        // `/ 60`, which is integer division in Postgres and truncates to 1.
-        ["seed-aging-ws-both-set", 10],
         // ⚠️ NEGATIVE CONTROL, listed first by sort order: 90 minutes AND an
         // explicitly chosen 10 hours. The explicit choice survives untouched.
-        ["seed-aging-ws-default", 4],
+        ["seed-aging-ws-both-set", 10],
         // ⚠️ NEGATIVE CONTROL: both columns at their defaults, nothing converted.
-        ["seed-aging-ws-floor", 1],
+        ["seed-aging-ws-default", 4],
         // 30 min → 1h, and the floor is what stops a sub-half-hour threshold
         // rounding to 0 and calling every item aging on capture.
-        ["seed-aging-ws-round-half-even-trap", 3],
+        ["seed-aging-ws-floor", 1],
         // 150 min → 3h. Ties break AWAY FROM ZERO, matching `Math.round` in
         // `updateAgingSettings`. A double-precision division would store 2.
+        ["seed-aging-ws-round-half-even-trap", 3],
+        // 90 min → 2h. Also the row that fails if the division is written
+        // `/ 60`, which is integer division in Postgres and truncates to 1.
         ["seed-aging-ws-round-up", 2],
       ]);
 
