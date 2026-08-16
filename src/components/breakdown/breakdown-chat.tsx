@@ -220,6 +220,105 @@ export function settledEject(
     : { kind: "edited", at };
 }
 
+/**
+ * #238 — what the user did to the plan while a re-plan was streaming.
+ *
+ * A re-plan shows the model a SNAPSHOT of the list and then replaces the list
+ * with the answer, so anything done to a row in between is overwritten. Every
+ * list-level control is held for that window (`disabled={busy}`); the five
+ * inside a row are held by nothing, and all five route here:
+ * `EmojiPicker`, the step text, `estMinutes`, ✕ Remove and the ⠿ drag grip.
+ *
+ * The three fields are compared rather than a reference, because `updateStep`
+ * replaces the row object on every keystroke — an identity check would report
+ * every row as changed the moment anything anywhere was typed.
+ */
+type ReplanDivergence<T> = {
+  /**
+   * Rows still present whose content the user changed. Carried across the
+   * replacement AS THEY ARE — same object, same key — so the row keeps its
+   * place in `ejectButtonRefs` and whatever focus or caret it holds.
+   */
+  kept: T[];
+  /**
+   * How many rows the user deleted. A count, not the rows: a deletion cannot be
+   * "kept", and the answer's rows are a fresh list with no identity mapping back
+   * to the ones they replaced. All that is left is to say it happened.
+   */
+  removed: number;
+  /** The surviving rows are the same ones, in an order the user changed. */
+  reordered: boolean;
+};
+
+/** The fields a row is compared on. Anything wider is fine. */
+type ComparableStep = Pick<
+  EditorStep,
+  "key" | "text" | "estMinutes" | "subtaskEmoji"
+>;
+
+/**
+ * #238 — compare the list as the model was shown it against the list as it
+ * stands now.
+ *
+ * **By key, never by text**, which is `settledEject`'s rule for the reason
+ * `EditorStep` gives: two rows can legitimately say the same thing, and the
+ * words are exactly what an edit changes. With the words as identity, a user
+ * editing row B to say what row A says would read as "A is unchanged" and "B
+ * vanished" — the divergence inverted, on the one input that guarantees it.
+ *
+ * A key the baseline never saw is skipped rather than counted. Nothing can add
+ * a row mid-stream today — "Add a step" is `disabled={busy}` and both eject
+ * routes are gated on `planInFlight` — but a comparison that reported an
+ * unknown key as a change would make a future affordance announce itself on
+ * every single re-plan.
+ *
+ * Pure and exported so it is testable on synthetic rows rather than only
+ * through the component, the shape `settledEject` and every hygiene module in
+ * `src/lib` use.
+ */
+export function replanDivergence<T extends ComparableStep>(
+  before: readonly T[],
+  now: readonly T[],
+): ReplanDivergence<T> {
+  const baseline = new Map(before.map((step) => [step.key, step]));
+  const kept: T[] = [];
+  /** The baseline's rows that are still here, in the order they are in NOW. */
+  const survivors: string[] = [];
+  for (const step of now) {
+    const was = baseline.get(step.key);
+    if (was === undefined) continue;
+    survivors.push(step.key);
+    if (
+      step.text !== was.text ||
+      step.estMinutes !== was.estMinutes ||
+      step.subtaskEmoji !== was.subtaskEmoji
+    ) {
+      kept.push(step);
+    }
+  }
+  const present = new Set(survivors);
+  const removed = before.reduce(
+    (n, step) => (present.has(step.key) ? n : n + 1),
+    0,
+  );
+  // Compared against the baseline with the deleted rows taken out, so a removal
+  // on its own is not also reported as a reorder — it shifts every row after it
+  // and would otherwise light up both.
+  const reordered = before
+    .filter((step) => present.has(step.key))
+    .some((step, i) => step.key !== survivors[i]);
+  return { kept, removed, reordered };
+}
+
+/**
+ * #238 — the notice saying a re-plan landed on top of an edit in progress.
+ *
+ * Holds the KEYS of the rows that were carried over, for two things: choosing
+ * between the two sentences (something was kept, or nothing could be), and
+ * giving the dismiss control somewhere to hand focus when it destroys itself.
+ */
+type ReplanNotice = { keptKeys: readonly string[] };
+
 type ScheduleState = {
   status: "idle" | "scheduling" | "done" | "error";
   count?: number;
@@ -351,11 +450,35 @@ export function BreakdownChat({
    * and so had to choose which failure kept its text.
    */
   const [ejectNotice, setEjectNotice] = useState<EjectNotice | null>(null);
+  /**
+   * #238 — the re-plan that landed on top of an edit, if one did.
+   *
+   * Its own slot rather than a fifth `EjectOutcome`: an eject notice is about
+   * ONE row and carries that row's words so a Retry can resend them, while this
+   * is about the whole list and has nothing to resend. Folding them would give
+   * the eject notice a state in which its `key` means nothing.
+   */
+  const [replanNotice, setReplanNotice] = useState<ReplanNotice | null>(null);
+  /**
+   * The plan as the model was shown it, held for the length of one stream.
+   *
+   * A ref rather than state, and set inside `request` past both gates: it is
+   * read once, in the handler for the answer, and nothing paints from it. It is
+   * also the flag saying a comparison is owed — `applyReplan` nulls it as it
+   * consumes it, so a second `steps` event in the same stream falls through to
+   * the plain replacement. That is deliberate rather than a gap: by then the
+   * baseline describes a list this function has already replaced, and the two
+   * updates share a commit, so `latestSteps` cannot have caught up to answer
+   * honestly. The server sends one answer per stream.
+   */
+  const replanBaseline = useRef<readonly EditorStep[] | null>(null);
   const ejectErrorId = useId();
   const ejectSendingId = useId();
   const ejectHeldId = useId();
   /** The mirror of `ejectHeldId`, for the hold pointing the other way. */
   const planHeldId = useId();
+  /** #238 — the re-plan notice's sentence, pointed at by its dismiss control. */
+  const replanNoticeId = useId();
   /**
    * The notice's Retry control, **and the row that notice was about**.
    *
@@ -436,7 +559,11 @@ export function BreakdownChat({
     const refs = ejectButtonRefs.current;
     const landing = target.rowKey === null ? null : refs.get(target.rowKey);
     (landing ?? addStepRef.current)?.focus();
-  }, [proposal, ejecting, ejectNotice]);
+    // `replanNotice` (#238) is in here for the same reason `ejectNotice` is: its
+    // dismiss control destroys itself, and the commit that unmounts it is the
+    // one this effect has to run on. Without it the hand-off is armed and never
+    // drained, and the next arm fires against a stale target.
+  }, [proposal, ejecting, ejectNotice, replanNotice]);
   /**
    * The current steps, readable from a callback that started renders ago.
    *
@@ -456,6 +583,64 @@ export function BreakdownChat({
     if (!initialProposal && !startManual) void request({ kind: "propose" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * #238 — put a re-plan's answer on screen without throwing away what the user
+   * did to the list while it was streaming.
+   *
+   * The answer replaces the list. That part is unchanged and has to be: it is a
+   * plan, not a patch, and the rows it hands back are a fresh list under fresh
+   * keys with no mapping to the ones they replace. What changes is that the
+   * rows the user EDITED in the meantime are carried across it, and that
+   * anything that could not be carried is said out loud.
+   *
+   * Carried rather than merged, which is the option this deliberately is not.
+   * Merging an edit into the answer needs an identity across the replacement —
+   * "this new row is the one you were typing into" — and no such identity
+   * exists: `!304`'s minted keys make the question askable and do not answer it.
+   * Inventing the match on the words would be the text-identity mistake `!304`
+   * removed, and getting it wrong silently rewrites a row the user is looking at.
+   *
+   * Held-instead was the other option, and it is the one the row controls
+   * already refused for a written reason. Freezing the step text mid-stream
+   * trades one lost edit for another: a user who starts typing into a field that
+   * has gone dead has also lost work, and unlike this case they get no notice at
+   * all because nothing knows it happened. See `ejectStep` — #212 exists because
+   * a row is the only copy of the words in it.
+   *
+   * Appended rather than spliced back at their old indices. Those indices
+   * describe a list that no longer exists — the answer may be shorter, longer or
+   * a completely different shape — so a "position" restored into it would be a
+   * guess presented as the user's own arrangement. The end of the list is
+   * honest about what happened, and the notice says so in words.
+   */
+  function applyReplan(answer: Proposal) {
+    const baseline = replanBaseline.current;
+    // Consumed as it is read: see `replanBaseline`.
+    replanBaseline.current = null;
+    // Fresh keys: a re-proposal is a new list of rows, even where the words
+    // coincide with the ones it replaced. Minted here rather than inside the
+    // updater, which must stay pure — see `latestSteps`.
+    const next = withKeys(answer);
+    if (baseline === null) {
+      setProposal(next);
+      return;
+    }
+    // From the last committed steps, like `ejectStep`'s settlement — the render
+    // that called `request` is many commits ago and its `proposal` is precisely
+    // the snapshot we are comparing AGAINST.
+    const { kept, removed, reordered } = replanDivergence(
+      baseline,
+      latestSteps.current,
+    );
+    setProposal({ ...next, steps: [...next.steps, ...kept] });
+    // Only when something actually diverged. A notice on every re-plan would be
+    // an announcement about nothing in the overwhelmingly common case, and a
+    // live region that cries wolf is one users learn to ignore.
+    if (kept.length > 0 || removed > 0 || reordered) {
+      setReplanNotice({ keptKeys: kept.map((step) => step.key) });
+    }
+  }
 
   async function request(feedback: Feedback, userLabel?: string) {
     if (streaming) return;
@@ -490,8 +675,17 @@ export function BreakdownChat({
     // Raised here — past both gates, before the fetch — so an eject pressed
     // while this stream is open reads it. See `planInFlight`.
     planInFlight.current = true;
+    // #238 — the same snapshot the request below sends, kept so the answer can
+    // be compared against whatever the user does to the list in the meantime.
+    // Taken from the render's `proposal`, which IS what `currentProposal` is
+    // built from four lines down, so the two can never describe different lists.
+    replanBaseline.current = proposal?.steps ?? [];
     setError(null);
     setFallbackNote(null);
+    // A notice about the PREVIOUS re-plan, still on screen. It reports something
+    // finished, so leaving it up while a new answer is being computed would have
+    // it explaining a list that is about to be replaced again.
+    setReplanNotice(null);
     if (userLabel)
       setMessages((m) => [...m, { role: "user", text: userLabel }]);
     setStreaming(true);
@@ -531,12 +725,13 @@ export function BreakdownChat({
             assistantText += ev.delta;
             setStreamText(assistantText);
           } else if (ev.type === "steps") {
-            // Fresh keys: a re-proposal is a new list of rows, even where the
-            // words coincide with the ones it replaced. Minted here rather than
-            // inside the updater, which must stay pure — see `latestSteps`.
-            setProposal(withKeys(ev.data));
+            applyReplan(ev.data);
           } else if (ev.type === "fallback") {
-            setProposal(withKeys(ev.data));
+            // #238 applies here too. A fallback plan replaces the list exactly
+            // as wholesale as a model answer does, and the user has had the
+            // same window to edit — longer, if the provider took its time
+            // before giving up.
+            applyReplan(ev.data);
             setFallbackNote(
               ev.reason === "quota"
                 ? "⚡ You're out of AI breakdowns for now — but here's a solid starter plan you can tweak, and the focus list still works."
@@ -1371,6 +1566,84 @@ export function BreakdownChat({
                 {t("breakdown.eject.sending", voice)}
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── #238: a re-plan that landed on top of an edit in progress ────────
+          A SIBLING of the eject notice above, never inside it, and never with
+          one inside this. Politeness inherits across a live region's whole
+          subtree, so a nested region has no defined announcement — that is
+          #218's shape and `write-notice-hygiene` rule D's finding.
+
+          `role="status"`, not `alert`. Nothing failed: no write was attempted,
+          the plan is not corrupt, and the answer the user asked for is on
+          screen. This reports a divergence between what they typed and what
+          arrived, which is the same class of event as the eject notice's
+          `edited` outcome — and that one is `role="status"` for the same
+          reason. Interrupting a screen reader mid-sentence would overstate it.
+
+          Not a live region nested anywhere, and it does not steal focus either
+          (WCAG 3.2.2): the user is still in the editor with a caret somewhere,
+          and this appeared as the consequence of a request they made, not of a
+          keystroke. Focus IS moved when the dismiss control destroys itself —
+          that is 2.4.3 and the same hand-off "Got it" makes on the eject
+          notice. See `focusAfterUnmount`.
+
+          `STATUS_BANNER_TONE.warn` — "attention, not alarm", measured AA over
+          its own tint in both themes by #109 and never re-spelled here. The
+          outcome is carried by the icon and the words as well as the hue (WCAG
+          1.4.1), and nothing sets `outline-none`, so the UA focus ring draws
+          and 2.4.7 holds without a bespoke indicator. */}
+      {replanNotice && (
+        <div
+          role="status"
+          className={cn(
+            "flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between",
+            STATUS_BANNER_TONE.warn,
+          )}
+        >
+          <p
+            id={replanNoticeId}
+            className="flex min-w-0 items-start gap-1.5 text-sm font-medium"
+          >
+            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="break-words">
+              {t(
+                replanNotice.keptKeys.length > 0
+                  ? "breakdown.replan.editsKept"
+                  : "breakdown.replan.editsReplaced",
+                voice,
+              )}
+            </span>
+          </p>
+          <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+            {/* The only control, and the only way this notice can end: what it
+                reports is already over, so there is nothing to retry and
+                nothing to undo. Same shape as the `edited` eject notice's
+                acknowledgement, including the focus hand-off — this button
+                unmounts itself, which no `aria-disabled` choice can cover. */}
+            <button
+              type="button"
+              aria-describedby={replanNoticeId}
+              onClick={(e) => {
+                // `currentTarget`, read synchronously: this is the button, and
+                // the only question is whether the user is standing on it.
+                if (e.currentTarget === document.activeElement) {
+                  // The first row that was carried across — the thing this
+                  // notice is most about, and a row the user was just editing.
+                  // With nothing kept there is no such row, so it falls through
+                  // to "Add a step", the one control always mounted.
+                  focusAfterUnmount.current = {
+                    rowKey: replanNotice.keptKeys[0] ?? null,
+                  };
+                }
+                setReplanNotice(null);
+              }}
+              className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+            >
+              {t("breakdown.replan.dismiss", voice)}
+            </button>
           </div>
         </div>
       )}

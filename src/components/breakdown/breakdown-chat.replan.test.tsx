@@ -321,9 +321,39 @@ describe("#238 — an edit made while a re-plan streams", () => {
 
     expect(replanNotice()).toBeNull();
     // WCAG 2.4.3 — the control the user was standing on has been destroyed by
-    // its own press, so focus must be placed rather than left to fall to
-    // <body>. Same hand-off the `edited` eject notice's "Got it" makes.
-    expect(document.activeElement).not.toBe(document.body);
+    // its own press, so focus must be PLACED, not left to fall to <body>. Named
+    // rather than merely "not body": a detached node also satisfies that, and a
+    // focus that has silently left the document is the failure, not the pass.
+    // Same hand-off the `edited` eject notice's "Got it" makes — the row the
+    // notice was about, which here is the row that was carried across.
+    const kept = screen
+      .getAllByLabelText("Step text")
+      .findIndex((el) => (el as HTMLInputElement).value.endsWith("(revised)"));
+    expect(kept).toBeGreaterThanOrEqual(0);
+    expect(document.activeElement).toBe(
+      screen.getAllByRole("button", { name: "Back to inbox" })[kept],
+    );
+  });
+
+  it("falls through to Add a step when the dismiss has no kept row to land on", async () => {
+    renderChat();
+    const { fetchMock, release } = heldReplan();
+    await openStream(fetchMock);
+
+    // A deletion: nothing can be carried, so the notice names no row.
+    fireEvent.click(screen.getAllByLabelText("Remove this step")[0]);
+    await release();
+
+    const user = userEvent.setup();
+    const dismiss = screen.getByRole("button", { name: "Got it" });
+    dismiss.focus();
+    await user.click(dismiss);
+
+    // The one control that is always mounted whatever the list does — the same
+    // last-resort landing spot #212 chose for an ejected row's unmount.
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Add a step" }),
+    );
   });
 
   it("stays quiet when nothing was touched during the stream", async () => {

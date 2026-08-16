@@ -1127,6 +1127,48 @@ export const STRINGS = {
   // places, so splitting them could only let the two drift apart.
   "breakdown.eject.sending": { plain: "Sending…", playful: "Sending…" },
 
+  // ── #238: a re-plan that landed on top of an edit in progress ──────────────
+  // A re-plan shows the model a snapshot of the list and then replaces the list
+  // wholesale with the answer. The five controls inside a row are not held while
+  // that stream is open — deliberately, because the row is the user's own copy
+  // of their words and a field that goes dead mid-sentence loses work too — so
+  // an edit made in the window between the press and the answer used to be
+  // overwritten with nothing said. These two are the "said".
+  //
+  // Identical across voices, for the reason the `breakdown.eject.*` family
+  // gives: this is the app reporting that it did something to the user's work,
+  // and a joke about that reads as the app being cute about losing it.
+  //
+  // TWO strings rather than one with a count, and not because the table has no
+  // interpolation (#86) — because they are two different facts and only one of
+  // them can be true. Something was carried across, or nothing could be. A
+  // single sentence hedged to cover both ("any steps you changed are kept…")
+  // is vacuously true in the second case, which is the case where the user has
+  // actually lost something and most needs a straight answer.
+  "breakdown.replan.editsKept": {
+    plain:
+      "The new plan arrived while you were editing, so it replaced the list. The steps you had changed are kept, at the end — everything else is the new plan.",
+    playful:
+      "The new plan arrived while you were editing, so it replaced the list. The steps you had changed are kept, at the end — everything else is the new plan.",
+  },
+  // The branch where nothing could be carried: a row deleted or reordered
+  // mid-stream. Neither survives a wholesale replacement — there is no row left
+  // to keep, and the answer's rows are a fresh list with no way back to the ones
+  // they replaced — so this says plainly that the change is not in the new plan
+  // rather than implying something was rescued.
+  "breakdown.replan.editsReplaced": {
+    plain:
+      "The new plan arrived while you were editing and replaced the whole list, so the change you had just made is not in it. Nothing was saved either way — have a look before you save.",
+    playful:
+      "The new plan arrived while you were editing and replaced the whole list, so the change you had just made is not in it. Nothing was saved either way — have a look before you save.",
+  },
+  // Its own key rather than a reuse of `breakdown.eject.dismiss`, whose value is
+  // the same word today. The reason is the one the `breakdown.eject.*` family's
+  // own comment gives: the prefix has to name the surface, or re-tuning one
+  // notice's copy silently re-words another's. These two notices report
+  // unrelated events and will not stay in step.
+  "breakdown.replan.dismiss": { plain: "Got it", playful: "Got it" },
+
   // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
   // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
   // are functional glyphs (allowed in plain); 🔌 is playful-only flavour.
