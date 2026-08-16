@@ -307,7 +307,12 @@ async function refreshAccessToken(userId: string): Promise<string | null> {
     // `null` is what the non-`invalid_grant` failure branch below already
     // returns for a 5xx, and every caller reads it the same way: the
     // best-effort sync paths (`google-task-sync.ts`) skip and report "not
-    // synced", and the interactive push offers Connect. Returning it here also
+    // synced", and the interactive push returns `not_connected`, which the
+    // schedule surfaces render as the words "Google Tasks isn't connected."
+    // Words only — the row's own control is driven by the SERVER-rendered
+    // status, which after a timeout still reads connected because the tokens
+    // are untouched, so no Connect affordance appears and none should: nothing
+    // is wrong with the credential. Returning it here also
     // stops the raw abort propagating out of `pushStepsToGoogleTasks`, which
     // resolves its token OUTSIDE its try/catch — so a rejection there escapes
     // the server action rather than becoming a result the UI can render.
@@ -561,9 +566,15 @@ export async function listTaskLists(token: string): Promise<TaskList[]> {
     });
   } catch (err) {
     // A read, and the first call a push makes — so nothing has been written
-    // anywhere yet and the message can say so without qualification. It is
-    // rendered verbatim: `pushStepsToGoogleTasks` returns it as its `error`
-    // message and the schedule surfaces print that.
+    // anywhere yet and the message can say so without qualification.
+    //
+    // It does reach the user: `pushStepsToGoogleTasks` returns it as its
+    // `error` message, and `runSchedule` (`inbox-view.tsx`) and
+    // `task-schedule.tsx` both prefer `res.message` over their dictionary.
+    // ⚠️ `breakdown-chat.tsx` resolves the other way round — `map[res.reason]
+    // ?? res.message` — and prints this only because `"error"` has no entry in
+    // that map. Adding one would silently swallow every message this module
+    // writes.
     if (isDeadlineRejection(err)) {
       throw new GoogleTimeoutError("nothing was scheduled.");
     }
@@ -665,10 +676,29 @@ export async function patchGoogleTask(
       signal: AbortSignal.timeout(GOOGLE_FETCH_TIMEOUT_MS),
     });
   } catch (err) {
-    // Named rather than swallowed even though the callers discard it: the
-    // reason a bulk complete stopped syncing reaches an operator through this
-    // message, and "the operation was aborted due to timeout" does not say
-    // which operation or what it left behind.
+    // ⚠️ Nobody reads this message today, and the mapping is here anyway.
+    //
+    // Both callers discard it with a bare catch and no log line — `patchOne`
+    // (`google-task-sync.ts`) returns false, and the requeue in
+    // `focus.ts` lets the Google title drift. So this is NOT an observability
+    // claim; the JSDoc above ("swallows it structurally") is the accurate
+    // description of where it goes, which is nowhere. (Duo review, !368: this
+    // comment used to assert the message "reaches an operator", contradicting
+    // that JSDoc and its own opening clause in one sentence.)
+    //
+    // What it is for is the module's CONTRACT being uniform. Every call here
+    // that hands a deadline BACK to its caller turns it into a
+    // `GoogleTimeoutError` — five of the seven, asserted per call site in
+    // `google.test.ts`. The other two never reject at all and decide it
+    // locally instead: the refresh returns null, the revoke reports
+    // `revoked: false`. Leaving the PATCH as the one exception would
+    // mean a caller that catches the type — as the OAuth callback does — misses
+    // this one silently, and the wording is settled now so that whoever first
+    // surfaces it does not have to reconstruct what a stalled PATCH left
+    // behind. Adding the log to back it up is a real change to a
+    // best-effort path (it fires per item, so a bulk complete against a stalled
+    // Google is one line per row), not a comment fix, so it is not smuggled in
+    // here.
     if (isDeadlineRejection(err)) {
       throw new GoogleTimeoutError("the task was not confirmed updated.");
     }
