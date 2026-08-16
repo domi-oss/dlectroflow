@@ -3,8 +3,11 @@
  *
  * Guests must never be able to point roundup emails anywhere: the action
  * forces roundupEmailEnabled=false + roundupEmail=null for non-owner
- * workspaces while still letting the sandbox tweak the harmless demo knobs
- * (workdayEndTime, roundupDemoOverride). Owner keeps full control.
+ * workspaces while still letting the sandbox tweak the harmless knob it is
+ * allowed (workdayEndTime). Owner keeps full control.
+ *
+ * #261 removed `roundupDemoOverride` — the round-up's "fire ~4s after load"
+ * demo switch — so `workdayEndTime` is the only guest-writable field left here.
  *
  * Mirrors the vi.mock shape used in snooze.test.ts.
  */
@@ -47,12 +50,11 @@ beforeEach(() => {
 });
 
 describe("updateRoundupSettings", () => {
-  it("guest workspace: forces email opt-out and null address in both upsert branches, keeps demo knobs", async () => {
+  it("guest workspace: forces email opt-out and null address in both upsert branches, keeps the workday end", async () => {
     currentWorkspaceIdMock.mockResolvedValue("g_attacker");
     const { updateRoundupSettings } = await import("./settings");
     await updateRoundupSettings({
       workdayEndTime: "18:30",
-      roundupDemoOverride: true,
       roundupEmailEnabled: true,
       roundupEmail: "victim@example.com",
     });
@@ -63,16 +65,17 @@ describe("updateRoundupSettings", () => {
     expect(call.update.roundupEmail).toBeNull();
     expect(call.create.roundupEmailEnabled).toBe(false);
     expect(call.create.roundupEmail).toBeNull();
-    // Harmless sandbox knobs still apply for guests.
+    // The harmless sandbox knob still applies for guests.
     expect(call.update.workdayEndTime).toBe("18:30");
-    expect(call.update.roundupDemoOverride).toBe(true);
+    // …and the demo switch #261 removed is not resurrected by a stale bundle.
+    expect(call.update).not.toHaveProperty("roundupDemoOverride");
+    expect(call.create).not.toHaveProperty("roundupDemoOverride");
   });
 
   it("owner workspace: email opt-in and address pass through unchanged", async () => {
     const { updateRoundupSettings } = await import("./settings");
     await updateRoundupSettings({
       workdayEndTime: "17:00",
-      roundupDemoOverride: false,
       roundupEmailEnabled: true,
       roundupEmail: "me@example.com",
     });

@@ -25,8 +25,6 @@ afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 30,
-  demoOverrideSeconds: null,
   agingHours: 4,
   overdueHours: 8,
   wayOverdueHours: 12,
@@ -56,18 +54,32 @@ describe("AgingSection auto-save", () => {
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
   });
 
-  // #109 — #95's twin: literally the same colour, size and semantic on a
-  // different route, missed by the same gate for the same reason. The note only
-  // renders when a demo override is set, so /settings' zero-tolerance contrast
-  // gate has always scanned a page without it. `text-amber-600` is 3.01:1 at
-  // 12px on the light --background; the tuned pair #57 settled on for
-  // "attention, not alarm" is 4.75:1 / 11.44:1.
-  it("paints the demo-override note with the AA-tuned amber pair (#109)", () => {
-    renderSection({ demoOverrideSeconds: 10 });
-    const note = screen.getByText(/demo override: 10s/);
-    expect(note.className).toContain("text-amber-700");
-    expect(note.className).toContain("dark:text-amber-400");
-    expect(note.className).not.toContain("text-amber-600");
+  /**
+   * #261 — the section is HOURS throughout, and this is the assertion that says
+   * so. It carried an "Aging threshold (minutes)" field beside "Aging (hours)":
+   * two controls for one concept, in two units, with the same default (240 vs 4)
+   * and no reconciliation — so the owner's report was *"the aging threshold is in
+   * minutes, whereas the other options are hours"*, and the cause underneath it
+   * was two columns rather than a formatting choice.
+   *
+   * The "Demo override (seconds)" field is gone with it: a THIRD unit on the same
+   * five-control row, and the talk it existed for has happened.
+   *
+   * #260 adds a "park until" snooze here and the convention it inherits is this
+   * one — whole hours, one setting per concept. `aging.ts`'s module docblock is
+   * where that is written down at length.
+   */
+  it("is hours throughout — no minutes and no seconds control (#261)", () => {
+    const { container } = renderSection();
+    expect(screen.queryByLabelText(/minutes/i)).toBeNull();
+    expect(screen.queryByLabelText(/seconds/i)).toBeNull();
+    expect(screen.queryByLabelText(/demo override/i)).toBeNull();
+
+    const labels = [...container.querySelectorAll("label")].map(
+      (l) => l.textContent ?? "",
+    );
+    expect(labels).toHaveLength(3);
+    for (const label of labels) expect(label).toMatch(/\(hours\)$/);
   });
 
   it("auto-saves (debounced) when a freshness input changes", async () => {
@@ -80,8 +92,6 @@ describe("AgingSection auto-save", () => {
 
     await waitFor(() =>
       expect(updateAgingSettings).toHaveBeenLastCalledWith({
-        agingThresholdMinutes: 30,
-        demoOverrideSeconds: null,
         agingHours: 6,
         overdueHours: 8,
         wayOverdueHours: 12,
@@ -104,25 +114,10 @@ describe("AgingSection auto-save", () => {
 
     await waitFor(() =>
       expect(updateAgingSettings).toHaveBeenLastCalledWith({
-        agingThresholdMinutes: 30,
-        demoOverrideSeconds: null,
         agingHours: 7,
         overdueHours: 9,
         wayOverdueHours: 12,
       }),
-    );
-  });
-
-  it("sends a blank demo override as null, not as 0", async () => {
-    const user = userEvent.setup();
-    renderSection({ demoOverrideSeconds: 10 });
-    const demo = screen.getByLabelText(/demo override/i);
-    await user.clear(demo);
-
-    await waitFor(() =>
-      expect(updateAgingSettings).toHaveBeenLastCalledWith(
-        expect.objectContaining({ demoOverrideSeconds: null }),
-      ),
     );
   });
 
@@ -150,7 +145,7 @@ describe("AgingSection auto-save", () => {
    * a decision rather than an omission — so it is pinned here, or the next audit
    * reads the missing rollback as the bug the other three had.
    *
-   * These are five free-entry number fields behind a 600 ms debounce. The value
+   * These are three free-entry number fields behind a 600 ms debounce. The value
    * on screen is the user's own in-progress typing, not a toggle's committed
    * state, so restoring the server's number would DELETE what they are still
    * editing — a considerably worse outcome than the stale-looking switch #227 is
@@ -176,23 +171,19 @@ describe("AgingSection auto-save", () => {
 });
 
 describe("AgingSection — the disclosure (#101)", () => {
-  it("rests collapsed, keeping the live demo-override warning in the band", () => {
-    render(
-      <AgingSection
-        settings={{ ...settings, demoOverrideSeconds: 10 }}
-        voice="plain"
-      />,
-    );
+  it("rests collapsed", () => {
+    render(<AgingSection settings={settings} voice="plain" />);
     const trigger = document.querySelector(
       '[data-section-toggle="settings-aging"]',
     )!;
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByLabelText("Aging (hours)")).not.toBeVisible();
-    // "demo override: 10s" is a warning that items are aging in SECONDS. It has
-    // to survive the section being closed, or the one state where the app lies
-    // about time is the state with no visible explanation.
-    expect(trigger.closest("[data-section-header]")).toHaveTextContent(
-      "demo override: 10s",
+    // #261 — the header used to carry "demo override: 10s" through the collapse,
+    // because a workspace aging items in SECONDS needed an explanation visible
+    // with the section shut. Nothing lies about time any more, so there is
+    // nothing for the band to warn about.
+    expect(trigger.closest("[data-section-header]")).not.toHaveTextContent(
+      /demo override/i,
     );
   });
 });

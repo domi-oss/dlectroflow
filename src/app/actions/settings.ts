@@ -14,46 +14,39 @@ import {
 import { isGuestWorkspace } from "@/lib/workspace-kind";
 import { isValidHHmm } from "@/lib/daily-review-nudge";
 
+/**
+ * The freshness thresholds, in whole hours — the ONE unit (#261).
+ *
+ * `agingThresholdMinutes` and `demoOverrideSeconds` used to arrive here too. The
+ * first was a second, minutes-denominated answer to the question `agingHours`
+ * already answers; the second rescaled all four boundaries into seconds for a
+ * stage demo that has now happened. Both columns are gone, so a stale bundle
+ * that still posts them has its extra keys dropped by the explicit read below
+ * rather than reaching Prisma, where an unknown key is a validation error.
+ *
+ * Each value is clamped to a whole number ≥ 1 hour. Not range-checked against
+ * each other: a workspace is allowed to put `agingHours` above `overdueHours`
+ * and gets the tier `freshnessTier` finds first, which is what this page has
+ * always done.
+ */
 export async function updateAgingSettings(input: {
-  agingThresholdMinutes: number;
-  demoOverrideSeconds: number | null;
   agingHours: number;
   overdueHours: number;
   wayOverdueHours: number;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const agingThresholdMinutes = Math.max(
-    1,
-    Math.round(input.agingThresholdMinutes || 1),
-  );
-  const demoOverrideSeconds =
-    input.demoOverrideSeconds != null && input.demoOverrideSeconds > 0
-      ? Math.round(input.demoOverrideSeconds)
-      : null;
   const clampHours = (value: number) =>
     Number.isFinite(value) ? Math.max(1, Math.round(value)) : 1;
-  const agingHours = clampHours(input.agingHours);
-  const overdueHours = clampHours(input.overdueHours);
-  const wayOverdueHours = clampHours(input.wayOverdueHours);
+  const data = {
+    agingHours: clampHours(input.agingHours),
+    overdueHours: clampHours(input.overdueHours),
+    wayOverdueHours: clampHours(input.wayOverdueHours),
+  };
 
   await prisma.settings.upsert({
     where: { workspaceId },
-    create: {
-      id: workspaceId,
-      workspaceId,
-      agingThresholdMinutes,
-      demoOverrideSeconds,
-      agingHours,
-      overdueHours,
-      wayOverdueHours,
-    },
-    update: {
-      agingThresholdMinutes,
-      demoOverrideSeconds,
-      agingHours,
-      overdueHours,
-      wayOverdueHours,
-    },
+    create: { id: workspaceId, workspaceId, ...data },
+    update: data,
   });
   revalidatePath("/");
 }
@@ -61,7 +54,6 @@ export async function updateAgingSettings(input: {
 /** Feature 3/9 — end-of-day round-up delivery settings. */
 export async function updateRoundupSettings(input: {
   workdayEndTime: string; // HH:mm
-  roundupDemoOverride: boolean;
   roundupEmailEnabled: boolean;
   roundupEmail: string | null;
 }) {
@@ -75,7 +67,6 @@ export async function updateRoundupSettings(input: {
   const roundupEmail = isGuest ? null : input.roundupEmail?.trim() || null;
   const data = {
     workdayEndTime,
-    roundupDemoOverride: Boolean(input.roundupDemoOverride),
     roundupEmailEnabled: isGuest ? false : Boolean(input.roundupEmailEnabled),
     roundupEmail,
   };

@@ -142,8 +142,6 @@ const openRowMenu = (
 ) => user.click(within(row).getByRole("button", { name: "All options" }));
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 30,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

@@ -112,8 +112,6 @@ describe("AgeLabel — aging accent (#95 a11y)", () => {
   afterEach(cleanup);
 
   const settings: AgingSettings = {
-    agingThresholdMinutes: 240,
-    demoOverrideSeconds: null,
     agingHours: 4,
     overdueHours: 24,
     wayOverdueHours: 72,

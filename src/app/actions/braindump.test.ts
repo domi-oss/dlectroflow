@@ -89,8 +89,6 @@ describe("settings.ts › updateAgingSettings (per-tier hours)", () => {
   it("persists clamped hour values into both create and update", async () => {
     const { updateAgingSettings } = await import("./settings");
     await updateAgingSettings({
-      agingThresholdMinutes: 30,
-      demoOverrideSeconds: null,
       agingHours: 5,
       overdueHours: 9,
       wayOverdueHours: 13,
@@ -114,8 +112,6 @@ describe("settings.ts › updateAgingSettings (per-tier hours)", () => {
   it("clamps zero/negative hours to 1", async () => {
     const { updateAgingSettings } = await import("./settings");
     await updateAgingSettings({
-      agingThresholdMinutes: 30,
-      demoOverrideSeconds: null,
       agingHours: 0,
       overdueHours: -3,
       wayOverdueHours: 1,
@@ -130,8 +126,6 @@ describe("settings.ts › updateAgingSettings (per-tier hours)", () => {
   it("clamps NaN/Infinity hours to 1 (not the tier default)", async () => {
     const { updateAgingSettings } = await import("./settings");
     await updateAgingSettings({
-      agingThresholdMinutes: 30,
-      demoOverrideSeconds: null,
       agingHours: NaN,
       overdueHours: Infinity,
       wayOverdueHours: -Infinity,
@@ -147,11 +141,35 @@ describe("settings.ts › updateAgingSettings (per-tier hours)", () => {
     expect(call.create.wayOverdueHours).toBe(1);
   });
 
+  /**
+   * #261 — the action used to take `agingThresholdMinutes` and
+   * `demoOverrideSeconds` too, and both columns are gone. A browser still
+   * holding the previous deploy's bundle will keep posting them, so the
+   * assertion is that the WRITE ignores them: an unknown key reaching
+   * `prisma.settings.upsert` is a `PrismaClientValidationError` at runtime, not
+   * a type error at build time.
+   */
+  it("ignores the removed minutes/demo fields a stale bundle still posts", async () => {
+    const { updateAgingSettings } = await import("./settings");
+    await updateAgingSettings({
+      agingHours: 5,
+      overdueHours: 9,
+      wayOverdueHours: 13,
+      // Deliberately off-type: this is what the old bundle sends.
+      ...({ agingThresholdMinutes: 30, demoOverrideSeconds: 10 } as object),
+    });
+
+    const call = prismaMock.settings.upsert.mock.calls[0][0];
+    for (const branch of [call.create, call.update]) {
+      expect(branch).not.toHaveProperty("agingThresholdMinutes");
+      expect(branch).not.toHaveProperty("demoOverrideSeconds");
+    }
+    expect(call.update).toMatchObject({ agingHours: 5 });
+  });
+
   it("rounds float hours", async () => {
     const { updateAgingSettings } = await import("./settings");
     await updateAgingSettings({
-      agingThresholdMinutes: 30,
-      demoOverrideSeconds: null,
       agingHours: 4.6,
       overdueHours: 8.2,
       wayOverdueHours: 12.5,
