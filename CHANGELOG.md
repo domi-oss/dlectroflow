@@ -772,6 +772,27 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **A stalled Google no longer holds a request for five minutes (#211).** Node's
+  `fetch` defaults to a 300 s header timeout, and only one of the seven calls this
+  app makes to Google set a deadline of its own. An endpoint that accepted the
+  connection and then went quiet therefore produced a spinner rather than a failure
+  — worst of all on the OAuth return, which is a browser navigation with nothing
+  else to bound it, so clicking **Connect Google** could mean five minutes of blank
+  page.
+
+  Every call now shares one 10 s deadline, and **every call site decides what
+  hitting it means**, which is the part that separates a fix from a faster failure.
+  A connect that times out says so in words and offers **Try connecting again**,
+  because nothing was written and the retry is safe. A token refresh that times out
+  is treated as transient: it does not clear your tokens and does not ask you to
+  reconnect, since a slow network says nothing about whether the connection is
+  still good. Disconnect still deletes your stored tokens and still tells you if
+  Google never confirmed the revoke — it just answers in seconds now. A scheduling
+  push that times out mid-write says the task **may** have been created, rather
+  than claiming nothing happened and walking you into a duplicate; and a
+  re-schedule that times out will not recreate the task it was updating, which
+  would have left two entries and two calendar blocks for one step.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
