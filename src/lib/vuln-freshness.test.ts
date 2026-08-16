@@ -278,6 +278,38 @@ function vulnRoute(vulns: Vuln[], endCursor: string | null = null): Route {
   };
 }
 
+/**
+ * The #203 control: the SAME connection, asked only whether it can return
+ * anything at all.
+ *
+ * Reading the Vulnerability Report needs `read_security_resource`, and a caller
+ * without it does not get an error — it gets an empty connection. Measured
+ * 2026-08-16 against this project's own GraphQL endpoint, anonymously, with the
+ * script's own query verbatim: `{"pageInfo":{"hasNextPage":false,"endCursor":
+ * null},"nodes":[]}`, HTTP 200, no `errors` array, `data.project` present and
+ * `data.project.vulnerabilities` non-null. Every guard the script already had
+ * passes that response, and the block it produced read `0 active` with a ✅.
+ *
+ * So the control is the state filter widened to all four states. `first: 1`
+ * because the question is "did this connection return anything", not "how
+ * many".
+ */
+function controlRoute(records = 1): Route {
+  return {
+    body: {
+      data: {
+        project: {
+          vulnerabilities: {
+            nodes: Array.from({ length: records }, (_, i) => ({
+              id: `gid://gitlab/Vulnerability/${100 + i}`,
+            })),
+          },
+        },
+      },
+    },
+  };
+}
+
 interface Result {
   status: number;
   stdout: string;
@@ -351,17 +383,23 @@ function drive(
   };
 }
 
-/** The default scenario: one recent full scan, three active findings. */
+/**
+ * The default scenario: one recent full scan, three active findings.
+ *
+ * When the active set is EMPTY the script issues one further request — the
+ * #203 control above — so the default scenario supplies it. A caller that wants
+ * the control to come back empty builds its routes by hand.
+ */
 function healthy(overrides: { vulns?: Vuln[]; scanHours?: number } = {}) {
+  const vulns = overrides.vulns ?? [
+    { severity: "HIGH" },
+    { severity: "MEDIUM" },
+    { severity: "LOW", resolvedOnDefaultBranch: true },
+  ];
   return [
     anchorRoute(freshPipelines(overrides.scanHours ?? 1)),
-    vulnRoute(
-      overrides.vulns ?? [
-        { severity: "HIGH" },
-        { severity: "MEDIUM" },
-        { severity: "LOW", resolvedOnDefaultBranch: true },
-      ],
-    ),
+    vulnRoute(vulns),
+    ...(vulns.length === 0 ? [controlRoute()] : []),
   ];
 }
 
@@ -416,6 +454,97 @@ describe("scripts/check-vuln-freshness.sh", () => {
     // not take the evidence with it.
     expect(result.stdout).toMatch(/Oldest evidence: \w+/);
     expect(result.stdout).toMatch(/last succeeded 2026-08-06T19:00:00Z/);
+  });
+
+  // ── #203: a zero has to be DEMONSTRATED, not merely returned ───────────────
+
+  it("refuses to print a zero it cannot show the surface returning anything for", () => {
+    // THE #203 test. `ops_digest` runs on a dedicated Reporter token, and
+    // reading the Vulnerability Report needs `read_security_resource`. A caller
+    // without it is not refused — the connection resolves EMPTY. Measured
+    // 2026-08-16 against this project's own endpoint with the script's query
+    // verbatim and no credential at all: HTTP 200, no `errors`, `data.project`
+    // present, `data.project.vulnerabilities` non-null, `nodes: []`. Every
+    // guard the script had passes that, and the digest then published
+    // "**0 active** findings" under a ✅ — a green, confident, wrong answer
+    // about security posture in the one place someone looks.
+    //
+    // Zero findings and no permission to look are the same bytes, so the only
+    // honest response is to say the count could not be read.
+    const result = drive([
+      anchorRoute(freshPipelines()),
+      vulnRoute([]),
+      controlRoute(0),
+    ]);
+    expect(result.status).toBe(2);
+    // Never the count.
+    expect(result.stdout).not.toMatch(/\*\*0 active\*\*/);
+    expect(result.stdout).not.toContain("✅");
+    // Names BOTH state filters, so the reader can re-run the pair by hand and
+    // does not have to guess which surface was ambiguous.
+    expect(result.stdout).toContain("[DETECTED, CONFIRMED]");
+    expect(result.stdout).toContain(
+      "[DETECTED, CONFIRMED, DISMISSED, RESOLVED]",
+    );
+    // And names the mechanism, because "empty" reading as "clean" is the whole
+    // defect and a reader who does not know that will re-tidy this away.
+    expect(result.stdout).toMatch(/read_security_resource/);
+    expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+  });
+
+  it("prints a zero once the same connection is shown returning a record", () => {
+    // The other half, and the one that keeps this from being a check that only
+    // ever says no: with the control returning a record the token demonstrably
+    // reads the report, so the zero is a real zero and prints — carrying the
+    // control with it. This is the project's own house rule mechanised: a
+    // reported zero names the surface it queried and shows that same query
+    // returning non-zero somewhere.
+    const result = drive(healthy({ vulns: [] }));
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/\*\*0 active\*\*/);
+    expect(result.stdout).toContain(
+      "[DETECTED, CONFIRMED, DISMISSED, RESOLVED]",
+    );
+    expect(result.stdout).toMatch(/returned a record/);
+  });
+
+  it("spends the control request only on a zero, and only as a read", () => {
+    // A non-zero count IS its own proof that the connection resolved, so the
+    // extra round trip is not taken. Asserted because the cheap way to write
+    // this fix is to query unconditionally, and a weekly job paying for a
+    // request it does not need is the kind of thing that never gets noticed.
+    const nonZero = drive(healthy());
+    expect(nonZero.status).toBe(0);
+    expect(nonZero.urls).toHaveLength(2);
+
+    const zero = drive(healthy({ vulns: [] }));
+    expect(zero.status).toBe(0);
+    expect(zero.urls).toHaveLength(3);
+    for (const url of zero.urls) expect(url).toContain("/api/graphql");
+    for (const query of zero.queries) {
+      expect(query).not.toMatch(/"query"\s*:\s*"\s*mutation/);
+    }
+  });
+
+  it("reports the control's own failure as an unknown, not as a zero", () => {
+    // The control is a network call like any other, so it has the same three
+    // ways to not answer. None of them may fall through to printing the count
+    // the control was there to justify.
+    for (const broken of [
+      { code: 403 } as Route,
+      { body: { errors: [{ message: "insufficient permissions" }] } } as Route,
+      { body: { data: { project: { vulnerabilities: null } } } } as Route,
+    ]) {
+      const result = drive([
+        anchorRoute(freshPipelines()),
+        vulnRoute([]),
+        broken,
+      ]);
+      expect(result.status).toBe(2);
+      expect(result.stdout).not.toMatch(/\*\*0 active\*\*/);
+      expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+    }
   });
 
   it("goes stale, not clean, when nothing has scanned inside the budget", () => {
@@ -572,10 +701,16 @@ describe("scripts/check-vuln-freshness.sh", () => {
     const result = drive([
       anchorRoute([{ iid: 1928, jobs: [] }]),
       vulnRoute([]),
+      controlRoute(),
     ]);
     expect(result.status).toBe(2);
     expect(result.stdout).toContain("⚠️");
     expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+    // For the ANCHOR's reason, not #203's — both exit 2 with that tail, so
+    // without this the control route could be dropped and the test would still
+    // pass while testing something else entirely.
+    expect(result.stdout).toMatch(/could not determine how old/);
+    expect(result.stdout).not.toMatch(/could not be read/);
   });
 
   it("reports undetermined when a scanner has no SUCCESSFUL run in the window", () => {
@@ -595,6 +730,7 @@ describe("scripts/check-vuln-freshness.sh", () => {
         },
       ]),
       vulnRoute([]),
+      controlRoute(),
     ]);
     expect(result.status).toBe(2);
     expect(result.stdout).toMatch(/CONTAINER_SCANNING/);
@@ -712,6 +848,7 @@ describe("scripts/check-vuln-freshness.sh", () => {
         },
       ]),
       vulnRoute([]),
+      controlRoute(),
     ]);
     expect(result.status).toBe(2);
   });
