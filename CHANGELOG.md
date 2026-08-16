@@ -772,6 +772,30 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Editing a step while a new plan is on its way no longer loses what you typed
+  (#238).** Asking for fewer or more steps, or sending feedback in your own words,
+  gets you a whole new list — and it is worked out from the list as it stood when
+  you asked, so anything you changed in the seconds before it arrived was quietly
+  written over. No warning, nothing saved anywhere, just a plan that no longer said
+  what you had just told it.
+
+  Every control **around** the list already waited for the answer. The five **inside
+  a row** did not: the emoji, the step text, the minutes, the ✕ and the drag handle.
+  All five now wait too, so the row matches its own surroundings and there is no
+  longer a gap where an edit can be made and then thrown away.
+
+  The trade is deliberate and worth stating plainly: **for the few seconds an answer
+  takes, the steps are read-only.** If you reach for a field in that window it will
+  not respond. The ✕ stays selectable so there is always one place in the row that
+  can tell you why — it and the surrounding controls all point at the same sentence,
+  which names both reasons the list is held: a new plan must not land on top of an
+  edit, and a step must not end up in your plan and your inbox at once.
+
+  Everything unlocks the moment the answer arrives, **including when the answer never
+  comes** — a failed or fallen-back plan releases the list rather than leaving it
+  frozen. Nothing here ever reached the server; what was at stake was the sentence
+  you were part-way through.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
