@@ -105,6 +105,76 @@ export function resolveExpectedBuildSha(
  */
 export type BuildShaEnv = Readonly<Record<string, string | undefined>>;
 
+/**
+ * The variable `config/playwright.config.ts` threads its ONE resolution through
+ * to `globalSetup` (Duo review on !370).
+ *
+ * The commit used to be resolved twice — once at config load to decide
+ * `reuseExistingServer`, once inside `globalSetup` to check the servers — by two
+ * separate `git` shellouts. Two answers to one question, and the disagreement is
+ * not academic on a machine carrying ~30 worktrees where a commit can land
+ * mid-run:
+ *
+ *   * git answers at the config and transiently fails at the assertion → reuse
+ *     was ENABLED and the guard then skips itself as "cannot identify the
+ *     checkout". An unverified attach, silently — the exact hole this guard
+ *     exists to close, reopened by the guard's own plumbing;
+ *   * git fails at the config and answers at the assertion → reuse was off,
+ *     Playwright started its own server with no `BUILD_SHA`, and the guard
+ *     fires on a run that was never in danger.
+ *
+ * Threading it through the environment rather than through a module-level cache
+ * is deliberate. Playwright loads the config and runs `globalSetup` in the same
+ * process — `createGlobalSetupTask` calls `loadGlobalHook` and awaits the hook
+ * inline, verified in `node_modules/playwright/lib/runner/index.js` — but that
+ * is an implementation detail, and a shared module instance additionally
+ * assumes both files resolve through one module registry. `process.env` needs
+ * only the process to be shared, and when even that stops being true the
+ * variable is ABSENT, which is its own loud state below rather than a silent
+ * re-resolution.
+ */
+export const EXPECTED_BUILD_SHA_ENV = "E2E_EXPECTED_BUILD_SHA";
+
+/**
+ * What `globalSetup` finds when it looks for the config's resolution.
+ *
+ * Three states and not two, because "the config resolved nothing" and "the
+ * value never arrived" call for opposite responses, and collapsing them is how
+ * a guard comes to skip itself.
+ */
+export type ThreadedExpectation =
+  { kind: "sha"; sha: string } | { kind: "unidentified" } | { kind: "lost" };
+
+/**
+ * Read the threaded resolution. The config writes the variable
+ * **unconditionally** — empty when it could not identify the checkout — so an
+ * absent variable can only mean the value did not survive.
+ */
+export function readThreadedExpectation(env: BuildShaEnv): ThreadedExpectation {
+  const raw = env[EXPECTED_BUILD_SHA_ENV];
+  if (raw === undefined) return { kind: "lost" };
+  if (raw === "") return { kind: "unidentified" };
+  return { kind: "sha", sha: raw };
+}
+
+/**
+ * What to say when the config's resolution did not reach `globalSetup` at all.
+ *
+ * A hard error rather than a fallback. Re-resolving would restore the two
+ * answers this variable exists to remove, and skipping would leave a possible
+ * attach unverified — so the only honest response to "the plumbing changed" is
+ * to stop and say which plumbing.
+ */
+export const LOST_EXPECTATION_ERROR =
+  `e2e: \`${EXPECTED_BUILD_SHA_ENV}\` is not set, so the #266 wrong-build ` +
+  "guard cannot tell which commit this run is supposed to be testing. " +
+  "`config/playwright.config.ts` sets it unconditionally at config load — " +
+  "empty when the checkout has no identity — so an absent one means the value " +
+  "did not survive from there to global setup (a wiring change, or a " +
+  "Playwright that no longer runs global setup in the config's process). " +
+  "Refusing to re-resolve it here: two resolutions of one commit is the defect " +
+  "this variable replaced.";
+
 /** One server to check, named the way the failure message should name it. */
 export interface ServerUnderTest {
   /** Human-readable, e.g. "the default project's server". */
@@ -147,6 +217,7 @@ export function buildMismatchReport(
   reading: HealthReading,
 ): string | null {
   if (reading.error === null && reading.sha === expected) return null;
+  const port = portOf(server.url);
   return [
     `e2e: ${server.label} on ${server.url} is NOT the build under test (#266).`,
     "",
@@ -160,22 +231,38 @@ export function buildMismatchReport(
     "or GREEN for one that is absent.",
     "",
     "This is an environment fault, not a test failure. Either stop the other",
-    `server (\`lsof -ti tcp:${portOf(server.url)} | xargs kill\`) and re-run, or`,
+    ...(port === null
+      ? [
+          "server — this URL could not be parsed, so no port can be named for it",
+          "here — and re-run, or",
+        ]
+      : [`server (\`lsof -ti tcp:${port} | xargs kill\`) and re-run, or`]),
     "run this suite with CI=1, which makes Playwright start its own.",
   ].join("\n");
 }
 
 /**
- * The port a `lsof` line can act on. Falls back to the scheme default rather
- * than printing `undefined` into a command the reader is invited to paste.
+ * The port a `lsof` line can act on, or `null` when the URL will not parse.
+ *
+ * `null` and not a default (Duo review on !370). This used to fall back to a
+ * hardcoded `"3000"`, so a malformed MEMBER url printed
+ * `lsof -ti tcp:3000 | xargs kill` — a command that kills the wrong server,
+ * handed to someone who is already confused about which server they are talking
+ * to, and the exact inverse of the property the sibling test asserts.
+ *
+ * `"unknown"` was the review's suggestion and is not taken: `lsof -ti
+ * tcp:unknown` is still a paste-able command that cannot work, and the failure
+ * messages in this repo are meant to be run. When the port is not known, the
+ * kill line is not offered — the caller says so in words instead, and the
+ * unparseable URL is already named on the line above it.
  */
-function portOf(url: string): string {
+function portOf(url: string): string | null {
   try {
     const parsed = new URL(url);
     if (parsed.port !== "") return parsed.port;
     return parsed.protocol === "https:" ? "443" : "80";
   } catch {
-    return "3000";
+    return null;
   }
 }
 

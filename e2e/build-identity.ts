@@ -18,7 +18,9 @@ import { execFileSync } from "node:child_process";
 import { isolatedGitEnv } from "../src/lib/git-env";
 import {
   resolveExpectedBuildSha,
+  readThreadedExpectation,
   buildMismatchReport,
+  LOST_EXPECTATION_ERROR,
   UNIDENTIFIED_CHECKOUT_NOTICE,
   type HealthReading,
   type ServerUnderTest,
@@ -118,13 +120,24 @@ async function probeHealth(origin: string): Promise<HealthReading> {
  *
  * Every server is probed before anything is thrown, so two wrong attachments
  * are reported together rather than one per re-run.
+ *
+ * The expected commit is READ, never re-resolved (Duo review on !370). It was
+ * resolved a second time here by a second `git rev-parse`, and two answers to
+ * one question could disagree — with the worse direction silent: git answering
+ * at the config and failing here left `reuseExistingServer` ON while this
+ * function skipped itself as "cannot identify the checkout".
  */
 export async function assertServersAreThisBuild(
   servers: readonly ServerUnderTest[],
   repoRoot: string,
 ): Promise<void> {
-  const expected = expectedBuildSha(repoRoot);
-  if (expected === null) {
+  const expectation = readThreadedExpectation(process.env);
+  if (expectation.kind === "lost") {
+    // The plumbing changed under this guard. Not a skip and not a re-resolve —
+    // both of those are how it would come to pass without looking.
+    throw new Error(`\n\n${LOST_EXPECTATION_ERROR}\n`);
+  }
+  if (expectation.kind === "unidentified") {
     // Not silence, and not a throw either: with no identity for the checkout
     // the config has already switched `reuseExistingServer` off, so the attach
     // this guard exists to catch cannot happen on this run. Saying so keeps
@@ -132,6 +145,7 @@ export async function assertServersAreThisBuild(
     console.warn(UNIDENTIFIED_CHECKOUT_NOTICE);
     return;
   }
+  const expected = expectation.sha;
 
   const readings = await Promise.all(
     servers.map(async (server) => ({

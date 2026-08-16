@@ -10,6 +10,7 @@ import {
   TOKEN_ENC_KEY,
 } from "../e2e/constants";
 import { expectedBuildSha } from "../e2e/build-identity";
+import { EXPECTED_BUILD_SHA_ENV } from "../src/lib/e2e-build-identity";
 
 // #133 — this file lives in `config/`, not the repo root. Playwright resolves
 // `testDir` and `globalSetup` against THIS FILE's directory, and — the one that
@@ -44,7 +45,21 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 // below, so Playwright starts its own server and fails with its own
 // unmistakable "port is already used" rather than attaching to something it
 // cannot verify.
+// Resolved exactly ONCE per run, here, and threaded to `e2e/global-setup.ts`
+// through the environment (Duo review on !370). It used to be resolved a second
+// time inside the assertion, by a second `git` shellout — two answers to one
+// question, and if they disagreed the failure was silent in the worse
+// direction: reuse enabled from the first answer while the second made the
+// guard skip itself. `src/lib/e2e-build-identity.ts` carries the full note at
+// EXPECTED_BUILD_SHA_ENV, including why the environment rather than a shared
+// module instance.
 const EXPECTED_BUILD_SHA = expectedBuildSha(REPO_ROOT);
+
+// Written UNCONDITIONALLY, empty when the checkout has no identity, so that
+// "could not identify" is a value global setup can read rather than an absence
+// it has to interpret. An absent variable then means only one thing — the value
+// did not survive the trip — and that is an error there rather than a guess.
+process.env[EXPECTED_BUILD_SHA_ENV] = EXPECTED_BUILD_SHA ?? "";
 
 // Reuse is a LOCAL convenience — in CI Playwright always boots its own — and it
 // is only safe once the server can be asked to prove which build it is.
