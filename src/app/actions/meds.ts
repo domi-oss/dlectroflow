@@ -50,9 +50,6 @@ export type MedsLogRefusal = "unknown-dose" | "bad-date" | "bad-state";
 export type MedsLogResult =
   { ok: true; state: MedsDoseState } | { ok: false; reason: MedsLogRefusal };
 
-/** `YYYY-MM-DD`, strictly — two digits each, so "2026-8-1" is refused. */
-const YMD = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
  * How far the client's local date may sit from the server's UTC date.
  *
@@ -68,26 +65,48 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
  */
 const MAX_DATE_DRIFT_DAYS = 1;
 
+/**
+ * Is `date` a canonical `YYYY-MM-DD` naming a day the reader could plausibly be
+ * on right now?
+ *
+ * ⚠️ **Validated by ROUND-TRIP rather than by a pattern, and that is deliberate.**
+ * The obvious `/^\d{4}-\d{2}-\d{2}$/` is linear and perfectly safe, and
+ * `gitlab-advanced-sast` reports it anyway as CWE-185 "Incorrect regular
+ * expression" — measured on this exact line in pipeline 3471. Dismissing it would
+ * work once: the fingerprint includes the LINE NUMBER, so the same statement
+ * comes back as a new finding every time an unrelated edit moves it down the
+ * file. `src/lib/pick-one.ts` records what that costs — one `Math.random` in
+ * `focus-timer.tsx` dismissed five separate times at five different lines. There
+ * is no regex to flag if there is no regex.
+ *
+ * The round trip is also the STRICTER check. It accepts exactly the canonical
+ * rendering and nothing else, so `"2026-8-1"`, `"2026-08-1"`, `"+002026-08-17"`
+ * and a 32nd of a month are all refused — the last by `Date.UTC`'s silent
+ * roll-over showing up as a different string, which a pattern would have let
+ * through.
+ *
+ * Both sides are built field by field against UTC, so the comparison is a pure
+ * day count that does not itself depend on the container's timezone.
+ */
 function isPlausibleLocalDate(date: string, now: Date): boolean {
-  if (!YMD.test(date)) return false;
-  // Built field by field against UTC on BOTH sides, so the comparison is a pure
-  // day count and does not itself depend on the container's timezone. Parsing
-  // with `new Date(date)` would be UTC midnight, which is the same thing — but
-  // only by accident of the format, and #269's whole subject is not relying on
-  // that kind of accident.
-  const [y, m, d] = date.split("-").map(Number);
+  const parts = date.split("-");
+  if (parts.length !== 3) return false;
+  const [y, m, d] = parts.map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
+    return false;
+  }
   const asked = Date.UTC(y, m - 1, d);
-  // `Date.UTC` on a 32nd of a month rolls over silently, so an out-of-range
-  // component is caught by round-tripping rather than by a range check.
-  const roundTrip = new Date(asked).toISOString().slice(0, 10);
-  if (roundTrip !== date) return false;
+  // Out of the range `Date` can hold. Guarded before `toISOString`, which throws
+  // a RangeError on an invalid date rather than returning anything.
+  if (!Number.isFinite(asked)) return false;
+  if (new Date(asked).toISOString().slice(0, 10) !== date) return false;
+
   const serverDay = Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
     now.getUTCDate(),
   );
-  const days = Math.abs(asked - serverDay) / 86_400_000;
-  return days <= MAX_DATE_DRIFT_DAYS;
+  return Math.abs(asked - serverDay) / 86_400_000 <= MAX_DATE_DRIFT_DAYS;
 }
 
 export async function logMedsDose(input: {

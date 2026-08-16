@@ -148,7 +148,21 @@ describe("logMedsDose — workspace scoping", () => {
 
 describe("logMedsDose — the date the client supplies", () => {
   it("refuses a date that is not YYYY-MM-DD", async () => {
-    for (const bad of ["", "2026-8-1", "01/01/2026", "yesterday"]) {
+    // The round-trip validator's whole surface, including the shapes a
+    // `/^\d{4}-\d{2}-\d{2}$/` pattern would also have refused and the two it
+    // would NOT have: an expanded-year form, and a 32nd of a month that
+    // `Date.UTC` rolls over silently.
+    for (const bad of [
+      "",
+      "2026-8-1",
+      "2026-08-1",
+      "01/01/2026",
+      "yesterday",
+      "+002026-08-17",
+      "2026-02-31",
+      "2026-13-01",
+      "275760-09-14",
+    ]) {
       expect(
         await logMedsDose({
           medicationDoseId: "itest-269-dose",
