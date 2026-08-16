@@ -233,7 +233,7 @@ export function settledEject(
  * replaces the row object on every keystroke — an identity check would report
  * every row as changed the moment anything anywhere was typed.
  */
-type ReplanDivergence<T> = {
+export type ReplanDivergence<T> = {
   /**
    * Rows still present whose content the user changed. Carried across the
    * replacement AS THEY ARE — same object, same key — so the row keeps its
