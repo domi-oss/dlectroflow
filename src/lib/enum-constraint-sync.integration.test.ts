@@ -555,11 +555,22 @@ let checks: Map<string, string>;
  * class this repo keeps meeting: a guard reading green on something it never
  * examined.
  *
- * It became reachable when `20260816120000_meds_tracker` adopted the
- * `NOT VALID` → `VALIDATE CONSTRAINT` pair to avoid an ACCESS EXCLUSIVE lock on
- * a populated `Settings`. That form is only safe if forgetting the second
- * statement is a red build, so this is the assertion that makes it safe — for
- * that migration and for whoever copies the pattern next.
+ * ⚠️ **KEEP THIS. It is not leftover, and it is the piece most likely to be
+ * swept away by someone tidying.** It was PROMPTED by a `NOT VALID` experiment
+ * in `20260816120000_meds_tracker` that was measured and reverted — but it is
+ * not ABOUT that migration. The blindness above is a property of
+ * `pg_get_constraintdef`, and it exists whether or not anything currently uses
+ * the form.
+ *
+ * ⚠️ **Nothing in `prisma/migrations/` uses `NOT VALID` today** — measured, not
+ * assumed: every occurrence of the phrase in that directory is inside a `--`
+ * comment. So this assertion catches nothing at present, and that is the honest
+ * description of it. What it does is make the form SAFE TO ADOPT: whoever
+ * reaches for it next gets a red build if they forget the `VALIDATE
+ * CONSTRAINT`, instead of a constraint that silently bites on no existing row.
+ *
+ * The form is a live temptation here rather than a hypothetical — the meds
+ * migration reached for it, and its own docblock records why it was reverted.
  */
 let validated: Map<string, boolean>;
 
@@ -605,10 +616,10 @@ describe("every managed CHECK constraint is VALIDATED, not merely declared", () 
     // values it forbids. `pg_get_constraintdef` renders it identically to a
     // validated one, so every other assertion in this file passes on it.
     //
-    // `20260816120000_meds_tracker` deliberately uses `NOT VALID` →
-    // `VALIDATE CONSTRAINT` on `Settings` to avoid an ACCESS EXCLUSIVE lock
-    // during a re-validation scan, which is only a safe pattern because
-    // forgetting the second statement reds this.
+    // ⚠️ No migration in this repo uses that form today, so this currently
+    // proves a property nothing is testing — deliberately. It is what makes the
+    // form safe to adopt: see the docblock on `validated` before deleting it as
+    // revert leftover.
     expect(
       validated.get(constraint),
       `${constraint} exists but is NOT VALID — it does not bite on rows that ` +
