@@ -73,8 +73,16 @@ postgres:
   # auto-merged (majors always get a manual-review MR). Now tracked by the
   # customManager in .gitlab/renovate.json via the "# renovate:" annotation below, which
   # bumps this tag+digest — and the backup dumpImage that defaults to it. (#15)
+  # ⚠️ This pin and the five `postgres:16` pins in docker/docker-compose*.yml and
+  # .gitlab-ci.yml are TWO SEPARATE Renovate streams and will not arrive in one MR:
+  # this one is a pinned minor, so it updates as a *version* bump, while those track
+  # the rolling `16` tag and update as *digest* bumps. Renovate cannot group them —
+  # different update types on different depNames. So a digest MR must have this line
+  # folded into it by hand, or CI and Compose silently run a different minor from
+  # production. That is what happened on !379, where postgres:16 resolved to 16.15's
+  # digest and this line would have been left on 16.14 (#17).
   # renovate: datasource=docker depName=postgres versioning=docker
-  image: postgres:16.14@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+  image: postgres:16.15@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
 
 tls:
   clusterIssuer: letsencrypt-prod
