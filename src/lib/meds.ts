@@ -173,6 +173,80 @@ export function medicationAppliesOn(
 }
 
 /**
+ * How far the client's local date may sit from the server's UTC date.
+ *
+ * The client sends its own local day because the server cannot know the reader's
+ * timezone — `MedsDoseLog.date` is a calendar fact in their time, not the
+ * container's. That must not quietly become a backfill API: a caller posting an
+ * arbitrary date could fabricate a history v2 will later visualise as fact.
+ *
+ * ⚠️ **It lives HERE, in a pure module, and NOT in the server action — that is a
+ * security boundary, not tidiness.**
+ *
+ * `"use server"` exports are POST endpoints. Next's own docs for this version:
+ * *"the route is reachable to anyone who can send the same POST. Treat every
+ * action as an untrusted entry point."* So every argument of an action is an
+ * untrusted input, and this predicate's `now` was briefly one of them — meaning
+ * a caller could supply BOTH the date and the clock it is judged against and
+ * make any date plausible. The action now always passes its own `new Date()`
+ * and accepts no clock at all.
+ *
+ * Injectability is free in a pure function and is an INPUT SURFACE on an action.
+ * That is why `deriveTodayDoses` and `targetTimeToday` take a `now` and
+ * `logMedsDose` must not: the precedent was real, the analogy was not.
+ *
+ * Real UTC offsets span UTC-12 to UTC+14, so a genuine local date is at most one
+ * day either side of the server's. One day is therefore the tightest bound that
+ * refuses nothing legitimate — narrower and the reader in Auckland at 09:00 or in
+ * Honolulu at 22:00 is told their own today is invalid.
+ */
+export const MAX_DATE_DRIFT_DAYS = 1;
+
+/**
+ * Is `date` a canonical `YYYY-MM-DD` naming a day the reader could plausibly be
+ * on right now?
+ *
+ * ⚠️ **Validated by ROUND-TRIP rather than by a pattern, and that is deliberate.**
+ * The obvious `/^\d{4}-\d{2}-\d{2}$/` is linear and perfectly safe, and
+ * `gitlab-advanced-sast` reports it anyway as CWE-185 "Incorrect regular
+ * expression" — measured on this exact line in pipeline 3471. Dismissing it would
+ * work once: the fingerprint includes the LINE NUMBER, so the same statement
+ * comes back as a new finding every time an unrelated edit moves it down the
+ * file. `src/lib/pick-one.ts` records what that costs — one `Math.random` in
+ * `focus-timer.tsx` dismissed five separate times at five different lines. There
+ * is no regex to flag if there is no regex.
+ *
+ * The round trip is also the STRICTER check. It accepts exactly the canonical
+ * rendering and nothing else, so `"2026-8-1"`, `"2026-08-1"`, `"+002026-08-17"`
+ * and a 32nd of a month are all refused — the last by `Date.UTC`'s silent
+ * roll-over showing up as a different string, which a pattern would have let
+ * through.
+ *
+ * Both sides are built field by field against UTC, so the comparison is a pure
+ * day count that does not itself depend on the container's timezone.
+ */
+export function isPlausibleLocalDate(date: string, now: Date): boolean {
+  const parts = date.split("-");
+  if (parts.length !== 3) return false;
+  const [y, m, d] = parts.map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
+    return false;
+  }
+  const asked = Date.UTC(y, m - 1, d);
+  // Out of the range `Date` can hold. Guarded before `toISOString`, which throws
+  // a RangeError on an invalid date rather than returning anything.
+  if (!Number.isFinite(asked)) return false;
+  if (new Date(asked).toISOString().slice(0, 10) !== date) return false;
+
+  const serverDay = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  return Math.abs(asked - serverDay) / 86_400_000 <= MAX_DATE_DRIFT_DAYS;
+}
+
+/**
  * Today's doses, in render order, each carrying its derived state.
  *
  * `logs` must already be the rows for `now`'s local day — the caller reads them by

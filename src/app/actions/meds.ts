@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { MedsDoseState } from "@/lib/constants";
+import { isPlausibleLocalDate } from "@/lib/meds";
 
 /**
  * #269 — record that a dose was taken or deliberately skipped.
@@ -55,91 +56,28 @@ export type MedsLogRefusal =
 export type MedsLogResult =
   { ok: true; state: MedsDoseState } | { ok: false; reason: MedsLogRefusal };
 
-/**
- * How far the client's local date may sit from the server's UTC date.
- *
- * The client sends its own local day because the server cannot know the reader's
- * timezone — `MedsDoseLog.date` is a calendar fact in their time, not the
- * container's. That must not quietly become a backfill API: a caller posting an
- * arbitrary date could fabricate a history v2 will later visualise as fact.
- *
- * Real UTC offsets span UTC-12 to UTC+14, so a genuine local date is at most one
- * day either side of the server's. One day is therefore the tightest bound that
- * refuses nothing legitimate — narrower and the reader in Auckland at 09:00 or in
- * Honolulu at 22:00 is told their own today is invalid.
- */
-const MAX_DATE_DRIFT_DAYS = 1;
-
-/**
- * Is `date` a canonical `YYYY-MM-DD` naming a day the reader could plausibly be
- * on right now?
- *
- * ⚠️ **Validated by ROUND-TRIP rather than by a pattern, and that is deliberate.**
- * The obvious `/^\d{4}-\d{2}-\d{2}$/` is linear and perfectly safe, and
- * `gitlab-advanced-sast` reports it anyway as CWE-185 "Incorrect regular
- * expression" — measured on this exact line in pipeline 3471. Dismissing it would
- * work once: the fingerprint includes the LINE NUMBER, so the same statement
- * comes back as a new finding every time an unrelated edit moves it down the
- * file. `src/lib/pick-one.ts` records what that costs — one `Math.random` in
- * `focus-timer.tsx` dismissed five separate times at five different lines. There
- * is no regex to flag if there is no regex.
- *
- * The round trip is also the STRICTER check. It accepts exactly the canonical
- * rendering and nothing else, so `"2026-8-1"`, `"2026-08-1"`, `"+002026-08-17"`
- * and a 32nd of a month are all refused — the last by `Date.UTC`'s silent
- * roll-over showing up as a different string, which a pattern would have let
- * through.
- *
- * Both sides are built field by field against UTC, so the comparison is a pure
- * day count that does not itself depend on the container's timezone.
- */
-function isPlausibleLocalDate(date: string, now: Date): boolean {
-  const parts = date.split("-");
-  if (parts.length !== 3) return false;
-  const [y, m, d] = parts.map(Number);
-  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) {
-    return false;
-  }
-  const asked = Date.UTC(y, m - 1, d);
-  // Out of the range `Date` can hold. Guarded before `toISOString`, which throws
-  // a RangeError on an invalid date rather than returning anything.
-  if (!Number.isFinite(asked)) return false;
-  if (new Date(asked).toISOString().slice(0, 10) !== date) return false;
-
-  const serverDay = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-  );
-  return Math.abs(asked - serverDay) / 86_400_000 <= MAX_DATE_DRIFT_DAYS;
-}
-
 export async function logMedsDose(input: {
   medicationDoseId: string;
   state: MedsDoseState;
-  /** The reader's LOCAL `YYYY-MM-DD`. See {@link MAX_DATE_DRIFT_DAYS}. */
-  date: string;
   /**
-   * The server's clock, injectable.
+   * The reader's LOCAL `YYYY-MM-DD`.
    *
-   * ⚠️ Every sibling in this slice already takes one — `deriveTodayDoses`,
-   * `targetTimeToday`, `collectExport` — precisely so the local-vs-UTC day
-   * boundary can be tested without moving the machine's clock. This function
-   * called `new Date()` inline, which made **the one check that decides whether
-   * a submitted date is plausible** the only untestable date logic in the
-   * feature.
+   * ⚠️ **This action takes NO clock, and that is the security property.** A
+   * previous round added `now?: Date` so the day boundary could be tested — good
+   * advice, misapplied. `"use server"` exports are POST endpoints ("treat every
+   * action as an untrusted entry point", Next's own docs), so an argument is an
+   * untrusted input: a caller supplying both `date` and `now` could make ANY date
+   * plausible and write a health record against an arbitrary day, defeating the
+   * very backfill defence the bound is documented as providing.
    *
-   * That is not theoretical here: a three-day-window bug lived in this exact
-   * seam, and a latent flake in this file's own spec turned out to be the local
-   * date and the UTC date disagreeing at 00:18 BST. Both were found by accident
-   * rather than by a test that could reach the boundary.
-   *
-   * Optional with a real default, so no caller changes and the production path
-   * is unchanged.
+   * The clock is now always the server's. The boundary cases moved down to
+   * `isPlausibleLocalDate` in `src/lib/meds.ts`, which is pure, keeps its `now`
+   * parameter, and is not reachable by a caller — so nothing was lost in
+   * coverage and the input surface shrank.
    */
-  now?: Date;
+  date: string;
 }): Promise<MedsLogResult> {
-  const { medicationDoseId, state, date, now = new Date() } = input;
+  const { medicationDoseId, state, date } = input;
 
   // Validated here rather than left to `MedsDoseLog_state_check`. The constraint
   // is the backstop and it stays the backstop — but a caller that reaches it gets
@@ -149,7 +87,7 @@ export async function logMedsDose(input: {
   if (!Object.values(MedsDoseState).includes(state)) {
     return { ok: false, reason: "bad-state" };
   }
-  if (!isPlausibleLocalDate(date, now)) {
+  if (!isPlausibleLocalDate(date, new Date())) {
     return { ok: false, reason: "bad-date" };
   }
 

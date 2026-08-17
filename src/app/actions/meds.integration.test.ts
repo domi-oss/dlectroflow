@@ -559,57 +559,94 @@ describe("logMedsDose — idempotency and correction", () => {
  * server's clock to sit at a specific instant, and before this they could only
  * have been written by moving the machine's.
  */
-describe("logMedsDose — the date bound, at the boundary", () => {
-  /** 23:30 UTC — the instant where local dates east of Greenwich are already
-   *  tomorrow and the server's UTC date is still today. */
-  const LATE_UTC = new Date(Date.UTC(2026, 7, 17, 23, 30));
-  /** 00:30 UTC — the mirror, where local dates west are still yesterday. */
-  const EARLY_UTC = new Date(Date.UTC(2026, 7, 17, 0, 30));
+/**
+ * ⚠️ The eight clock-boundary cases that used to live here have MOVED DOWN to
+ * `src/lib/meds.test.ts`, against the pure `isPlausibleLocalDate`.
+ *
+ * They were written here by injecting a `now` into the action — which a later
+ * round found was a caller-controlled RPC parameter, letting a caller supply
+ * both the date and the clock it is judged against. The action takes no clock
+ * now, so these cases cannot be expressed at this level, and they should never
+ * have been: the predicate is pure and the boundary is its property, not the
+ * endpoint's. Nothing was lost, and the input surface shrank.
+ *
+ * What stays here is what the ACTION is responsible for: refusing a malformed or
+ * far-off date at all, which needs no control over the clock.
+ */
 
-  it.each([
-    [LATE_UTC, "2026-08-18", "UTC+14 is already tomorrow at 23:30 UTC"],
-    [LATE_UTC, "2026-08-17", "the server's own date"],
-    [LATE_UTC, "2026-08-16", "UTC-12 is still yesterday"],
-    [EARLY_UTC, "2026-08-16", "UTC-12 is still yesterday at 00:30 UTC"],
-    [EARLY_UTC, "2026-08-18", "UTC+14 is already tomorrow"],
-  ])("accepts %s + %s (%s)", async (now, date) => {
+/**
+ * #269 — the action's input surface, as a caller sees it.
+ *
+ * ⚠️ `"use server"` exports are POST endpoints. Next's own docs for this version:
+ * *"the route is reachable to anyone who can send the same POST. Treat every
+ * action as an untrusted entry point."* TypeScript stops the app's own UI from
+ * passing an extra argument; it stops nothing at the wire. So the property worth
+ * asserting is not "the parameter is gone from the type" but **"sending it has no
+ * effect"**.
+ */
+describe("logMedsDose ignores anything a caller adds to the payload", () => {
+  /** A caller's payload, past the compile-time shape. */
+  const asWire = (payload: Record<string, unknown>) =>
+    logMedsDose(payload as Parameters<typeof logMedsDose>[0]);
+
+  it("cannot use a supplied clock to make a far-off date plausible", async () => {
+    // The exploit the previous round's `now?: Date` opened: supply BOTH the date
+    // and the clock it is judged against, and every date is one day from
+    // "today". Measured against the fixed action — the clock is ignored and the
+    // date is judged against the server's own.
+    const longAgo = "2020-01-01";
     expect(
-      await logMedsDose({
+      await asWire({
         medicationDoseId: "itest-269-dose",
         state: MedsDoseState.Taken,
-        date,
-        now,
+        date: longAgo,
+        now: new Date("2020-01-01T12:00:00.000Z"),
       }),
-    ).toMatchObject({ ok: true });
-    await db.medsDoseLog.deleteMany({ where: { workspaceId: WS } });
+    ).toEqual({ ok: false, reason: "bad-date" });
+    // The row count, not just the answer: this is the assertion that would have
+    // caught a fabricated health record.
+    expect(await db.medsDoseLog.count()).toBe(0);
   });
 
-  it.each([
-    [LATE_UTC, "2026-08-19", "two days ahead of the server"],
-    [LATE_UTC, "2026-08-15", "two days behind"],
-    [EARLY_UTC, "2026-08-19", "two days ahead"],
-  ])("refuses %s + %s (%s)", async (now, date) => {
+  it("cannot shift the window forward either", async () => {
+    const future = "2030-06-15";
     expect(
-      await logMedsDose({
+      await asWire({
         medicationDoseId: "itest-269-dose",
         state: MedsDoseState.Taken,
-        date,
-        now,
+        date: future,
+        now: new Date("2030-06-15T12:00:00.000Z"),
       }),
     ).toEqual({ ok: false, reason: "bad-date" });
     expect(await db.medsDoseLog.count()).toBe(0);
   });
 
-  it("treats the two directions symmetrically", () => {
-    // The property behind the table, without reaching for the read path's own
-    // window helper — that module lands with the UI slice, so asserting the two
-    // agree belongs there rather than here.
-    const day = 86_400_000;
-    for (const offset of [-1, 1]) {
-      const asked = new Date(LATE_UTC.getTime() + offset * day)
-        .toISOString()
-        .slice(0, 10);
-      expect(asked).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    }
+  it("still accepts a genuine payload that happens to carry the extra key", async () => {
+    // The non-zero control. A fix that refused any payload with an unexpected
+    // key would pass both specs above while breaking every real caller on the
+    // day someone adds a field.
+    expect(
+      await asWire({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+        now: new Date("2020-01-01T12:00:00.000Z"),
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await db.medsDoseLog.count()).toBe(1);
+  });
+
+  it("cannot supply its own workspace", async () => {
+    // The workspace comes from the session, never the payload — so a foreign id
+    // in the wire payload is inert rather than honoured.
+    expect(
+      await asWire({
+        medicationDoseId: "itest-269-dose-other",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+        workspaceId: OTHER_WS,
+      }),
+    ).toEqual({ ok: false, reason: "unknown-dose" });
+    expect(await db.medsDoseLog.count()).toBe(0);
   });
 });

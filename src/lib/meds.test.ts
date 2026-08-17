@@ -5,6 +5,8 @@ import {
   deriveTodayDoses,
   doseDeadline,
   medicationAppliesOn,
+  isPlausibleLocalDate,
+  MAX_DATE_DRIFT_DAYS,
   nextUnrecordedDose,
   type MedsMedicationInput,
 } from "@/lib/meds";
@@ -349,5 +351,80 @@ describe("nextUnrecordedDose", () => {
       ],
     });
     expect(nextUnrecordedDose(doses)).toBeNull();
+  });
+});
+
+/**
+ * #269 — the plausible-date bound, driven at the clock boundary.
+ *
+ * ⚠️ These eight cases MOVED here from `meds.integration.test.ts`, where they
+ * were expressed by injecting a `now` into the `logMedsDose` server action. A
+ * later review round established that argument was a caller-controlled RPC
+ * parameter — `"use server"` exports are POST endpoints, and Next's own docs for
+ * this version say to *"treat every action as an untrusted entry point"* — so a
+ * caller could supply both the date and the clock it is judged against and make
+ * any date plausible.
+ *
+ * They belong here and always did: the boundary is a property of the pure
+ * predicate, not of the endpoint. Injectability is free in a pure function and is
+ * an input surface on an action. Nothing was lost in coverage.
+ */
+describe("isPlausibleLocalDate", () => {
+  /** 23:30 UTC — local dates east of Greenwich are already tomorrow. */
+  const LATE_UTC = new Date(Date.UTC(2026, 7, 17, 23, 30));
+  /** 00:30 UTC — the mirror, where local dates west are still yesterday. */
+  const EARLY_UTC = new Date(Date.UTC(2026, 7, 17, 0, 30));
+
+  it.each([
+    [LATE_UTC, "2026-08-18", "UTC+14 is already tomorrow at 23:30 UTC"],
+    [LATE_UTC, "2026-08-17", "the server's own date"],
+    [LATE_UTC, "2026-08-16", "UTC-12 is still yesterday"],
+    [EARLY_UTC, "2026-08-16", "UTC-12 is still yesterday at 00:30 UTC"],
+    [EARLY_UTC, "2026-08-18", "UTC+14 is already tomorrow"],
+  ])("accepts %s + %s (%s)", (now, date) => {
+    expect(isPlausibleLocalDate(date as string, now as Date)).toBe(true);
+  });
+
+  it.each([
+    [LATE_UTC, "2026-08-19", "two days ahead of the server"],
+    [LATE_UTC, "2026-08-15", "two days behind"],
+    [EARLY_UTC, "2026-08-19", "two days ahead"],
+  ])("refuses %s + %s (%s)", (now, date) => {
+    expect(isPlausibleLocalDate(date as string, now as Date)).toBe(false);
+  });
+
+  it.each([
+    "",
+    "2026-8-1",
+    "2026-08-1",
+    "01/01/2026",
+    "yesterday",
+    "+002026-08-17",
+    "2026-02-31",
+    "2026-13-01",
+    "275760-09-14",
+  ])("refuses the non-canonical %o whatever the clock says", (bad) => {
+    // The round-trip check, which is stricter than a pattern: it accepts exactly
+    // the canonical rendering, so an expanded year and a 32nd of a month — which
+    // `Date.UTC` rolls over silently — are both refused.
+    expect(isPlausibleLocalDate(bad, LATE_UTC)).toBe(false);
+  });
+
+  it("is SYMMETRIC about the server's UTC date", () => {
+    // The property behind the tables: the window is the server's UTC date plus or
+    // minus MAX_DATE_DRIFT_DAYS, in both directions.
+    const day = 86_400_000;
+    const mid = Date.UTC(2026, 7, 17, 12, 0);
+    for (const offset of [-MAX_DATE_DRIFT_DAYS, 0, MAX_DATE_DRIFT_DAYS]) {
+      const date = new Date(mid + offset * day).toISOString().slice(0, 10);
+      expect(isPlausibleLocalDate(date, new Date(mid)), date).toBe(true);
+    }
+    for (const offset of [
+      -(MAX_DATE_DRIFT_DAYS + 1),
+      MAX_DATE_DRIFT_DAYS + 1,
+    ]) {
+      const date = new Date(mid + offset * day).toISOString().slice(0, 10);
+      expect(isPlausibleLocalDate(date, new Date(mid)), date).toBe(false);
+    }
   });
 });
