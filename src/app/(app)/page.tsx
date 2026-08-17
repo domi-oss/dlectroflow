@@ -1,6 +1,6 @@
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
-import { getGoogleStatus } from "@/lib/google";
+import { getGoogleStatus, GOOGLE_TIMEOUT_REASON } from "@/lib/google";
 import { identityFor } from "@/lib/identity";
 import {
   emptyInboxIsNewAccount,
@@ -14,7 +14,7 @@ import { mergePersistedIntent } from "@/lib/scheduling/intent";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
 import { shoppingSummaryVisible } from "@/lib/shopping-summary";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -254,6 +254,14 @@ export default async function InboxPage({
           via your Google Tasks list.
         </div>
       )}
+      {/* #211 — a timed-out exchange is the ONE failure here that earns a
+          control rather than an instruction. It is retryable, and it wrote
+          nothing: `exchangeCode` stores tokens only after the response arrives,
+          so the account is exactly as it was. Every other reason keeps the
+          generic copy, because offering "try again" for a state mismatch or a
+          refused grant walks someone round a loop that cannot succeed. The
+          reason token is the callback route's, shared rather than spelled twice
+          — see GOOGLE_TIMEOUT_REASON. */}
       {sp.google === "error" && (
         <div
           className={cn(
@@ -261,8 +269,31 @@ export default async function InboxPage({
             STATUS_BANNER_TONE.error,
           )}
         >
-          Google Tasks connection failed{sp.reason ? `: ${sp.reason}` : ""}. Try
-          again from a task breakdown.
+          {sp.reason === GOOGLE_TIMEOUT_REASON ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <span>
+                Google did not answer in time, so nothing was connected. Your
+                account is unchanged.
+              </span>
+              {/* The same entry point every other connect control uses: it
+                  mints a fresh PKCE verifier and state, which is exactly what
+                  the timed-out attempt's cleared cookies no longer supply. */}
+              <a
+                href="/api/google/oauth/start"
+                className={cn(
+                  "bg-primary text-primary-foreground rounded-md px-3 py-2 text-sm font-medium",
+                  touchTarget,
+                )}
+              >
+                Try connecting again →
+              </a>
+            </div>
+          ) : (
+            <>
+              Google Tasks connection failed{sp.reason ? `: ${sp.reason}` : ""}.
+              Try again from a task breakdown.
+            </>
+          )}
         </div>
       )}
       <InboxView

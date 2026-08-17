@@ -796,6 +796,25 @@ operators upgrading a self-hosted instance don't get surprised.
   frozen. Nothing here ever reached the server; what was at stake was the sentence
   you were part-way through.
 
+- **One setting decides when an item is going stale, and it is in hours (#261).**
+  The app answered "is this aging?" two different ways, from two different settings
+  that meant the same thing in different units — an aging threshold in minutes
+  defaulting to 240, and an aging value in hours defaulting to 4. Set one to 240 and
+  the other to 8 and you got different answers depending on which part of the app
+  asked; most visibly, moving the aging threshold did not change when the amber
+  "still needed?" prompt appeared, because that prompt read the other setting. The
+  hours trio is now the single source of truth and the minutes field is gone. **A
+  value you had customised is converted rather than dropped** — 90 minutes becomes
+  2 hours, rounded to the nearest whole hour and never below 1, and only where the
+  hours control was still at its default, so an explicit setting on either control
+  is left exactly as you set it. The demo overrides that made hours of behaviour
+  happen in seconds on stage are removed now that talk has happened, which also
+  retires the ×2/×3/×4 tier scaling that existed only to serve them.
+
+  Also dropped: five database indexes made redundant by a composite key already
+  covering the same leading column (#208). No behaviour change — every read path
+  still resolves through the composite.
+
 - **A local end-to-end run can no longer test the wrong branch (#266).** Playwright
   reuses an existing server outside CI, on fixed ports, and this project's default
   working mode is many concurrent worktrees — so the server it attached to
@@ -809,6 +828,30 @@ operators upgrading a self-hosted instance don't get surprised.
   When the commit cannot be established at all, server reuse is switched off rather
   than left unverified. No effect on a self-hosted instance or on CI, where
   Playwright always starts its own server — this is this project's own test harness.
+
+- **A stalled Google no longer holds a request for five minutes (#211).** Node's
+  `fetch` defaults to a 300 s header timeout, and only one of the seven calls this
+  app makes to Google set a deadline of its own. An endpoint that accepted the
+  connection and then went quiet therefore produced a spinner rather than a failure
+  — worst of all on the OAuth return, which is a browser navigation with nothing
+  else to bound it, so clicking **Connect Google** could mean five minutes of blank
+  page.
+
+  Every call now shares one 8 s deadline — deliberately shorter than the 10 s the
+  app is willing to wait on a server action, so a slow Google can no longer make a
+  completion that actually saved look like one that failed — and **every call site
+  decides what hitting it means**, which is the part that separates a fix from a
+  faster failure.
+  A connect that times out says so in words and offers **Try connecting again**,
+  because nothing was written and the retry is safe. A token refresh that times out
+  is treated as transient: it does not clear your tokens and does not ask you to
+  reconnect, since a slow network says nothing about whether the connection is
+  still good. Disconnect still deletes your stored tokens and still tells you if
+  Google never confirmed the revoke — it just answers in seconds now. A scheduling
+  push that times out mid-write says the task **may** have been created, rather
+  than claiming nothing happened and walking you into a duplicate; and a
+  re-schedule that times out will not recreate the task it was updating, which
+  would have left two entries and two calendar blocks for one step.
 
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
