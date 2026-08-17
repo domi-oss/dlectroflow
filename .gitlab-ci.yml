@@ -6,6 +6,38 @@
 # release image (see build_image). Without this rule a tag push matches no rule
 # and creates no pipeline. Tag pipelines never deploy (deploy jobs are MR/main only).
 workflow:
+  # Cancel only jobs that SAY they are safe to cancel, rather than whole pipelines.
+  #
+  # The default (`conservative`) cancels a redundant pipeline outright unless a job
+  # with `interruptible: false` has already STARTED — and GitLab's own reference is
+  # explicit that under that mode "a job that has not started yet is always
+  # considered `interruptible: true`, regardless of the job's configuration"
+  # (doc/ci/yaml/_index.md, `interruptible` → Additional details). That sentence is
+  # the whole bug: `deploy_production` is stage-scheduled behind build+test and
+  # additionally queues on `resource_group: production`, so at the moment a second
+  # merge lands it has NOT started, and it is cancelled however it is configured.
+  #
+  # Measured on this project, pipeline 2762854030 (main, 2026-08-15): build_app,
+  # test_app, e2e_test, build_image and four of five scanners all SUCCEEDED — the
+  # image was built and pushed — and `deploy_production` was still `canceled`
+  # without ever starting, because a newer merge arrived. `alert_pipeline_failure`
+  # was cancelled in the same sweep, which is why that deploy went missing quietly
+  # instead of loudly. Pipeline 2758021582 (2026-08-13) is the same shape.
+  #
+  # Under `interruptible` the decision is the job's declared value whether or not
+  # it has started, so: build/test/scan jobs (all `interruptible: true`) still get
+  # cancelled and re-run on the newer pipeline, while `deploy_production` (no
+  # `interruptible` key, so false) and `alert_pipeline_failure` (explicitly false)
+  # survive. That is what makes every merge end with production on a commit or a
+  # visible red, never silently neither — and it is what removes the need to merge
+  # one at a time watching each deploy finish.
+  #
+  # Safe because the two survivors cannot double-deploy: `resource_group: production`
+  # serialises them, and "Prevent outdated deployment jobs" is on, so an older deploy
+  # that reaches the runner after a newer one fails as `failed outdated deployment
+  # job` rather than overwriting it. Loud, and the newest commit wins.
+  auto_cancel:
+    on_new_commit: interruptible
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -891,6 +923,16 @@ deploy_production:
   extends: .deploy_base
   # Serialize prod helm ops (rapid successive merges to main would otherwise
   # race each other the same way review deploys can).
+  #
+  # ⚠️ This serialises; it does NOT protect this job from cancellation, and it used
+  # to read as though it did. Queuing on a resource group leaves the job unstarted,
+  # and under `workflow:auto_cancel:on_new_commit: conservative` an unstarted job is
+  # treated as interruptible whatever it is configured as — so `resource_group` was
+  # actively widening the window in which a second merge could cancel this deploy.
+  # That is how pipeline 2762854030 lost a deploy whose image had already been built
+  # and pushed. What protects it is the `auto_cancel` mode set in `workflow:` at the
+  # top of this file, plus the absence of an `interruptible` key here (default
+  # false). Do not add `interruptible: true` to this job.
   resource_group: production
   secrets:
     ANTHROPIC_API_KEY:
