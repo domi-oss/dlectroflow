@@ -831,19 +831,40 @@ deploy_review:
   # Autopilot capacity. Under the previous `conservative` default an unstarted
   # review deploy was cancelled, so omitting this would have been a regression.
   #
-  # Safe to cancel mid-flight, which is the part worth recording: `--atomic` is
-  # set on the helm call below, and helm installs a SIGINT/SIGTERM handler
-  # (`pkg/action/upgrade.go`, `handleContext`) that triggers the rollback and
-  # holds a mutex until it finishes — so a cancelled upgrade rolls back rather
-  # than leaving the release wedged in `pending-upgrade`. `stop_review` remains
-  # the manual escape hatch if one ever does wedge.
+  # ⚠️ Cancelling this mid-flight is NOT graceful, and the exposure belongs here
+  # rather than being assumed away. The signal does reach helm: the runner sends
+  # SIGTERM to every process in the build container, signalling descendants
+  # directly rather than trusting the shell to forward it (the runner's
+  # FF_USE_NATIVE_CONTAINER_STOP defaults to false, precisely because shells do
+  # not), so `--atomic` below does start its rollback. It just does not finish.
+  # The container is then stopped with a nil timeout — the container engine's own
+  # default grace period, ten seconds on Linux unless the runner operator raised
+  # it — while the rollback inherits `--timeout` from the upgrade and waits for
+  # pods to go Ready. A rollback with real work to do is therefore killed
+  # part-way, leaving the release mid-operation, and helm treats a pending
+  # release as a pessimistic lock: the next `helm upgrade` on it fails with
+  # "another operation (install/upgrade/rollback) is in progress". That grace
+  # period is not ours to tune — the runner passes it as nil, so no keyword or CI
+  # variable here can raise it, and the rollback cannot be bounded under it.
+  #
+  # Accepted for REVIEW only. The blast radius is one MR's own release, and
+  # `stop_review` is a complete recovery rather than a rollback to unpick: it
+  # deletes the namespace, and helm keeps release history in the release
+  # namespace, so a wedged release goes with it. Nothing here holds real data
+  # (non-persistent Postgres, per-deploy secrets) and `auto_stop_in` caps the
+  # tail. The window is narrow, too — this job starts only after build+test+e2e,
+  # so most cancellations arrive before it has started, which is the case this
+  # key is actually here for. None of that holds for prod, which is why
+  # `deploy_production` keeps the default.
   interruptible: true
   # Serialize helm per review env: a follow-up push otherwise races the previous
   # pipeline's still-running helm op on the same release → "another operation is
-  # in progress" (hit on !46). Still required WITH `interruptible: true` above —
-  # cancellation is not instant, and the rollback it triggers is itself a helm op
-  # that must not overlap the next upgrade. Same group as stop_review so a deploy
-  # can't race the teardown either.
+  # in progress" (hit on !46). Still required WITH `interruptible: true` above,
+  # but not for the next upgrade's sake — that one is minutes away behind
+  # build+test+e2e and cannot overlap a ten-second teardown. It is for
+  # `stop_review`: a manual click can land at any moment, including inside the
+  # window where a cancelled deploy is still rolling back, and sharing the group
+  # is what stops a teardown racing that.
   resource_group: review/$CI_MERGE_REQUEST_IID
   secrets:
     ANTHROPIC_API_KEY:
