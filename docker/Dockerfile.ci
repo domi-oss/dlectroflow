@@ -51,8 +51,28 @@ ENV HOSTNAME=0.0.0.0
 # package-lock.json (guarded by src/lib/dockerfile-hygiene.test.ts) so the
 # container never runs migrations on a different Prisma than the app was built
 # against.
+#
+# ⚠️ The manifest below carries its own `overrides`, and it MUST: because this
+# prefix is isolated, npm reads THIS package.json as the project root, so the
+# `overrides` in the repo's package.json do not apply here. Anything that has to
+# be forced in the shipped image has to be forced twice — once for the repo (CI,
+# local dev, and what the dependency scanner reads out of package-lock.json) and
+# once here, for the copy that is actually grafted into /app/node_modules and
+# runs in the cluster. `deepmerge-ts` is pinned to ^8.0.1 for CVE-2026-40345
+# (HIGH, stack exhaustion on recursive object graphs): `prisma` pulls
+# `@prisma/config`, which depends on `deepmerge-ts` at an EXACT `7.1.5`, so no
+# range bump reaches it and naming the package on the install line below does not
+# either — measured in node:22-alpine, that produces a hoisted 8.0.1 AND a nested
+# @prisma/config/node_modules/deepmerge-ts@7.1.5, which is the copy
+# @prisma/config would load. Only an override collapses it to one.
+#
+# This is the load-bearing half of that fix. Fixing only the repo's package.json
+# turns the dependency scan green while the running image still carries the
+# vulnerable copy, because the scanner reads the lockfile and the pod gets this
+# install. Do not "simplify" the overrides block out; dockerfile-hygiene fails if
+# it goes missing.
 RUN mkdir -p /opt/tools \
-  && printf '{"name":"dlectroflow-image-tools","private":true}\n' > /opt/tools/package.json \
+  && printf '{"name":"dlectroflow-image-tools","private":true,"overrides":{"deepmerge-ts":"^8.0.1"}}\n' > /opt/tools/package.json \
   && cd /opt/tools \
   && npm install --no-audit --no-fund --cache /tmp/npm-cache \
        prisma@6.19.3 dotenv@16.6.1 tsx@4.23.1 \

@@ -319,6 +319,71 @@ describe.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
         ).toContain(`${pkg}@${locked}`);
       }
     });
+
+    // The isolated prefix above is why this exists. npm reads the manifest the
+    // RUN writes as the project root, so the repo's `overrides` do NOT apply to
+    // the tools install — anything that has to be forced in the shipped image
+    // has to be forced twice, and only the second one reaches the cluster.
+    //
+    // Getting it wrong is silent in the worst direction: fixing only the repo's
+    // package.json turns the dependency scan green, because the scanner reads
+    // package-lock.json, while /app/node_modules still carries the vulnerable
+    // copy that `npx prisma migrate deploy` loads. CVE-2026-40345 (HIGH, stack
+    // exhaustion in deepmerge-ts) is here because `@prisma/config` depends on
+    // `deepmerge-ts` at an EXACT version, so nothing but an override moves it.
+    //
+    // Asserted as agreement between the two manifests rather than against a
+    // literal version, so a future bump only has to be made in one obvious place
+    // and this fails until the image side follows.
+    it("repeats the repo's overrides in the isolated tools manifest", () => {
+      const repo = JSON.parse(
+        readFileSync(join(process.cwd(), "package.json"), "utf8"),
+      ) as { overrides?: Record<string, unknown> };
+
+      const writesManifest = runs.find((r) =>
+        /\/opt\/tools\/package\.json/.test(r),
+      );
+      expect(
+        writesManifest,
+        `${filename} must still write the isolated tools manifest`,
+      ).toBeDefined();
+
+      const json = /printf\s+'([^']*)'/.exec(writesManifest!)?.[1];
+      expect(
+        json,
+        `could not read the manifest printf'd in ${filename}`,
+      ).toBeDefined();
+      const tools = JSON.parse(json!.replace(/\\n$/, "")) as {
+        overrides?: Record<string, unknown>;
+      };
+
+      expect(
+        tools.overrides,
+        `${filename} must declare an "overrides" block in the tools manifest. ` +
+          `Without one, npm resolves the migrate/seed/purge tooling with no ` +
+          `overrides at all and the image ships whatever the transitive tree ` +
+          `pins — the dependency scan would still read green off the lockfile`,
+      ).toBeDefined();
+
+      // Every entry the image forces must say the same thing the repo says, so
+      // the two cannot drift into shipping a different tree than CI tested.
+      for (const [pkg, range] of Object.entries(tools.overrides ?? {})) {
+        expect(
+          range,
+          `${filename} overrides ${pkg} to ${String(range)} but package.json ` +
+            `overrides it to ${String(repo.overrides?.[pkg])}. The image would ` +
+            `then run the tooling on a different ${pkg} than CI resolved`,
+        ).toBe(repo.overrides?.[pkg]);
+      }
+
+      // The one that is a live security control rather than housekeeping.
+      expect(
+        Object.keys(tools.overrides ?? {}),
+        `${filename} must keep deepmerge-ts overridden (CVE-2026-40345). ` +
+          `@prisma/config pins it exactly, so dropping this reintroduces the ` +
+          `vulnerable copy into /app/node_modules while CI stays green`,
+      ).toContain("deepmerge-ts");
+    });
   },
 );
 
