@@ -300,6 +300,103 @@ describe("logMedsDose — the feature gate", () => {
   });
 });
 
+describe("logMedsDose — a DEACTIVATED medication", () => {
+  /**
+   * `Medication.active` is the pause switch, and `deriveTodayDoses` skips an
+   * inactive medication outright (`src/lib/meds.ts`: `if (!med.active) continue`).
+   * So an inactive medication's doses appear on **no** surface — no chip, no dot,
+   * no banner line — and every legitimate press comes from a surface that
+   * rendered the dose it names.
+   *
+   * ⚠️ Reachable, and not only by a crafted POST: pause a medication in Settings
+   * with the home page open in a second tab, and that tab still holds the old
+   * regimen. A press there wrote a row the strip would never show again, because
+   * the read path had already stopped deriving the dose — an invisible health
+   * record, which the export then hands over. Same shape as the tracker gate: a
+   * server action is a POST endpoint, so a switch enforced only where the
+   * controls are drawn is cosmetic.
+   *
+   * Deactivating is not deleting, so the rows already recorded stay readable —
+   * the same hide-don't-delete promise the tracker flag makes.
+   */
+  async function deactivate() {
+    await db.medication.update({
+      where: { id: `${WS}-med` },
+      data: { active: false },
+    });
+  }
+
+  it("REFUSES a dose whose medication is paused, and writes NOTHING", async () => {
+    await deactivate();
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: false, reason: "unknown-dose" });
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
+  });
+
+  it("writes again once the medication is resumed", async () => {
+    // The non-zero control. A gate that refused unconditionally would satisfy
+    // the spec above while making the whole feature inert — the same control the
+    // tracker gate carries, for the same reason.
+    await deactivate();
+    await db.medication.update({
+      where: { id: `${WS}-med` },
+      data: { active: true },
+    });
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: true, state: MedsDoseState.Taken });
+  });
+
+  it("does not DELETE the rows a paused medication already has", async () => {
+    // Pausing hides; it does not destroy. /privacy, /help and the archive's
+    // README all say the reader's history survives, and a sweep here would make
+    // three published sentences false at once — about a health record.
+    await logMedsDose({
+      medicationDoseId: "itest-269-dose",
+      state: MedsDoseState.Taken,
+      date: TODAY,
+    });
+    await deactivate();
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(1);
+  });
+
+  it("answers `tracker-off` ahead of the pause, when BOTH are true", async () => {
+    // The disambiguation still names the thing the reader can act on. A paused
+    // medication inside an opted-out workspace is answered `tracker-off`,
+    // because Settings is where they go either way and the switch is the outer
+    // one.
+    await deactivate();
+    await db.settings.update({
+      where: { workspaceId: WS },
+      data: { medsTracker: false },
+    });
+    expect(
+      await logMedsDose({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: false, reason: "tracker-off" });
+  });
+});
+
 describe("logMedsDose — the date the client supplies", () => {
   it("refuses a date that is not YYYY-MM-DD", async () => {
     // The round-trip validator's whole surface, including the shapes a

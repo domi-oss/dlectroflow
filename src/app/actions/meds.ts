@@ -136,15 +136,35 @@ export async function logMedsDose(input: {
    * rather than deletes, so a valid dose id belonging to an opted-out workspace
    * is the ordinary state of anyone who has ever switched it off.
    *
-   * ## Why the two halves share one query
+   * ## The pause half: the medication must not be deactivated
    *
-   * There is no window between deciding the dose is in scope and deciding the
-   * workspace is opted in — and, more usefully, it forces the question to be
-   * asked the right way round. The filter walks `medication → workspace →
-   * settings` from the CALLER's `workspaceId`, so it answers "does the caller's
-   * own workspace have this on", never "does the dose's owner". Those look alike
-   * and only one of them is scoping; a spec logs a foreign dose whose own
-   * workspace IS opted in, which is the input that tells them apart.
+   * Duo review round 3 of `!364`, grounded. `deriveTodayDoses` skips an inactive
+   * medication outright (`if (!med.active) continue`), so its doses appear on no
+   * surface at all — no chip, no dot, no banner line. Every legitimate press
+   * comes from a surface that rendered the dose it names, and this write accepted
+   * one no surface could have offered.
+   *
+   * ⚠️ Not only a crafted POST: pause a medication in Settings with the home page
+   * open in a second tab and that tab still holds the old regimen. A press there
+   * wrote a row the strip would never show again, because the read path had
+   * already stopped deriving the dose — an invisible health record, which the
+   * export then hands over. It is the tracker gate's argument one level down: a
+   * switch enforced only where the controls are drawn is cosmetic.
+   *
+   * Deactivating hides and does not delete, exactly like the tracker flag, so the
+   * rows a paused medication already has stay readable. A spec asserts that.
+   *
+   * ## Why the three halves share one query
+   *
+   * There is no window between deciding the dose is in scope, deciding the
+   * workspace is opted in and deciding the medication is running — and, more
+   * usefully, it forces the questions to be asked the right way round. The filter
+   * walks `medication → workspace → settings` from the CALLER's `workspaceId`, so
+   * it answers "does the caller's own workspace have this on", never "does the
+   * dose's owner". Those look alike and only one of them is scoping; a spec logs a
+   * foreign dose whose own workspace IS opted in, which is the input that tells
+   * them apart. `active` sits on the same `medication` filter the scoping already
+   * walks through, so it costs no extra hop.
    *
    * `Settings` is a nullable to-one, so a workspace with no row matches nothing
    * and fails CLOSED — wanted rather than incidental, since `getSettings()`
@@ -171,6 +191,7 @@ export async function logMedsDose(input: {
       id: medicationDoseId,
       medication: {
         workspaceId,
+        active: true,
         workspace: { settings: { medsTracker: true } },
       },
     },
@@ -179,15 +200,23 @@ export async function logMedsDose(input: {
 
   if (!dose) {
     /**
-     * Which of the two refusals it was.
+     * Which refusal it was — three inputs, deliberately TWO answers.
      *
-     * Only on the failure path, so the happy path stays at one query. The two
-     * are told apart because the right response differs: a reader whose tracker
-     * is off needs sending to Settings, while a caller holding an id that is not
-     * theirs must learn nothing — so "not yours" and "does not exist" still
-     * answer identically to each other, and neither is an existence oracle over
-     * another workspace's ids. Reporting the caller's OWN switch back to them
-     * discloses nothing they did not set.
+     * Only on the failure path, so the happy path stays at one query. The
+     * distinction that is drawn is the one where the right response differs: a
+     * reader whose tracker is off needs sending to Settings, while a caller
+     * holding an id that is not theirs must learn nothing — so "not yours" and
+     * "does not exist" still answer identically to each other, and neither is an
+     * existence oracle over another workspace's ids. Reporting the caller's OWN
+     * switch back to them discloses nothing they did not set.
+     *
+     * A PAUSED medication answers `unknown-dose`, with the tracker check taking
+     * precedence when both are true. That is not a gap: from the client's point
+     * of view the dose genuinely is not there, because the read path stopped
+     * deriving it — and a reason of its own would need its own copy in every
+     * voice for a state only a stale tab can reach, while the honest outcome is
+     * already the right one (the press reverts, and a reload shows the
+     * medication paused). Settings is where the reader goes for either.
      */
     const optedIn = await prisma.settings.findFirst({
       where: { workspaceId, medsTracker: true },

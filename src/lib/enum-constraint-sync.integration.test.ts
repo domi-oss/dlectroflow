@@ -947,6 +947,23 @@ describe("#269 medication CHECK constraints actually reject out-of-set values", 
   const MED = "meds-check-med";
   const DOSE = "meds-check-dose";
 
+  /**
+   * A distinct `YYYY-MM-DD` per enum value, keyed by INDEX rather than by value.
+   *
+   * `MedsDoseLog` is unique on `(workspaceId, date, medicationDoseId)` and the
+   * acceptance control inserts one row per value against one dose in one
+   * workspace, so `date` is the only column separating them. Indexing means the
+   * separation holds however many values `MedsDoseState` grows to — see the spec
+   * that proves it, and that shows the two-way ternary this replaced collapsing
+   * three values onto two days.
+   *
+   * Built through `Date.UTC` rather than by incrementing the day component, so a
+   * long enum rolls into the next month instead of producing "2026-08-32". The
+   * base is the 18th, leaving the 17th free for the two rejection specs.
+   */
+  const dayFor = (index: number) =>
+    new Date(Date.UTC(2026, 7, 18 + index)).toISOString().slice(0, 10);
+
   beforeAll(async () => {
     await prisma.$executeRawUnsafe(
       `INSERT INTO "Workspace" (id, kind) VALUES ($1,'user') ON CONFLICT (id) DO NOTHING`,
@@ -996,17 +1013,55 @@ describe("#269 medication CHECK constraints actually reject out-of-set values", 
     ).rejects.toThrow(/violates check constraint/i);
   });
 
+  it("gives every enum value its own DAY, so a third value cannot collide", () => {
+    /**
+     * `MedsDoseLog` is `@@unique([workspaceId, date, medicationDoseId])`, and the
+     * control below inserts one row per enum value against one dose in one
+     * workspace — so `date` is the only column left to keep them apart.
+     *
+     * ⚠️ It used to be a two-way ternary — `state === Taken ? "18" : "19"` — which
+     * is exact for today's two values and silently wrong for a third: the new
+     * value would land on the SAME day as `skipped` and the insert would fail on
+     * the unique index. The spec would then report a CHECK constraint rejecting a
+     * value it actually accepts, which is the worst possible failure for the one
+     * assertion standing between "the constraint is right" and "the constraint
+     * refuses everything".
+     *
+     * Provable today rather than on the day someone adds a value, because the
+     * derivation is a function of the INDEX: three indices give three days. The
+     * second half is the non-zero control on the defect itself — the shape this
+     * replaced, shown collapsing three values into two days.
+     */
+    const three = [0, 1, 2];
+    expect(new Set(three.map(dayFor)).size).toBe(3);
+
+    const asItWas = (state: string) =>
+      `2026-08-${state === MedsDoseState.Taken ? "18" : "19"}`;
+    expect(
+      new Set(
+        [MedsDoseState.Taken, MedsDoseState.Skipped, "paused"].map(asItWas),
+      ).size,
+      "the shape this replaced did not actually collide, so this spec guards nothing",
+    ).toBe(2);
+
+    // And it stays a real date across a month boundary, which arithmetic on the
+    // day component alone would not: fourteen values would have produced
+    // "2026-08-32".
+    expect(dayFor(13)).toBe("2026-08-31");
+    expect(dayFor(14)).toBe("2026-09-01");
+  });
+
   it("still accepts every value constants.ts declares for MedsDoseLog.state", async () => {
     // The non-zero control. Without it the two rejections above are satisfied by
     // a constraint that refuses everything, which would pass while making the
     // feature unusable.
-    for (const state of Object.values(MedsDoseState)) {
+    for (const [index, state] of Object.values(MedsDoseState).entries()) {
       await prisma.$executeRawUnsafe(
         `INSERT INTO "MedsDoseLog" (id, "workspaceId", date, "medicationDoseId", state)
            VALUES ($1,$2,$3,$4,$5)`,
         `meds-check-ok-${state}`,
         WS,
-        `2026-08-${state === MedsDoseState.Taken ? "18" : "19"}`,
+        dayFor(index),
         DOSE,
         state,
       );
