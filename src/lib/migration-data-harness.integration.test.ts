@@ -769,7 +769,12 @@ describe("the migrations applied to a database that already holds rows (#190)", 
       expect(await present(dropped)).toEqual([]);
       // The control for that zero, on the same table in the same schema.
       expect(await present(covering)).toEqual([...covering].sort());
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
 
+  /**
    * #269 — what the medication migration did to `Settings` rows that already
    * existed, and whether its constraint is enforced on those rows.
    *
