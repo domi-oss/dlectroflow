@@ -136,6 +136,46 @@ describe("doseDeadline", () => {
       new Date(2026, 7, 17, 17, 0).getTime(),
     );
   });
+
+  /**
+   * ⚠️ **A CUSTOMISED `workdayEndTime` is the case every test above misses**, and
+   * it is what makes "collapses to `workdayEndTime`" either true or a story.
+   *
+   * Duo review round 4 of `!364`, grounded. Every unusable-`dueAfter` assertion
+   * above passes `"17:00"` — the column's own default — so `Math.max(workdayEnd,
+   * 17:00)` is `workdayEnd` by coincidence of the fixture rather than by the
+   * behaviour the docblocks claim. A workspace that set an earlier end time is
+   * the input that tells the two apart, and `workdayEndTime` is a plain text
+   * input on the dashboard (`settings.ts` validates its SHAPE only), so this is
+   * an ordinary setting rather than exotic state.
+   *
+   * The direction of the error is the reason it is worth a behaviour change and
+   * not a narrower comment: an unusable `dueAfter` bought the dose EIGHT extra
+   * hours before it could read as *missed*, and it bought them silently. That is
+   * the same failure direction as the day-shift bug this module was already fixed
+   * for — later, not earlier, on a health record, where nobody notices a thing
+   * that fails to appear.
+   */
+  it.each(["nonsense", "25:00", "24:00", "12:99", "99:99", ""])(
+    "treats the unusable dueAfter %o exactly like `null` for an EARLY workdayEndTime",
+    (bad) => {
+      const asAbsent = doseDeadline(null, "09:00", MONDAY_0900);
+      expect(asAbsent).toBe(new Date(2026, 7, 17, 9, 0).getTime());
+      // The whole property in one line: unusable and absent are the same dose.
+      expect(
+        doseDeadline(bad, "09:00", MONDAY_0900),
+        `${bad} did not collapse to the workspace's own 09:00`,
+      ).toBe(asAbsent);
+    },
+  );
+
+  it("still takes the LATER time when dueAfter is usable and workdayEndTime is early", () => {
+    // The non-zero control. A fix that treated every `dueAfter` as absent would
+    // pass the block above and quietly delete the `max` this function exists for.
+    expect(doseDeadline("21:00", "09:00", MONDAY_0900)).toBe(
+      new Date(2026, 7, 17, 21, 0).getTime(),
+    );
+  });
 });
 
 describe("medicationAppliesOn", () => {

@@ -4,7 +4,7 @@ import { MedsDoseState } from "@/lib/constants";
 // Two derivations differing by an hour would let a dose read as missed on a day
 // the streak thinks has not started.
 import { isoWeekday, parseWorkingDays, ymd } from "@/lib/engagement-ledger";
-import { targetTimeToday } from "@/lib/target-time";
+import { isUsableHhmm, targetTimeToday } from "@/lib/target-time";
 
 /**
  * #269 — the medication tracker's read model.
@@ -138,6 +138,9 @@ export type DerivedDose = {
  *
  * The `max` costs the owner's own regimen nothing: breakfast and lunch are both
  * well before 17:00, so their deadline is 17:00 either way.
+ *
+ * ⚠️ **An UNUSABLE `dueAfter` is treated as no `dueAfter` at all**, which is a
+ * behaviour change from `!364`'s earlier commits and the point of the guard below.
  */
 export function doseDeadline(
   dueAfter: string | null,
@@ -145,10 +148,37 @@ export function doseDeadline(
   now: Date,
 ): number {
   const workdayEnd = targetTimeToday(workdayEndTime, now);
-  if (dueAfter == null) return workdayEnd;
-  // A malformed `dueAfter` resolves to 17:00 rather than NaN (see
-  // `targetTimeToday`), so `Math.max` cannot be poisoned into never comparing
-  // true — which would make the dose silently un-missable.
+  /**
+   * ⚠️ **`isUsableHhmm` FIRST, because a fallback fed into a `max` is not a
+   * fallback.** Duo review round 4 of `!364`, grounded and reproduced.
+   *
+   * `targetTimeToday` degrades an unusable time to 17:00 rather than to `NaN`, and
+   * that is right for `workdayEndTime` — 17:00 is that column's own schema
+   * default. It is not right *here*. Passing the degraded value into
+   * `Math.max(workdayEnd, …)` does not fall back, it takes the LATER of the two,
+   * and 17:00 is not any kind of default for `MedicationDose.dueAfter`, whose
+   * absent value is `null`.
+   *
+   * So for a workspace that set an earlier `workdayEndTime` the two diverged: at
+   * `"09:00"` a dose with `dueAfter: null` was due by 09:00 while the same
+   * medication with `dueAfter: "25:00"` was not late until 17:00 — eight extra
+   * hours, bought by a value nobody could have meant, and in the direction nobody
+   * notices. It is a smaller instance of the day-shift defect this function was
+   * already fixed for: a deadline later than it should be means a dose that reads
+   * as fine when it is not, on a health record.
+   *
+   * Every earlier spec missed it by passing `"17:00"`, the default, which makes
+   * `max(17:00, 17:00)` correct by coincidence of the fixture. The specs now pin
+   * the equivalence against a CUSTOMISED end time, which is the input that tells
+   * "collapses to `workdayEndTime`" apart from "happens to agree with it".
+   *
+   * Fixed here rather than in `targetTimeToday` because that function has exactly
+   * one other use — `workdayEnd` above — and the fallback is correct for it. The
+   * range rule itself is NOT duplicated: `isUsableHhmm` and `targetTimeToday`
+   * share one private parse in `target-time.ts`, so the predicate cannot come to
+   * disagree with the resolver about what `"24:00"` is.
+   */
+  if (dueAfter == null || !isUsableHhmm(dueAfter)) return workdayEnd;
   return Math.max(workdayEnd, targetTimeToday(dueAfter, now));
 }
 

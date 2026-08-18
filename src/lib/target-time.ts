@@ -34,6 +34,47 @@ const FALLBACK_HOUR = 17;
 const FALLBACK_MINUTE = 0;
 
 /**
+ * `hhmm` split into its two numbers, or `null` if it is unusable.
+ *
+ * ⚠️ **The ONE range rule, and the reason it is extracted.** Two callers need the
+ * same answer to "is this value usable" — this module, to decide whether to fall
+ * back, and `doseDeadline` (`src/lib/meds.ts`), to decide whether a `dueAfter`
+ * counts as stated at all. A second copy of `\d{1,2}:\d{2}` plus the 0..23/0..59
+ * bounds is the drift this file's own docblock argues against one section down,
+ * and it would drift in the direction that matters: the copy that still accepted
+ * `"25:00"` would be the one deciding a medication deadline.
+ *
+ * Returned as a parsed pair rather than a boolean so the predicate and the
+ * resolver cannot disagree about what they parsed, only about what to do with it.
+ */
+function parseHhmm(hhmm: string): { hour: number; minute: number } | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  // Shape and range are two ways for one input to be wrong, so they share an
+  // answer. `"24:00"` is refused here too — see `targetTimeToday`'s docblock for
+  // why that is a decision rather than an oversight.
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/**
+ * Is `hhmm` a time this repo can use, as opposed to one it would fall back for?
+ *
+ * Exported for callers that must treat an unusable value as **absent** rather
+ * than as the fallback. `doseDeadline` is the case that earned it: it composes
+ * `max(workdayEndTime, dueAfter)`, and feeding a fallback into a `max` is not the
+ * same thing as falling back — it silently takes the LATER of the two, so an
+ * unusable `dueAfter` moved a medication's deadline to 17:00 even for a workspace
+ * whose own workday ends at 09:00. Asking this first is what lets that caller say
+ * "no time was stated" and mean it.
+ */
+export function isUsableHhmm(hhmm: string): boolean {
+  return parseHhmm(hhmm) !== null;
+}
+
+/**
  * `hhmm` applied to `now`'s calendar day, as epoch milliseconds.
  *
  * An unusable value degrades to 17:00 rather than throwing or producing `NaN`,
@@ -76,29 +117,36 @@ const FALLBACK_MINUTE = 0;
  *    indistinguishable from "never missed" and is the wrong direction to fail on
  *    a medication record.
  *
- * Falling back to 17:00 lands it on `Settings.workdayEndTime`'s own default, and
- * for a `dueAfter` that is exactly the behaviour of a dose with no stated time —
- * `max(workdayEndTime, dueAfter)` collapses to `workdayEndTime`. The reader gets
- * the documented default rather than a silently different day. The Settings
- * editor refuses `24:00` at the write path too (`normaliseDueAfter`), so the two
- * surfaces agree.
+ * Falling back to 17:00 lands it on `Settings.workdayEndTime`'s own default, so
+ * the reader gets the documented default rather than a silently different day.
+ *
+ * ⚠️ **This section used to claim that made an unusable `dueAfter` behave like a
+ * dose with no stated time, because `max(workdayEndTime, dueAfter)` "collapses to
+ * `workdayEndTime`". That was only ever true for a workspace whose end time is
+ * 17:00 or later** — Duo review round 4 of `!364`, grounded and reproduced. The
+ * fallback is a value, and feeding a value into a `max` is not the same thing as
+ * declining to state one: at `workdayEndTime: "09:00"` the `max` took 17:00 and
+ * bought the dose eight extra hours before it could read as *missed*, measured as
+ * `expected 1786982400000 to be 1786953600000`.
+ *
+ * The composition was fixed rather than this paragraph narrowed, because the
+ * behaviour was wrong and not merely undocumented — `doseDeadline` now asks
+ * {@link isUsableHhmm} first and treats an unusable `dueAfter` as absent. **So
+ * this fallback is correct for `workdayEndTime` and must not be relied on for
+ * `dueAfter`**, and the difference is which of the two the value is a default
+ * FOR: 17:00 is `Settings.workdayEndTime`'s schema default, and it is not any
+ * kind of default for `MedicationDose.dueAfter`, whose absent value is `null`.
+ *
+ * A caller composing this into a comparison rather than using it as an answer
+ * needs {@link isUsableHhmm}; that is the whole reason the predicate is exported.
  *
  * `now` is not mutated: the setter runs on a copy, because a caller polling on an
  * interval hands the same `Date` to several readers.
  */
 export function targetTimeToday(hhmm: string, now: Date = new Date()): number {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
-  const parsedHour = m ? Number(m[1]) : NaN;
-  const parsedMinute = m ? Number(m[2]) : NaN;
-  // `NaN >= 0` is false, so an unmatched shape falls through this same test and
-  // there is genuinely one path rather than a shape branch beside a range branch.
-  const inRange =
-    parsedHour >= 0 &&
-    parsedHour <= 23 &&
-    parsedMinute >= 0 &&
-    parsedMinute <= 59;
-  const h = inRange ? parsedHour : FALLBACK_HOUR;
-  const min = inRange ? parsedMinute : FALLBACK_MINUTE;
+  const parsed = parseHhmm(hhmm);
+  const h = parsed ? parsed.hour : FALLBACK_HOUR;
+  const min = parsed ? parsed.minute : FALLBACK_MINUTE;
   const d = new Date(now.getTime());
   d.setHours(h, min, 0, 0);
   return d.getTime();

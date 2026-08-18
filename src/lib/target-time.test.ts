@@ -1,5 +1,40 @@
 import { describe, it, expect } from "vitest";
-import { targetTimeToday } from "@/lib/target-time";
+import { isUsableHhmm, targetTimeToday } from "@/lib/target-time";
+
+/**
+ * Every value this module refuses, with why — ONE table, shared by the resolver's
+ * fallback specs and by {@link isUsableHhmm}'s.
+ *
+ * ⚠️ Module scope rather than inline, because the two describes below assert the
+ * two halves of a single rule: that the predicate says "unusable" for exactly the
+ * inputs the resolver falls back for. Two copies of this list is precisely the
+ * drift `parseHhmm`'s docblock exists to prevent — and the copy that quietly kept
+ * accepting `"25:00"` would be the one deciding a medication deadline.
+ */
+const UNUSABLE: readonly (readonly [string, string])[] = [
+  // Shape — these already fell back correctly.
+  ["", "empty"],
+  ["nonsense", "not a time at all"],
+  ["25:00:00", "seconds appended"],
+  ["17.00", "a dot instead of a colon"],
+  ["1700", "no separator"],
+  ["-1:00", "a negative hour — the minus breaks the shape"],
+  ["7:5", "a one-digit minute"],
+  // Range — these MATCHED the shape and silently rolled the day over.
+  ["25:00", "an hour past 23"],
+  ["12:99", "a minute past 59"],
+  ["24:00", "midnight written as the 24th hour"],
+  ["99:99", "both out of range"],
+];
+
+/** Every value it accepts, with the hour and minute it must resolve to. */
+const USABLE: readonly (readonly [string, number, number])[] = [
+  ["00:00", 0, 0],
+  ["23:59", 23, 59],
+  ["0:00", 0, 0],
+  ["9:05", 9, 5],
+  ["17:00", 17, 0],
+];
 
 /**
  * #269 — the extracted half of `roundup-card.tsx`'s private `targetTimeToday`.
@@ -50,21 +85,7 @@ describe("targetTimeToday", () => {
    * and range are two ways for the same input to be wrong and they must not have
    * two different answers.
    */
-  it.each([
-    // Shape — these already fell back correctly.
-    ["", "empty"],
-    ["nonsense", "not a time at all"],
-    ["25:00:00", "seconds appended"],
-    ["17.00", "a dot instead of a colon"],
-    ["1700", "no separator"],
-    ["-1:00", "a negative hour — the minus breaks the shape"],
-    ["7:5", "a one-digit minute"],
-    // Range — these MATCHED the shape and silently rolled the day over.
-    ["25:00", "an hour past 23"],
-    ["12:99", "a minute past 59"],
-    ["24:00", "midnight written as the 24th hour"],
-    ["99:99", "both out of range"],
-  ])("falls back to 17:00 for %o (%s)", (bad) => {
+  it.each(UNUSABLE)("falls back to 17:00 for %o (%s)", (bad) => {
     const now = new Date(2026, 7, 16, 12, 0);
     expect(targetTimeToday(bad, now)).toBe(
       new Date(2026, 7, 16, 17, 0, 0, 0).getTime(),
@@ -85,19 +106,17 @@ describe("targetTimeToday", () => {
     }
   });
 
-  it.each([
-    ["00:00", 0, 0],
-    ["23:59", 23, 59],
-    ["0:00", 0, 0],
-    ["9:05", 9, 5],
-  ])("still accepts the in-range value %o", (good, hour, minute) => {
-    // The non-zero control. A range check that refused everything would satisfy
-    // every assertion above while making the deadline permanently 17:00.
-    const now = new Date(2026, 7, 16, 12, 0);
-    expect(targetTimeToday(good, now)).toBe(
-      new Date(2026, 7, 16, hour as number, minute as number, 0, 0).getTime(),
-    );
-  });
+  it.each(USABLE)(
+    "still accepts the in-range value %o",
+    (good, hour, minute) => {
+      // The non-zero control. A range check that refused everything would satisfy
+      // every assertion above while making the deadline permanently 17:00.
+      const now = new Date(2026, 7, 16, 12, 0);
+      expect(targetTimeToday(good, now)).toBe(
+        new Date(2026, 7, 16, hour, minute, 0, 0).getTime(),
+      );
+    },
+  );
 
   it("zeroes the seconds and milliseconds of the reference instant", () => {
     const now = new Date(2026, 7, 16, 12, 0, 44, 999);
@@ -110,5 +129,61 @@ describe("targetTimeToday", () => {
     const before = now.getTime();
     targetTimeToday("17:00", now);
     expect(now.getTime()).toBe(before);
+  });
+});
+
+/**
+ * #269 — the predicate `doseDeadline` needs, and why it is not just a second
+ * range check.
+ *
+ * ⚠️ Duo review round 4 of `!364`, grounded. `targetTimeToday` degrades an
+ * unusable value to 17:00, which is the right answer for `Settings.workdayEndTime`
+ * — 17:00 is that column's schema default — and the WRONG one for
+ * `MedicationDose.dueAfter`, whose absent value is `null`. Composing the degraded
+ * value into `max(workdayEndTime, dueAfter)` does not fall back, it takes the
+ * later of the two, so a workspace ending its day at 09:00 gave an unusable
+ * `dueAfter` eight extra hours before the dose could read as *missed*.
+ *
+ * A caller therefore has to be able to ask "was a time stated at all" separately
+ * from "resolve it". That is this function, and the block below pins the thing
+ * that makes it safe: it answers for **exactly** the inputs the resolver falls
+ * back for, sharing one table and one private parse rather than agreeing by
+ * inspection.
+ */
+describe("isUsableHhmm", () => {
+  it.each(UNUSABLE)("refuses %o (%s)", (bad) => {
+    expect(isUsableHhmm(bad)).toBe(false);
+  });
+
+  it.each(USABLE)("accepts %o", (good) => {
+    // The non-zero control, and it is load-bearing rather than decorative: a
+    // predicate stuck at `false` would make EVERY dose collapse to
+    // workdayEndTime, deleting the `max` that `doseDeadline` exists for while
+    // every refusal assertion above stayed green.
+    expect(isUsableHhmm(good)).toBe(true);
+  });
+
+  /**
+   * The agreement property, stated as itself.
+   *
+   * This is what earns the claim that there is ONE range rule rather than two
+   * that happen to match today. If a future edit taught the resolver to accept
+   * `"24:00"` and left the predicate refusing it, `doseDeadline` would treat a
+   * value the resolver resolves as "no time stated" — and nothing else in the
+   * suite would notice, because each side's own table would still pass.
+   */
+  it("says unusable for exactly the values the resolver falls back for", () => {
+    const now = new Date(2026, 7, 16, 12, 0);
+    const fallback = new Date(2026, 7, 16, 17, 0, 0, 0).getTime();
+    for (const [value] of UNUSABLE) {
+      expect(isUsableHhmm(value), `${value} disagreed`).toBe(false);
+      expect(targetTimeToday(value, now), `${value} disagreed`).toBe(fallback);
+    }
+    for (const [value, hour, minute] of USABLE) {
+      expect(isUsableHhmm(value), `${value} disagreed`).toBe(true);
+      expect(targetTimeToday(value, now), `${value} disagreed`).toBe(
+        new Date(2026, 7, 16, hour, minute, 0, 0).getTime(),
+      );
+    }
   });
 });
