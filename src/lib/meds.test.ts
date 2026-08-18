@@ -450,6 +450,55 @@ describe("isPlausibleLocalDate", () => {
     expect(isPlausibleLocalDate(bad, LATE_UTC)).toBe(false);
   });
 
+  /**
+   * ⚠️ **`Date.UTC` remaps a two-digit year, and the ROUND TRIP is what refuses
+   * it — not the drift bound.** Duo review round 5 of `!364`.
+   *
+   * `Date.UTC(y, …)` inherits `Date`'s legacy behaviour: `y` in `0..99` becomes
+   * `1900 + y`. So `"0050-08-17"` computes from 1950, and the finding is right
+   * that the year is never checked as a year.
+   *
+   * It is **not** right that the drift bound is what saves it, and this block is
+   * the measurement that settles it: a remapped year always renders as `19xx`,
+   * and `19xx` is never a string whose `Number` is under 100, so the round trip
+   * cannot pass. Measured across the whole class — eleven inputs, zero survivors —
+   * and pinned here against a **1950 clock**, which makes the drift bound
+   * ACCEPT 1950 and therefore removes it from the argument entirely.
+   *
+   * The refusal is now also explicit in the predicate, because a reader should
+   * not have to reconstruct that proof to know the case is handled.
+   */
+  it("refuses a two-digit year even against a clock that would accept the remap", () => {
+    // 1950 — the year `Date.UTC(50, …)` produces. With this clock the drift check
+    // would welcome "1950-08-17", so anything refused below is refused on its
+    // own shape rather than on its distance from now.
+    const in1950 = new Date(Date.UTC(1950, 7, 17, 12, 0));
+    expect(isPlausibleLocalDate("1950-08-17", in1950)).toBe(true);
+    for (const bad of [
+      "0050-08-17",
+      "50-08-17",
+      "0-08-17",
+      "00-08-17",
+      "099-08-17",
+      "0000-01-01",
+      "0099-12-31",
+    ]) {
+      expect(isPlausibleLocalDate(bad, in1950), bad).toBe(false);
+    }
+  });
+
+  it("still accepts a canonical four-digit year outside the remap range", () => {
+    // The non-zero control for the year guard. A guard written as "reject any
+    // leading zero" would refuse these, and they are ordinary canonical dates.
+    for (const [date, y] of [
+      ["0100-08-17", 100],
+      ["0500-08-17", 500],
+    ] as const) {
+      const clock = new Date(Date.UTC(y, 7, 17, 12, 0));
+      expect(isPlausibleLocalDate(date, clock), date).toBe(true);
+    }
+  });
+
   it("is SYMMETRIC about the server's UTC date", () => {
     // The property behind the tables: the window is the server's UTC date plus or
     // minus MAX_DATE_DRIFT_DAYS, in both directions.

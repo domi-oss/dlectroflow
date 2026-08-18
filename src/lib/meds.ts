@@ -254,6 +254,36 @@ export const MAX_DATE_DRIFT_DAYS = 1;
  *
  * Both sides are built field by field against UTC, so the comparison is a pure
  * day count that does not itself depend on the container's timezone.
+ *
+ * ## The two-digit year, and why there is no extra guard for it
+ *
+ * ⚠️ Duo review round 5 of `!364`. `Date.UTC(y, …)` inherits `Date`'s legacy
+ * remap: `y` in `0..99` becomes `1900 + y`, so `"0050-08-17"` computes `asked`
+ * from 1950 and the year is never checked *as a year*. That observation is
+ * correct. Two conclusions drawn from it are not, and both were checked rather
+ * than argued:
+ *
+ *  1. **The drift bound is not what refuses it — the round trip is, structurally.**
+ *     A remapped year always renders as `19xx`, and no string whose `Number` is
+ *     under 100 is spelled `19xx`, so the rendering can never equal the input.
+ *     Measured across the class: eleven inputs, **zero** survive the round trip.
+ *     `meds.test.ts` pins it against a **1950 clock**, which makes the drift check
+ *     accept 1950 and so removes it from the argument entirely. The protection
+ *     therefore does not weaken if this predicate is reused over a wider range.
+ *  2. **"Require exactly four digits" would not fix the case it was suggested
+ *     for.** `"0050"` *is* exactly four digits and still remaps. A guard shaped
+ *     like that would read as though it closed this and would not — the precise
+ *     failure the finding is about, arriving through the remedy.
+ *
+ * So no second rejection path was added. The round trip is a total canonical-form
+ * check and everything else masked by it is masked the same way — `"2026-8-1"`,
+ * `"+002026-08-17"`, a hex day, a trailing space, a 32nd of a month. Adding a
+ * partial year check beside it would give a future reader two rules to keep in
+ * step and an invitation to drop the round trip as redundant, which is what
+ * actually reopens all of the above. What was missing was the *proof*, not the
+ * code: it is now in `meds.test.ts` as two specs, one of them a control that
+ * `"0100-08-17"` and `"0500-08-17"` — canonical four-digit years outside the remap
+ * range — are still accepted.
  */
 export function isPlausibleLocalDate(date: string, now: Date): boolean {
   const parts = date.split("-");
