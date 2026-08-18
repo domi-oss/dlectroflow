@@ -32,6 +32,13 @@ workflow:
   # visible red, never silently neither — and it is what removes the need to merge
   # one at a time watching each deploy finish.
   #
+  # ⚠️ Because this mode reads each job's own value, EVERY deploy-ish job has to
+  # have an opinion, and they do not all want the same one. `deploy_review` carries
+  # `interruptible: true` explicitly: a superseded review deploy is worthless and
+  # should be abandoned, where a superseded production deploy still has to land.
+  # `stop_review` deliberately carries no key. Both jobs say why at their own
+  # definition — if you add another deploy job, decide which of the two it is.
+  #
   # Safe because the two survivors cannot double-deploy: `resource_group: production`
   # serialises them, and "Prevent outdated deployment jobs" is on, so an older deploy
   # that reaches the runner after a newer one fails as `failed outdated deployment
@@ -811,10 +818,32 @@ deploy_review:
       artifacts: false
     - job: e2e_test
       artifacts: false
-  # Serialize helm per review env: deploy jobs aren't interruptible, so a
-  # quick follow-up push otherwise races the previous pipeline's still-running
-  # helm op on the same release → "another operation is in progress" (hit on
-  # !46). Same group as stop_review so a deploy can't race the teardown either.
+  # ⚠️ The ONE deploy here that SHOULD be abandoned when superseded, which is why
+  # it carries the key and `deploy_production` deliberately does not. The contrast
+  # is the whole point of the `auto_cancel` mode set in `workflow:`: a superseded
+  # REVIEW deploy is worthless — nobody will open a review app for a commit that
+  # is already two pushes old — whereas a superseded PRODUCTION deploy still has
+  # to land, because it is the only thing that puts that commit in front of users.
+  #
+  # Without this key the job would default to false and inherit the protection
+  # meant for prod, so a dozen pushes to one MR in a morning would queue a dozen
+  # full `helm upgrade`s and run every stale one to completion on billable
+  # Autopilot capacity. Under the previous `conservative` default an unstarted
+  # review deploy was cancelled, so omitting this would have been a regression.
+  #
+  # Safe to cancel mid-flight, which is the part worth recording: `--atomic` is
+  # set on the helm call below, and helm installs a SIGINT/SIGTERM handler
+  # (`pkg/action/upgrade.go`, `handleContext`) that triggers the rollback and
+  # holds a mutex until it finishes — so a cancelled upgrade rolls back rather
+  # than leaving the release wedged in `pending-upgrade`. `stop_review` remains
+  # the manual escape hatch if one ever does wedge.
+  interruptible: true
+  # Serialize helm per review env: a follow-up push otherwise races the previous
+  # pipeline's still-running helm op on the same release → "another operation is
+  # in progress" (hit on !46). Still required WITH `interruptible: true` above —
+  # cancellation is not instant, and the rollback it triggers is itself a helm op
+  # that must not overlap the next upgrade. Same group as stop_review so a deploy
+  # can't race the teardown either.
   resource_group: review/$CI_MERGE_REQUEST_IID
   secrets:
     ANTHROPIC_API_KEY:
@@ -880,6 +909,14 @@ deploy_review:
 
 stop_review:
   extends: .deploy_base
+  # No `interruptible` key, and that is a decision rather than an oversight — it
+  # is the one place the review/production split above does NOT apply. Two
+  # reasons, either sufficient. It is `when: manual`, and a manual job nobody has
+  # clicked is not running or pending, so `auto_cancel` never considers it. And
+  # once somebody HAS clicked it, a teardown is exactly the kind of work that must
+  # finish: cancelling it half-way is what #145 describes, an environment wedged
+  # in `stopping` with an app pod and a Postgres StatefulSet still billing. So the
+  # default of false is what this job wants, unlike deploy_review above.
   resource_group: review/$CI_MERGE_REQUEST_IID
   # #145 — needs: [] is load-bearing, not tidiness. Without an explicit needs:,
   # GitLab gives a job an implicit dependency on EVERY job in every earlier

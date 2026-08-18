@@ -1369,10 +1369,20 @@ operators upgrading a self-hosted instance don't get surprised.
   `alert_pipeline_failure` was cancelled in the same sweep, which is why it was
   quiet rather than loud.
 
-  Now set to `interruptible`, so the job's own declared value decides. The ten
-  build, test and scan jobs that carry `interruptible: true` still get cancelled and
-  re-run on the newer pipeline; `deploy_production` and `alert_pipeline_failure` are
-  no longer eligible. Nothing can double-deploy: `resource_group: production` still
+  Now set to `interruptible`, so the job's own declared value decides. The build,
+  test and scan jobs that carry `interruptible: true` still get cancelled and re-run
+  on the newer pipeline; `deploy_production` and `alert_pipeline_failure` are no
+  longer eligible.
+
+  **`deploy_review` gains `interruptible: true` explicitly**, because it is the one
+  deploy that *should* be abandoned when superseded — nobody opens a review app for
+  a commit two pushes old, and without the key it would have inherited the
+  protection meant for production and run every stale `helm upgrade` to completion.
+  Cancelling it is safe: `--atomic` is already set and helm rolls back on SIGTERM,
+  so the release does not wedge. `stop_review` keeps the default deliberately — a
+  teardown a human clicked must finish.
+
+  Nothing can double-deploy: `resource_group: production` still
   serialises the two, and with **Prevent outdated deployment jobs** on, an older
   deploy reaching the runner after a newer one fails visibly as `failed outdated
   deployment job` instead of overwriting it. **No operator action required** — this
