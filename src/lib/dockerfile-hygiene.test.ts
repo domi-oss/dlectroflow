@@ -6,7 +6,15 @@ import {
   stageInstructions,
   deletesPathInSameCommand,
   lateRecursiveChowns,
+  isolatedManifest,
 } from "./dockerfile-hygiene";
+
+/**
+ * Where the runner stages install the cluster-invoked CLIs. A constant because
+ * both the assertion and its failure messages name it, and a typo in one of the
+ * two would read as a Dockerfile regression rather than a test bug.
+ */
+const TOOLS_MANIFEST = "/opt/tools/package.json";
 
 describe("parseDockerfile", () => {
   it("splits an instruction from its arguments", () => {
@@ -171,6 +179,72 @@ describe("lateRecursiveChowns", () => {
   });
 });
 
+describe("isolatedManifest", () => {
+  const write = (json: string) =>
+    `mkdir -p /opt/tools && printf '${json}' > ${TOOLS_MANIFEST} && cd /opt/tools && npm install prisma`;
+
+  it("extracts the manifest a RUN writes to the given path", () => {
+    expect(
+      isolatedManifest(
+        [write('{"private":true,"overrides":{"a":"1.2.3"}}')],
+        TOOLS_MANIFEST,
+      )?.manifest,
+    ).toEqual({ private: true, overrides: { a: "1.2.3" } });
+  });
+
+  it("strips printf's trailing newline escape", () => {
+    expect(
+      isolatedManifest([write('{"private":true}\\n')], TOOLS_MANIFEST)?.json,
+    ).toBe('{"private":true}');
+  });
+
+  it("returns null when no RUN writes that path", () => {
+    expect(
+      isolatedManifest(["npm ci && npm run build"], TOOLS_MANIFEST),
+    ).toBeNull();
+    expect(
+      isolatedManifest([write("{}")], "/opt/other/package.json"),
+    ).toBeNull();
+  });
+
+  // The reason the redirect target is matched and not merely the command: a RUN
+  // that writes several files would otherwise have the first payload read as
+  // this manifest, and the caller would assert against the wrong JSON.
+  it("ignores a printf redirected somewhere else in the same RUN", () => {
+    const run = `printf '{"decoy":true}' > /opt/other.json && printf '{"real":true}' > ${TOOLS_MANIFEST}`;
+    expect(isolatedManifest([run], TOOLS_MANIFEST)?.manifest).toEqual({
+      real: true,
+    });
+  });
+
+  it("reports the text without a parse when the JSON is malformed", () => {
+    const site = isolatedManifest([write('{"private":true,}')], TOOLS_MANIFEST);
+    expect(site?.json).toBe('{"private":true,}');
+    expect(site?.manifest).toBeNull();
+  });
+
+  it("refuses JSON that is not an object", () => {
+    expect(
+      isolatedManifest([write("null")], TOOLS_MANIFEST)?.manifest,
+    ).toBeNull();
+    expect(
+      isolatedManifest([write("[1,2]")], TOOLS_MANIFEST)?.manifest,
+    ).toBeNull();
+    expect(
+      isolatedManifest([write('"a string"')], TOOLS_MANIFEST)?.manifest,
+    ).toBeNull();
+  });
+
+  it("searches every RUN, not just the first", () => {
+    expect(
+      isolatedManifest(
+        ["apk add --no-cache openssl", write("{}")],
+        TOOLS_MANIFEST,
+      )?.manifest,
+    ).toEqual({});
+  });
+});
+
 /**
  * #71 regression guards. The runtime image was 893 MB and a cold pull on a
  * newly scaled Autopilot node blew past Helm's timeout, so `--atomic` rolled
@@ -190,6 +264,9 @@ describe("lateRecursiveChowns", () => {
  *    initContainer runs `npx prisma migrate deploy`, the review seed and the
  *    purge CronJob run `npx tsx <script>`, and prisma.config.ts imports dotenv.
  *    Pruning any of those breaks the deploy, not just the build.
+ *  - anything the image must FORCE is forced in that isolated manifest too, and
+ *    pinned exactly, because the repo's `overrides` do not reach it and no
+ *    lockfile is committed for it (Duo review on !383).
  */
 // Paths are relative to the repo root (Vitest's cwd) and carry the `docker/`
 // prefix since the root tidy moved the family there. Kept as full paths rather
@@ -330,55 +407,93 @@ describe.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
     // package-lock.json, while /app/node_modules still carries the vulnerable
     // copy that `npx prisma migrate deploy` loads. CVE-2026-40345 (HIGH, stack
     // exhaustion in deepmerge-ts) is here because `@prisma/config` depends on
-    // `deepmerge-ts` at an EXACT version, so nothing but an override moves it.
+    // `deepmerge-ts` at an exact version, so nothing but an override moves it.
     //
-    // Asserted as agreement between the two manifests rather than against a
-    // literal version, so a future bump only has to be made in one obvious place
-    // and this fails until the image side follows.
-    it("repeats the repo's overrides in the isolated tools manifest", () => {
+    // Why the assertion is equality with the LOCKFILE rather than with
+    // package.json's range, which is what it compared first (Duo review, !383):
+    // the two manifests are not symmetric. A range in package.json is safe
+    // because package-lock.json records the one version it resolved to and
+    // `npm ci` reinstalls exactly that. The tools manifest has no committed
+    // lockfile by design, so a range there is re-resolved on every image build —
+    // measured on this very package, an override of `^7.0.0` resolves to a
+    // different patch today than the version the lockfile era pinned. That is a
+    // silent change to what gets grafted into /app/node_modules, with no MR and
+    // no re-run of `prisma migrate deploy` behind it.
+    //
+    // Equality with the lockfile is deliberately stronger than "satisfies
+    // package.json's range": satisfying the range also permits a version CI never
+    // resolved or tested. It needs no semver implementation, and it inherits the
+    // range check for free — `npm ci` in the build stage fails when the lockfile
+    // and package.json's overrides disagree, so a lockfile resolution reaching
+    // here has already been proven to satisfy the range.
+    //
+    // No version literal appears in this test or in either Dockerfile comment:
+    // the expected value is read from package-lock.json, so a bump moves one
+    // obvious place and this reds until the image side follows — the same
+    // mechanism as the prisma/tsx/dotenv pins asserted above, for the same
+    // reason.
+    it("pins the tools manifest's overrides to package-lock.json's versions", () => {
       const repo = JSON.parse(
         readFileSync(join(process.cwd(), "package.json"), "utf8"),
       ) as { overrides?: Record<string, unknown> };
+      const lock = JSON.parse(
+        readFileSync(join(process.cwd(), "package-lock.json"), "utf8"),
+      ) as { packages: Record<string, { version?: string }> };
 
-      const writesManifest = runs.find((r) =>
-        /\/opt\/tools\/package\.json/.test(r),
-      );
+      const site = isolatedManifest(runs, TOOLS_MANIFEST);
       expect(
-        writesManifest,
-        `${filename} must still write the isolated tools manifest`,
-      ).toBeDefined();
+        site,
+        `${filename} must still write the isolated tools manifest to ` +
+          `${TOOLS_MANIFEST}. Without it npm reads the standalone output's ` +
+          `package.json as the project root and reinstalls the whole app tree`,
+      ).not.toBeNull();
+      expect(
+        site?.manifest,
+        `the manifest ${filename} writes to ${TOOLS_MANIFEST} is not a JSON ` +
+          `object, so npm install there would fail: ${site?.json ?? ""}`,
+      ).not.toBeNull();
 
-      const json = /printf\s+'([^']*)'/.exec(writesManifest!)?.[1];
+      const overrides = site?.manifest?.overrides;
       expect(
-        json,
-        `could not read the manifest printf'd in ${filename}`,
-      ).toBeDefined();
-      const tools = JSON.parse(json!.replace(/\\n$/, "")) as {
-        overrides?: Record<string, unknown>;
-      };
-
-      expect(
-        tools.overrides,
+        overrides,
         `${filename} must declare an "overrides" block in the tools manifest. ` +
           `Without one, npm resolves the migrate/seed/purge tooling with no ` +
           `overrides at all and the image ships whatever the transitive tree ` +
           `pins — the dependency scan would still read green off the lockfile`,
       ).toBeDefined();
 
-      // Every entry the image forces must say the same thing the repo says, so
-      // the two cannot drift into shipping a different tree than CI tested.
-      for (const [pkg, range] of Object.entries(tools.overrides ?? {})) {
+      for (const [pkg, pin] of Object.entries(overrides ?? {})) {
+        // Forcing something here that the repo does not force means the image
+        // runs a tree CI never resolved, in either direction.
         expect(
-          range,
-          `${filename} overrides ${pkg} to ${String(range)} but package.json ` +
-            `overrides it to ${String(repo.overrides?.[pkg])}. The image would ` +
-            `then run the tooling on a different ${pkg} than CI resolved`,
-        ).toBe(repo.overrides?.[pkg]);
+          repo.overrides?.[pkg],
+          `${filename} overrides ${pkg} in the tools manifest but package.json ` +
+            `does not override it at all, so CI never resolved the version the ` +
+            `image would ship`,
+        ).toBeDefined();
+
+        const locked = lock.packages[`node_modules/${pkg}`]?.version;
+        expect(
+          locked,
+          `${pkg} is overridden in ${filename} but has no resolved version in ` +
+            `package-lock.json, so there is nothing to hold the image's pin to`,
+        ).toBeDefined();
+
+        expect(
+          pin,
+          `${filename} pins ${pkg} to "${String(pin)}" in the tools manifest, ` +
+            `but that manifest has NO committed lockfile — every image build ` +
+            `re-resolves it. Anything other than the exact version ` +
+            `package-lock.json resolved ("${String(locked)}") either drifts to ` +
+            `a newer release on some later build, with no MR and no re-run of ` +
+            `prisma migrate deploy behind it, or ships a version CI never ` +
+            `tested. Pin it exactly, as the prisma/tsx/dotenv line does`,
+        ).toBe(locked);
       }
 
       // The one that is a live security control rather than housekeeping.
       expect(
-        Object.keys(tools.overrides ?? {}),
+        Object.keys(overrides ?? {}),
         `${filename} must keep deepmerge-ts overridden (CVE-2026-40345). ` +
           `@prisma/config pins it exactly, so dropping this reintroduces the ` +
           `vulnerable copy into /app/node_modules while CI stays green`,
