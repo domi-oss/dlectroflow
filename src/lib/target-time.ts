@@ -3,13 +3,25 @@
  *
  * ## Why this is a shared module and not a private helper
  *
- * It was private to `src/components/dashboard/roundup-card.tsx`, where it decides
- * when the end-of-day round-up fires. The medication tracker needs the identical
- * comparison for a different column — a dose is *missed* once the local clock
- * passes `max(Settings.workdayEndTime, MedicationDose.dueAfter)` — and a second
- * caller is what turns "a helper" into a shared one. Two copies of this would be
- * `#117`'s failure in a place where the two copies could disagree about what
- * "17:00" means, which is the whole thing the function exists to pin down.
+ * It was modelled on the private helper in
+ * `src/components/dashboard/roundup-card.tsx`, where the same comparison decides
+ * when the end-of-day round-up fires. The medication tracker needs it for a
+ * different column — a dose is *missed* once the local clock passes
+ * `max(Settings.workdayEndTime, MedicationDose.dueAfter)` — and a second caller is
+ * what turns "a helper" into a shared one.
+ *
+ * ⚠️ **`roundup-card.tsx` has NOT adopted this module: it still declares its own
+ * copy and imports nothing from here.** So there are two copies today, and this
+ * section previously said "it *was* private", describing a migration that never
+ * happened. Corrected on `!364` rather than performed — moving that component onto
+ * this function changes when the round-up fires for a hand-edited row and belongs
+ * to whichever change owns that component next.
+ *
+ * The two are not equivalent, which is the part worth knowing before relying on
+ * either: the private copy checks SHAPE only, so it still accepts `"25:00"` and
+ * rolls the round-up into the next day. That is `#117`'s two-copies failure in a
+ * place where the copies genuinely disagree about what `"17:00"` means, and it is
+ * the reason this one exists rather than a second private helper.
  *
  * ## Whose clock, and why the answer is the browser's
  *
