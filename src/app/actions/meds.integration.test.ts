@@ -91,6 +91,15 @@ async function seedWorkspace(id: string, doseId: string, medsTracker = true) {
   });
 }
 
+/**
+ * Counted within the workspaces this file owns, never globally.
+ *
+ * ⚠️ A bare `count()` is a shared-schema hazard: this Postgres carries a schema
+ * per worktree and anything else that seeds `MedsDoseLog` — another fixture, or
+ * a scratch workspace left behind by driving the app — answers it. Measured: two
+ * stray rows from a manual session turned seventeen specs red at once, none of
+ * them about the thing that had changed.
+ */
 async function wipe() {
   // The Workspace cascade takes Medication, MedicationDose and MedsDoseLog.
   await db.workspace.deleteMany({ where: { id: { in: [WS, OTHER_WS] } } });
@@ -137,7 +146,11 @@ describe("logMedsDose — workspace scoping", () => {
 
     // Neither workspace gained a row: not the caller's (the foreign id was
     // refused) and not the owner's (nothing writes across a boundary).
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("refuses a dose id that does not exist at all", async () => {
@@ -148,7 +161,11 @@ describe("logMedsDose — workspace scoping", () => {
         date: TODAY,
       }),
     ).toEqual({ ok: false, reason: "unknown-dose" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 });
 
@@ -183,7 +200,11 @@ describe("logMedsDose — the feature gate", () => {
     // The row count, not just the return value: an action that reported a
     // refusal and wrote anyway would satisfy a return-value assertion while
     // storing the health record the refusal exists to prevent.
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("REFUSES when the workspace has no Settings row at all", async () => {
@@ -200,7 +221,11 @@ describe("logMedsDose — the feature gate", () => {
         date: TODAY,
       }),
     ).toEqual({ ok: false, reason: "tracker-off" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("does not DELETE anything when the tracker is off — it only refuses", async () => {
@@ -212,7 +237,11 @@ describe("logMedsDose — the feature gate", () => {
       state: MedsDoseState.Taken,
       date: TODAY,
     });
-    expect(await db.medsDoseLog.count()).toBe(1);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(1);
 
     await db.settings.update({
       where: { workspaceId: WS },
@@ -242,7 +271,11 @@ describe("logMedsDose — the feature gate", () => {
       state: MedsDoseState.Taken,
       date: TODAY,
     });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
 
     await db.settings.update({
       where: { workspaceId: WS },
@@ -255,7 +288,11 @@ describe("logMedsDose — the feature gate", () => {
         date: TODAY,
       }),
     ).toMatchObject({ ok: true });
-    expect(await db.medsDoseLog.count()).toBe(1);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(1);
   });
 
   it("answers `tracker-off` distinctly from `unknown-dose`", async () => {
@@ -296,7 +333,11 @@ describe("logMedsDose — the feature gate", () => {
         date: TODAY,
       }),
     ).toEqual({ ok: false, reason: "unknown-dose" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 });
 
@@ -357,9 +398,12 @@ describe("logMedsDose — a DEACTIVATED medication", () => {
         state: MedsDoseState.Taken,
         date: TODAY,
       }),
-      // `toMatchObject` rather than `toEqual`: this is exact on this branch and
-      // wrong on !371, where a press also hands back the undo token. The subject
-      // is the gate reopening, and the result's shape has its own block.
+      // ⚠️ `toMatchObject`, not `toEqual`, and the same wording on both branches
+      // of this stack ON PURPOSE: the two had drifted to different comments over
+      // identical code, which is a conflict this file hit twice for no reason.
+      // The subject here is the gate REOPENING, not the shape of the result —
+      // `toEqual` would additionally pin every field of the undo token the undo
+      // path adds, and the token's shape has its own block.
     ).toMatchObject({ ok: true, state: MedsDoseState.Taken });
   });
 
@@ -425,7 +469,11 @@ describe("logMedsDose — the date the client supplies", () => {
         }),
       ).toEqual({ ok: false, reason: "bad-date" });
     }
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("refuses a date more than one day from the server's own", async () => {
@@ -442,7 +490,11 @@ describe("logMedsDose — the date the client supplies", () => {
         date: localYmd(far),
       }),
     ).toEqual({ ok: false, reason: "bad-date" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("accepts the neighbouring days, which a real timezone can produce", async () => {
@@ -471,7 +523,11 @@ describe("logMedsDose — the date the client supplies", () => {
       });
       expect(result, date).toEqual({ ok: true, state: MedsDoseState.Taken });
     }
-    expect(await db.medsDoseLog.count()).toBe(2);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(2);
   });
 
   it("refuses a state outside the value set before the CHECK has to", async () => {
@@ -484,7 +540,11 @@ describe("logMedsDose — the date the client supplies", () => {
         date: TODAY,
       }),
     ).toEqual({ ok: false, reason: "bad-state" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 });
 
@@ -705,7 +765,11 @@ describe("logMedsDose ignores anything a caller adds to the payload", () => {
     ).toEqual({ ok: false, reason: "bad-date" });
     // The row count, not just the answer: this is the assertion that would have
     // caught a fabricated health record.
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("cannot shift the window forward either", async () => {
@@ -718,7 +782,11 @@ describe("logMedsDose ignores anything a caller adds to the payload", () => {
         now: new Date("2030-06-15T12:00:00.000Z"),
       }),
     ).toEqual({ ok: false, reason: "bad-date" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 
   it("still accepts a genuine payload that happens to carry the extra key", async () => {
@@ -733,7 +801,11 @@ describe("logMedsDose ignores anything a caller adds to the payload", () => {
         now: new Date("2020-01-01T12:00:00.000Z"),
       }),
     ).toMatchObject({ ok: true });
-    expect(await db.medsDoseLog.count()).toBe(1);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(1);
   });
 
   it("cannot supply its own workspace", async () => {
@@ -747,6 +819,10 @@ describe("logMedsDose ignores anything a caller adds to the payload", () => {
         workspaceId: OTHER_WS,
       }),
     ).toEqual({ ok: false, reason: "unknown-dose" });
-    expect(await db.medsDoseLog.count()).toBe(0);
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
   });
 });
