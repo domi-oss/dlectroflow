@@ -357,7 +357,10 @@ describe("logMedsDose — a DEACTIVATED medication", () => {
         state: MedsDoseState.Taken,
         date: TODAY,
       }),
-    ).toEqual({ ok: true, state: MedsDoseState.Taken });
+      // `toMatchObject` rather than `toEqual`: this is exact on this branch and
+      // wrong on !371, where a press also hands back the undo token. The subject
+      // is the gate reopening, and the result's shape has its own block.
+    ).toMatchObject({ ok: true, state: MedsDoseState.Taken });
   });
 
   it("does not DELETE the rows a paused medication already has", async () => {

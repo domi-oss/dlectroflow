@@ -387,10 +387,10 @@ model CalendarFeed {
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
-  id                   String          @id @default(cuid())
+  id                   String    @id @default(cuid())
   text                 String
-  createdAt            DateTime        @default(now())
-  status               String          @default("inbox") // inbox | triaged | archived
+  createdAt            DateTime  @default(now())
+  status               String    @default("inbox") // inbox | triaged | archived
   triagedAt            DateTime?
   remindedAt           DateTime?
   snoozedUntil         DateTime?
@@ -509,9 +509,9 @@ model BrainDumpItem {
   // src/lib/braindump-client-key-unique.integration.test.ts.
   clientKey            String?
   taskId               String?
-  task                 Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  task                 Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId          String
-  workspace            Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   /// #233 — the engagement credits this item is the evidence for. `Cascade` on
   /// the far side, so deleting the item withdraws them; see `EngagementDay`.
   engagementDays       EngagementDay[]
@@ -766,7 +766,7 @@ model RewardEvent {
 /// (Postgres treats NULLs as distinct). `logReward` has the same property for the
 /// same reason.
 model EngagementDay {
-  id          String         @id @default(cuid())
+  id String @id @default(cuid())
   /// The local workday this engagement credited, YYYY-MM-DD — the same key and
   /// the same `ymd()` derivation as `Streak.lastActiveWorkday`, so the two are
   /// directly comparable.
@@ -774,7 +774,7 @@ model EngagementDay {
   /// Rows on a NON-working day are recorded and then ignored by the recompute,
   /// exactly as `touchStreakOnEngagement` ignores them when advancing. Recording
   /// them keeps the ledger a truthful log rather than a derived view.
-  day         String
+  day String
   /// Mirrors `EngagementKind` in src/lib/constants.ts; CHECK-constrained by
   /// `20260815120000_engagement_day_ledger` and registered in
   /// src/lib/enum-constraint-sync.integration.test.ts.
