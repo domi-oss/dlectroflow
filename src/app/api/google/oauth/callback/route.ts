@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { exchangeCode } from "@/lib/google";
+import {
+  exchangeCode,
+  GoogleTimeoutError,
+  GOOGLE_TIMEOUT_REASON,
+} from "@/lib/google";
 import { requestOrigin } from "@/lib/origin";
 import { currentUser } from "@/lib/workspace";
 
@@ -54,6 +58,21 @@ export async function GET(req: Request): Promise<Response> {
       `${origin}/api/google/oauth/callback`,
     );
   } catch (err) {
+    // #211 — a deadline is not a refusal, and the two want different words.
+    //
+    // Nothing else bounds this request: it is a browser navigation back from
+    // Google, so there is no server action to wrap in `withActionTimeout` and
+    // no spinner to abandon. A stalled endpoint was five minutes of blank page.
+    // Now that it fails in ten seconds, what the person reads next matters —
+    // and `err instanceof Error` accepts a DOMException, so left alone this
+    // line would put "The operation was aborted due to timeout" in the URL and
+    // the inbox banner would print it verbatim.
+    //
+    // A fixed token rather than the message, because the banner has to BRANCH
+    // on it: a timeout is retryable and gets a reconnect affordance, while a
+    // refused exchange is not going to be fixed by pressing the same button
+    // again and keeps its own text.
+    if (err instanceof GoogleTimeoutError) return fail(GOOGLE_TIMEOUT_REASON);
     return fail(err instanceof Error ? err.message : "token_exchange_failed");
   }
 

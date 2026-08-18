@@ -37,12 +37,9 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
   // defaults except where a test needs to see something distinctive.
   return {
     id: WORKSPACE_ID,
-    agingThresholdMinutes: 240,
-    demoOverrideSeconds: null,
     defaultFromEstimate: true,
     addTimeIncrementMin: 5,
     workdayEndTime: "17:00",
-    roundupDemoOverride: false,
     roundupEmailEnabled: false,
     roundupEmail: null,
     workingDays: "1,2,3,4,5",

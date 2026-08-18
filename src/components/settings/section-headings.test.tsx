@@ -86,8 +86,6 @@ function AllSections({ voice = "plain" as Voice }) {
       />
       <AgingSection
         settings={{
-          agingThresholdMinutes: 45,
-          demoOverrideSeconds: null,
           agingHours: 24,
           overdueHours: 48,
           wayOverdueHours: 72,

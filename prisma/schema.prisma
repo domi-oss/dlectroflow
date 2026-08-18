@@ -141,14 +141,10 @@ model Workspace {
 // ── Singleton config (one row per workspace, keyed by workspaceId) ───────
 model Settings {
   id                       String    @id @default(cuid())
-  // Feature 1 — aging
-  agingThresholdMinutes    Int       @default(240)
-  demoOverrideSeconds      Int? // aging demo override (~10s) to fire live on stage
   // Feature 3 — timer + round-up
   defaultFromEstimate      Boolean   @default(true)
   addTimeIncrementMin      Int       @default(5)
   workdayEndTime           String    @default("17:00") // HH:mm
-  roundupDemoOverride      Boolean   @default(false)
   roundupEmailEnabled      Boolean   @default(false)
   roundupEmail             String?
   // Feature 4 — streaks
@@ -157,7 +153,12 @@ model Settings {
   breakdownModel           String?
   // Voice preference: "plain" (default) or "playful"
   voice                    String    @default("plain")
-  // Phase 2 — per-tier freshness thresholds (hours)
+  // Freshness thresholds, in WHOLE HOURS — the single source of truth for
+  // "how old is too old" since #261, which removed the `agingThresholdMinutes`
+  // (240) that answered the same question in minutes and the
+  // `demoOverrideSeconds` that rescaled all of it into seconds for a stage demo.
+  // Every user-settable duration on this model is hours; see the convention in
+  // src/lib/aging.ts.
   agingHours               Int       @default(4)
   overdueHours             Int       @default(8)
   wayOverdueHours          Int       @default(12)
@@ -518,7 +519,6 @@ model BrainDumpItem {
 
   @@unique([workspaceId, clientKey])
   @@index([status])
-  @@index([workspaceId])
 }
 
 // ── Feature 2 — Task Breakdown → Scheduling ───────────────────────────────
@@ -620,7 +620,6 @@ model Step {
   // pass for data that already holds duplicates. A future reorder-by-SWAP would
   // collide here, loudly, which is the right way round.
   @@unique([taskId, order])
-  @@index([taskId])
 }
 
 model BreakdownTurn {
@@ -691,7 +690,6 @@ model FocusPlaylist {
   createdAt   DateTime  @default(now())
 
   @@unique([workspaceId, name])
-  @@index([workspaceId])
 }
 
 model DayRollup {
@@ -842,7 +840,6 @@ model Badge {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, key])
-  @@index([workspaceId])
 }
 
 model DailySpark {
@@ -955,7 +952,6 @@ model GuestDailyActivity {
   createdAt DateTime @default(now())
 
   @@id([day, ipHash])
-  @@index([day])
 }
 
 // ── #269 — the medication tracker ─────────────────────────────────────────

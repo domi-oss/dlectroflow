@@ -772,6 +772,87 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Editing a step while a new plan is on its way no longer loses what you typed
+  (#238).** Asking for fewer or more steps, or sending feedback in your own words,
+  gets you a whole new list — and it is worked out from the list as it stood when
+  you asked, so anything you changed in the seconds before it arrived was quietly
+  written over. No warning, nothing saved anywhere, just a plan that no longer said
+  what you had just told it.
+
+  Every control **around** the list already waited for the answer. The five **inside
+  a row** did not: the emoji, the step text, the minutes, the ✕ and the drag handle.
+  All five now wait too, so the row matches its own surroundings and there is no
+  longer a gap where an edit can be made and then thrown away.
+
+  The trade is deliberate and worth stating plainly: **for the few seconds an answer
+  takes, the steps are read-only.** If you reach for a field in that window it will
+  not respond. The ✕ stays selectable so there is always one place in the row that
+  can tell you why — it and the surrounding controls all point at the same sentence,
+  which names both reasons the list is held: a new plan must not land on top of an
+  edit, and a step must not end up in your plan and your inbox at once.
+
+  Everything unlocks the moment the answer arrives, **including when the answer never
+  comes** — a failed or fallen-back plan releases the list rather than leaving it
+  frozen. Nothing here ever reached the server; what was at stake was the sentence
+  you were part-way through.
+
+- **One setting decides when an item is going stale, and it is in hours (#261).**
+  The app answered "is this aging?" two different ways, from two different settings
+  that meant the same thing in different units — an aging threshold in minutes
+  defaulting to 240, and an aging value in hours defaulting to 4. Set one to 240 and
+  the other to 8 and you got different answers depending on which part of the app
+  asked; most visibly, moving the aging threshold did not change when the amber
+  "still needed?" prompt appeared, because that prompt read the other setting. The
+  hours trio is now the single source of truth and the minutes field is gone. **A
+  value you had customised is converted rather than dropped** — 90 minutes becomes
+  2 hours, rounded to the nearest whole hour and never below 1, and only where the
+  hours control was still at its default, so an explicit setting on either control
+  is left exactly as you set it. The demo overrides that made hours of behaviour
+  happen in seconds on stage are removed now that talk has happened, which also
+  retires the ×2/×3/×4 tier scaling that existed only to serve them.
+
+  Also dropped: five database indexes made redundant by a composite key already
+  covering the same leading column (#208). No behaviour change — every read path
+  still resolves through the composite.
+
+- **A local end-to-end run can no longer test the wrong branch (#266).** Playwright
+  reuses an existing server outside CI, on fixed ports, and this project's default
+  working mode is many concurrent worktrees — so the server it attached to
+  frequently belonged to a different branch, with nothing checking which. It was
+  seen twice inside one review as an all-red run that came back clean on an
+  immediate re-run with no change to the tree; the more expensive direction is the
+  opposite, a spec that should fail passing against a build that happens to satisfy
+  it. The checkout's commit is now handed to the servers under test, `/api/health`
+  is asked for it back before any spec runs, and a mismatch aborts the run naming
+  both commits and the port to free, so it can never be read as a failing feature.
+  When the commit cannot be established at all, server reuse is switched off rather
+  than left unverified. No effect on a self-hosted instance or on CI, where
+  Playwright always starts its own server — this is this project's own test harness.
+
+- **A stalled Google no longer holds a request for five minutes (#211).** Node's
+  `fetch` defaults to a 300 s header timeout, and only one of the seven calls this
+  app makes to Google set a deadline of its own. An endpoint that accepted the
+  connection and then went quiet therefore produced a spinner rather than a failure
+  — worst of all on the OAuth return, which is a browser navigation with nothing
+  else to bound it, so clicking **Connect Google** could mean five minutes of blank
+  page.
+
+  Every call now shares one 8 s deadline — deliberately shorter than the 10 s the
+  app is willing to wait on a server action, so a slow Google can no longer make a
+  completion that actually saved look like one that failed — and **every call site
+  decides what hitting it means**, which is the part that separates a fix from a
+  faster failure.
+  A connect that times out says so in words and offers **Try connecting again**,
+  because nothing was written and the retry is safe. A token refresh that times out
+  is treated as transient: it does not clear your tokens and does not ask you to
+  reconnect, since a slow network says nothing about whether the connection is
+  still good. Disconnect still deletes your stored tokens and still tells you if
+  Google never confirmed the revoke — it just answers in seconds now. A scheduling
+  push that times out mid-write says the task **may** have been created, rather
+  than claiming nothing happened and walking you into a duplicate; and a
+  re-schedule that times out will not recreate the task it was updating, which
+  would have left two entries and two calendar blocks for one step.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
@@ -1356,6 +1437,19 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
+
+- **The weekly ops digest can no longer report a security posture it did not read
+  (#203).** Reading the Vulnerability Report needs a permission, and a caller that
+  lacks it is not refused — the query resolves to an *empty* result rather than an
+  error, so "nothing was found" and "nobody was allowed to look" arrived as the
+  same bytes and the digest could publish **0 active findings**
+  under a ✅. A count of zero is now only printed once the same query has been
+  shown returning something; when it cannot be, the digest says the count could
+  not be read and marks the section ⚠️ undetermined instead. Two other counts in
+  the same note had a matching fault — a denied request answers with a JSON object,
+  and asking it for its length reported the object's **key count**, so a rejected
+  read rendered as "1 failed pipeline" — and now degrade to `?`. No effect on a
+  self-hosted instance; this is this project's own maintenance reporting.
 
 ## [0.5.0] - 2026-08-01
 

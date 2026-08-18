@@ -993,6 +993,52 @@ describe("scripts/ops-digest.sh", () => {
     expect(security).not.toMatch(/could not determine/);
   });
 
+  it("degrades a denied REST count to `?` rather than printing a wrong one", () => {
+    // #203's defect, second site, same file. `curl -s` exits 0 on 401/403 —
+    // the transfer SUCCEEDED, the answer is just a JSON object like
+    // {"message":"401 Unauthorized"} — so `set -o pipefail` does not fire and
+    // `jq 'length'` happily reports the object's KEY COUNT. Measured:
+    //
+    //   $ echo '{"message":"401 Unauthorized"}' | jq -r 'length'
+    //   1
+    //
+    // The digest then published "Failed `main` pipelines (last 7d): **1**" and
+    // "Open `security`-labelled issues: **1**". Two wrong numbers under
+    // confident labels, in the same weekly note as #203's `0 active findings`
+    // and for the same underlying reason: a count printed from bytes nobody
+    // checked were a count.
+    const denied = digestRoutes(0).map((route) =>
+      route.method === "GET" &&
+      (route.match === "/pipelines" || route.match === "/issues?state=opened")
+        ? { ...route, body: { message: "401 Unauthorized" }, code: 401 }
+        : route,
+    );
+    const result = drive(DIGEST_SCRIPT, {
+      routes: denied,
+      env: {
+        OPS_DIGEST_ISSUE_IID: "16",
+        ALERT_ISSUE_IID: undefined,
+        CI_PROJECT_PATH: "acme/dlectroflow",
+        REGISTRY_DRAIN_NOW: DRAIN_NOW,
+        VULN_FRESHNESS_NOW: FRESHNESS_NOW,
+      },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const body = result.bodies.find(
+      (b) => typeof b === "string" && b.includes("ops digest"),
+    ) as string;
+    expect(body).toMatch(/Failed `main` pipelines \(last 7d\): \*\*\?\*\*/);
+    expect(body).toMatch(/Open `security`-labelled issues: \*\*\?\*\*/);
+    // The number the object's key count produced, which must not appear on
+    // either line.
+    expect(body).not.toMatch(/Failed `main` pipelines \(last 7d\): \*\*1\*\*/);
+    expect(body).not.toMatch(/Open `security`-labelled issues: \*\*1\*\*/);
+    // The control, and the reason this is not just "print ? everywhere": the
+    // Renovate line was served a real (empty) array and still reports a real 0.
+    expect(body).toMatch(/Open Renovate MRs awaiting triage: \*\*0\*\*/);
+  });
+
   it("drops the 7-day window rather than inventing a 1969 one", () => {
     // Duo review on !251, mechanism corrected — see DATE_STUB. With a `date`
     // that cannot parse relative strings and answers `+%s` with junk, the

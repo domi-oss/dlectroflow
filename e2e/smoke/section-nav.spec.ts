@@ -826,7 +826,10 @@ test.describe("section nav — desktop", () => {
       page.locator("[data-section-header][data-current]"),
     ).toHaveText(/Aging & reminder/);
 
-    const threshold = page.getByLabel("Aging threshold (minutes)");
+    // #261 — was "Aging threshold (minutes)", a second control for the same
+    // concept in a second unit. The section is hours throughout now, and this
+    // test only needs a number input inside the lit band to type into.
+    const threshold = page.getByLabel("Aging (hours)");
     const original = await threshold.inputValue();
     await threshold.fill(String(Number(original) + 1));
 

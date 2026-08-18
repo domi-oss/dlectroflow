@@ -494,17 +494,21 @@ describe("the repo itself", () => {
   it("finds the git-reaching call sites that are known to exist", () => {
     // Two in registry-prune.test.ts (the `git` wrapper and the `bash
     // prune-registry.sh` spawn, which runs git seven times), two in
-    // ci-docs-only.test.ts (`ls-tree` and the decoy repo builder), and one in
+    // ci-docs-only.test.ts (`ls-tree` and the decoy repo builder), one in
     // source-encoding-hygiene.test.ts (`ls-files`, which is how the whole-repo
     // sweep for #224 learns which files are tracked — a recursive readdir from
-    // the repo root would walk node_modules and sibling worktrees).
+    // the repo root would walk node_modules and sibling worktrees), and one in
+    // e2e/build-identity.ts (`rev-parse HEAD`, the only non-test caller: #266
+    // needs the checkout's own commit to tell this worktree's server apart from
+    // the one another worktree left on port 3000).
     const reaching = gitReachingCalls();
-    expect(reaching.length).toBeGreaterThanOrEqual(5);
+    expect(reaching.length).toBeGreaterThanOrEqual(6);
     expect(new Set(reaching.map(({ file }) => file))).toEqual(
       new Set([
         path.join("src", "lib", "registry-prune.test.ts"),
         path.join("src", "lib", "ci-docs-only.test.ts"),
         path.join("src", "lib", "source-encoding-hygiene.test.ts"),
+        path.join("e2e", "build-identity.ts"),
       ]),
     );
   });

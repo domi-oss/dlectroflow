@@ -1032,7 +1032,7 @@ export const STRINGS = {
   },
   // #212 (!304 review) — the same fact from the other side: why "Back to inbox"
   // and the notice's Retry are not taking the press while the plan itself is in
-  // flight.
+  // flight. #238 widened it to the whole row, below.
   //
   // Its own key rather than a re-use of the tail above, because the two are not
   // the same sentence and only look alike: that one is a TAIL with a count
@@ -1046,15 +1046,35 @@ export const STRINGS = {
   // plan shows the model the row and then replaces the plan with an answer that
   // hands it straight back, moments after the eject took it away.
   //
+  // #238 — and STILL one string, now that the same event also holds the five
+  // controls inside a row (the emoji, the step text, the minutes, the ✕ and the
+  // drag grip). They are held by the same fact and lift on it together, so this
+  // follows `breakdown.ejectHeld`'s rule rather than growing a second sentence:
+  // one paragraph for every control one event holds, because five copies would
+  // be five things to re-read rather than five explanations.
+  //
+  // Both consequences are named, and the editing one goes FIRST because it is
+  // the one the user is most likely to be mid-way through discovering — they
+  // reached for a field, not for "Back to inbox". Neither is a claim the app
+  // cannot support: the answer replaces the list wholesale, so an edit made in
+  // the gap really would be overwritten, and the plan write really would put one
+  // step in two places.
+  //
   // Identical across voices, and never the word "disabled", for the reasons the
   // `breakdown.eject.*` family and `breakdown.ejectHeld` give: the app is
   // declining an action to protect the user's data, the control is not broken,
   // and the wait is one round trip.
+  // "waits for that to finish" is load-bearing and stays: two `!304` specs
+  // assert on it, and what they are pinning is the CONCEPT — that the sentence
+  // tells the user this is a wait rather than a broken control. Widening the
+  // subject from "sending a step back to your inbox" to "the step list" keeps
+  // that true of every control the event now holds, so the assertions go on
+  // testing what they were written to test and did not need editing.
   "breakdown.planHeld": {
     plain:
-      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+      "Saving the plan, or asking for a new one — the step list waits for that to finish, so a new plan cannot land on top of an edit and the same step cannot end up in both your plan and your inbox.",
     playful:
-      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+      "Saving the plan, or asking for a new one — the step list waits for that to finish, so a new plan cannot land on top of an edit and the same step cannot end up in both your plan and your inbox.",
   },
 
   // ── #212: a step that could not be sent back to the inbox ──────────────────

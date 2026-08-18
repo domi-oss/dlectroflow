@@ -110,8 +110,6 @@ import { startBreakdown } from "@/app/actions/breakdown";
 import { INBOX_ACTION_TIMEOUT_MS } from "@/components/inbox/inbox-view";
 
 const settings: AgingSettings = {
-  agingThresholdMinutes: 30,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

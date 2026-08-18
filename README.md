@@ -52,7 +52,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 |---|---|
 | 🧠 Brain Dump — capture, triage, aging reminders | ✅ works |
 | 📝 Notes on a to-do and on a step | ✅ works — jot the context you'd otherwise lose and it rides along into the Google Task or the calendar entry, task note first where both exist. Capture can write one inline: a `{…}` group at the **very end** of what you type splits off as the note, so `water the plants {can under sink}` splits and `fix the {foo} handler` stays exactly as typed. |
-| 🔔 Desktop notifications + demo override | ✅ works |
+| 🔔 Desktop notifications when an item ages | ✅ works — one threshold, in hours, set in **Settings → Aging & reminder** |
 | ✂️ AI task breakdown (streaming chat) | ✅ works — Claude by default (needs an Anthropic API key) |
 | 🤖 Bring your own LLM (`LLM_PROVIDER`) | ⚠️ **partly** — `anthropic` is what runs in production; `openai-compatible` ships but is unit-tested only, and **no human has yet run it against a real non-Anthropic endpoint** (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) |
 | 📅 Scheduling (breakdown → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically (see [Connecting Google Tasks](#-connecting-google-tasks)). No Google? Steps save locally, export as `.ics`, or **subscribe to a private calendar feed** that stays in sync (see [No Google account?](#no-google-account-ics-still-works)). |

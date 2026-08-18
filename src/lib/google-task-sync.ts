@@ -177,9 +177,9 @@ export async function reopenGoogleTaskForStep(
  *
  * #209 asked whether the patches run in parallel, and both extremes are wrong.
  *
- * **Sequential** costs one round trip per step, and `TASKS_PATCH_TIMEOUT_MS`
- * (`src/lib/google.ts`) allows each 10 s — so a twenty-step breakdown could hold
- * a server action open for over three minutes, and `bulkBrainDumpAction` loops
+ * **Sequential** costs one round trip per step, and `GOOGLE_FETCH_TIMEOUT_MS`
+ * (`src/lib/google.ts`) allows each 8 s — so a twenty-step breakdown could hold
+ * a server action open for over two minutes, and `bulkBrainDumpAction` loops
  * over items on top of that. `!288` bounded the blast radius of one stalled
  * connection; it did not make the loop fast, and said so.
  *
@@ -220,7 +220,11 @@ export const GOOGLE_SYNC_CONCURRENCY = 4;
  * refresh round-trips, each writing the row. Resolving before the fan-out makes
  * that one refresh, and the token cannot expire underneath the pool — the
  * refresh window is a minute and the whole fan-out is bounded by
- * `TASKS_PATCH_TIMEOUT_MS` per patch.
+ * `GOOGLE_FETCH_TIMEOUT_MS` per patch.
+ *
+ * That resolution is itself now bounded too (#211): the refresh call it may
+ * make had no deadline of its own, so the "one refresh" this paragraph relies
+ * on could hold the whole fan-out for Node's 300 s default.
  *
  * It is resolved once per **to-do**, not once per bulk operation:
  * `bulkBrainDumpAction` calls `completeItem` in a loop, so ten selected rows

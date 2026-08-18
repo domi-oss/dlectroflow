@@ -5,8 +5,6 @@ import { render, screen, cleanup } from "@testing-library/react";
 // --- Server-side deps: stubbed so the async server component runs in jsdom ---
 const settingsFixture = {
   voice: "plain" as const,
-  agingThresholdMinutes: 45,
-  demoOverrideSeconds: null,
   agingHours: 24,
   overdueHours: 48,
   wayOverdueHours: 72,

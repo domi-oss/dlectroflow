@@ -520,7 +520,7 @@ test_app:
   # queries — e.g. workspace scoping — and skipping them in CI would gate on
   # less than the local suite runs).
   services:
-    - postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+    - postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
   variables:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
@@ -616,7 +616,7 @@ e2e_test:
   interruptible: true
   needs: []          # starts at pipeline start, in parallel with build_app
   services:
-    - postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+    - postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
   variables:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
@@ -1082,6 +1082,28 @@ renovate:
 # → Variables, both protected):
 #   OPS_DIGEST_ISSUE_IID = iid of a standing "Weekly ops digest" issue
 #   GL_TOKEN             = api-scoped token that can post issue notes (dedicated Reporter token)
+#
+# The role is enough for everything this job WRITES, and deliberately so — it
+# posts one note and reads nothing it does not print.
+#
+# Whether it is enough to READ the Vulnerability Report is the open question in
+# #203, and this file no longer claims an answer: reading it needs
+# `read_security_resource`, and GitLab's own documentation gives two accounts of
+# which role carries that — the permissions matrix lists "View vulnerability
+# report" at Reporter, the vulnerability report page's prerequisites say
+# "Security Manager, Developer, Maintainer, or Owner" (both read 2026-08-16).
+#
+# The reason that ambiguity mattered is measurable and does not depend on
+# resolving it: a caller WITHOUT the ability is not refused.
+# `project.vulnerabilities` resolves to an EMPTY connection, HTTP 200, no error
+# — so the security section could publish "0 active findings" under a ✅.
+#
+# The role is unchanged by #203 and the defence is in the script, which now
+# refuses to print a count it cannot show the same connection returning a record
+# for, and exits 2 into the ⚠️ undetermined arm instead. That holds for any token
+# and any future permission change, which raising a role would not — and it is
+# the option to prefer precisely BECAUSE the role requirement is not something
+# this repo can read off with confidence.
 ops_digest:
   stage: maintenance
   image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
