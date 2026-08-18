@@ -79,6 +79,61 @@ export async function logMedsDose(input: {
 }): Promise<MedsLogResult> {
   const { medicationDoseId, state, date } = input;
 
+  /**
+   * ⚠️ **All three fields have their SHAPE checked, in the order the type
+   * declares them, before anything is queried.** The type above is a
+   * compile-time shape and this is a POST endpoint; every guard below is
+   * unreachable from the app's own UI and reachable from the wire.
+   *
+   * ## `medicationDoseId`: an absent key does not mean "match nothing"
+   *
+   * Prisma **omits** a `where` key whose value is `undefined` rather than
+   * treating it as unsatisfiable, and `strictUndefinedChecks` is a preview
+   * feature this schema's `generator client` block does not enable — so the
+   * omitting behaviour is the one in force. A payload without the id therefore
+   * reduced the scoped lookup below to `findFirst({ where: { medication: … } })`
+   * with no `id` term, and `findFirst` answers with the FIRST eligible dose in
+   * the workspace. Measured before this guard existed: a payload of `{ state,
+   * date }` returned `{ ok: true, state: "taken" }` and wrote a row.
+   *
+   * The `workspaceId` filter still held, so it was never a cross-workspace leak
+   * — it was a health record against a medication the caller never named,
+   * reported as success. For a tracker whose whole worth is that nobody has lied
+   * to it, a wrong row is the same category of harm as a missing one, and the
+   * export hands it over either way.
+   *
+   * ⚠️ **`typeof`, not a null check, and the difference is the whole guard.**
+   * `{ not: "" }` and `{ contains: "itest" }` are Prisma FILTER operators. A
+   * caller sending one where a scalar belongs does not blank the term, it
+   * substitutes a predicate of its own choosing — and every one of those shapes
+   * is non-null, so `!= null` would pass them straight through. Refusing
+   * anything that is not a non-empty string closes the absent, the `undefined`
+   * and the operator-object cases with one condition.
+   *
+   * It answers `unknown-dose` rather than earning a refusal of its own. From the
+   * caller's side that is the honest outcome — no dose was named, so none was
+   * found — and it is the same argument the `if (!dose)` block below makes for a
+   * paused medication: a reason nobody's UI can reach still costs a copy in
+   * every voice. Nothing in the app can send this payload, so nothing needs to
+   * render a new answer to it.
+   *
+   * ## `date`: the one that threw instead of refusing
+   *
+   * `isPlausibleLocalDate` takes a `string` and calls `date.split("-")`
+   * unconditionally, so a non-string threw a `TypeError` out of the action —
+   * measured as `Cannot read properties of undefined (reading 'split')`, an
+   * unhandled 500 where the `state` check below achieves a graceful refusal for
+   * free because `Object.values(...).includes(...)` cannot throw.
+   *
+   * Guarded HERE and not by widening that predicate's parameter to `unknown`:
+   * it is a pure function whose `string` contract is honest, its own docblock
+   * records that it lives outside the action deliberately, and this action is
+   * the untrusted entry point. Weakening the signature would cost every internal
+   * caller its compile-time check to defend a wire that only this file faces.
+   */
+  if (typeof medicationDoseId !== "string" || medicationDoseId.length === 0) {
+    return { ok: false, reason: "unknown-dose" };
+  }
   // Validated here rather than left to `MedsDoseLog_state_check`. The constraint
   // is the backstop and it stays the backstop — but a caller that reaches it gets
   // a 500 and a stack trace, and `missed` is the value an implementer would
@@ -87,7 +142,7 @@ export async function logMedsDose(input: {
   if (!Object.values(MedsDoseState).includes(state)) {
     return { ok: false, reason: "bad-state" };
   }
-  if (!isPlausibleLocalDate(date, new Date())) {
+  if (typeof date !== "string" || !isPlausibleLocalDate(date, new Date())) {
     return { ok: false, reason: "bad-date" };
   }
 

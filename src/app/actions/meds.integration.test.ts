@@ -65,6 +65,18 @@ function localYmd(d: Date = new Date()): string {
 
 const TODAY = localYmd();
 
+/**
+ * A caller's payload, past the compile-time shape.
+ *
+ * ⚠️ Module scope rather than one copy per block, because two blocks now need it
+ * and they assert opposite halves of the same property: that an EXTRA key is
+ * inert, and that a MISSING or non-conforming one is refused. A second copy is
+ * the shape `best-effort.ts` warns about — the copy that drifts reads fine on its
+ * own.
+ */
+const asWire = (payload: Record<string, unknown>) =>
+  logMedsDose(payload as Parameters<typeof logMedsDose>[0]);
+
 async function seedWorkspace(id: string, doseId: string, medsTracker = true) {
   await db.workspace.create({ data: { id, kind: "user" } });
   // ⚠️ A `Settings` row with the tracker ON, because that is what an opted-in
@@ -548,6 +560,126 @@ describe("logMedsDose — the date the client supplies", () => {
   });
 });
 
+/**
+ * #269 — a payload that OMITS a field, or sends one of the wrong shape.
+ *
+ * ⚠️ **The sibling of the extra-key block at the foot of this file, and the half
+ * that had no specs.** That block proves an extra key is inert; nothing proved
+ * that a MISSING one is refused, and the two failure modes are not symmetric.
+ *
+ * `Prisma` **omits** a `where` key whose value is `undefined` rather than treating
+ * it as "match nothing" — `strictUndefinedChecks` is a preview feature and this
+ * schema's `generator client` block enables no preview features, so the omitting
+ * behaviour is the one in force. A payload without `medicationDoseId` therefore
+ * turns the scoped lookup into `findFirst({ where: { medication: { … } } })` with
+ * no `id` term at all, and `findFirst` answers with the FIRST eligible dose in the
+ * workspace — so the action writes a health record against a medication the caller
+ * never named and reports `{ ok: true }`. It is not a cross-workspace leak, the
+ * `workspaceId` filter still holds; it is a health record about the wrong dose,
+ * which for a tracker whose entire worth is that you have not lied to it is the
+ * same category of harm as losing one.
+ *
+ * The **object** cases are the sharper half and are not what a missing field
+ * looks like: `{ not: "" }` and `{ gte: "" }` are Prisma FILTER operators, so a
+ * caller sending one where a scalar is expected does not merely blank the term —
+ * it substitutes a predicate of its own choosing. A `typeof === "string"` guard is
+ * what closes both shapes at once, which is why it is a guard on the TYPE and not
+ * a null check.
+ *
+ * `date` fails differently and worse: `isPlausibleLocalDate` calls
+ * `date.split("-")` unconditionally, so a non-string throws a `TypeError` out of
+ * the action — an unhandled 500 rather than the graceful refusal the `state` check
+ * achieves, because `Object.values(...).includes(...)` cannot throw. Three inputs,
+ * three different failure modes, one shape of fix.
+ */
+describe("logMedsDose — a payload MISSING a field, or one of the wrong shape", () => {
+  /** Every dose id shape that is not a non-empty string. */
+  const badIds: readonly unknown[] = [
+    undefined,
+    null,
+    "",
+    42,
+    true,
+    ["itest-269-dose"],
+    // Prisma filter operators. These are the ones a blanket `!= null` check would
+    // let straight through into the `where`.
+    { not: "" },
+    { gte: "" },
+    { contains: "itest" },
+  ];
+
+  it("REFUSES a payload with NO `medicationDoseId` at all, and writes NOTHING", async () => {
+    // The key is absent rather than `undefined`, because that is what a hand-built
+    // POST body actually looks like and Prisma treats the two identically.
+    expect(await asWire({ state: MedsDoseState.Taken, date: TODAY })).toEqual({
+      ok: false,
+      reason: "unknown-dose",
+    });
+    // The row count is the assertion that matters. The answer alone would still
+    // read as a refusal if the write had already landed against another dose.
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
+  });
+
+  it("REFUSES every non-string `medicationDoseId`, including a Prisma filter object", async () => {
+    for (const medicationDoseId of badIds) {
+      expect(
+        await asWire({
+          medicationDoseId,
+          state: MedsDoseState.Taken,
+          date: TODAY,
+        }),
+        String(JSON.stringify(medicationDoseId)),
+      ).toEqual({ ok: false, reason: "unknown-dose" });
+    }
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
+  });
+
+  it("REFUSES a non-string `date` rather than throwing a TypeError", async () => {
+    // `.split` on a non-string is a TypeError, which leaves the caller a 500 and
+    // a stack trace instead of a reason they can act on. Asserted with
+    // `resolves`, so a throw fails as a throw rather than as a wrong value.
+    for (const date of [undefined, null, 20260818, {}, ["2026-08-18"]]) {
+      await expect(
+        asWire({
+          medicationDoseId: "itest-269-dose",
+          state: MedsDoseState.Taken,
+          date,
+        }),
+      ).resolves.toEqual({ ok: false, reason: "bad-date" });
+    }
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(0);
+  });
+
+  it("still writes the row for a payload that names all three properly", async () => {
+    // The non-zero control. A guard that refused everything would pass all three
+    // specs above, and this is the one that fails if it does.
+    expect(
+      await asWire({
+        medicationDoseId: "itest-269-dose",
+        state: MedsDoseState.Taken,
+        date: TODAY,
+      }),
+    ).toEqual({ ok: true, state: MedsDoseState.Taken });
+    expect(
+      await db.medsDoseLog.count({
+        where: { workspaceId: { in: [WS, OTHER_WS] } },
+      }),
+    ).toBe(1);
+  });
+});
+
 describe("logMedsDose — idempotency and correction", () => {
   it("overwrites skipped with taken on the SAME row", async () => {
     await logMedsDose({
@@ -745,10 +877,6 @@ describe("logMedsDose — idempotency and correction", () => {
  * effect"**.
  */
 describe("logMedsDose ignores anything a caller adds to the payload", () => {
-  /** A caller's payload, past the compile-time shape. */
-  const asWire = (payload: Record<string, unknown>) =>
-    logMedsDose(payload as Parameters<typeof logMedsDose>[0]);
-
   it("cannot use a supplied clock to make a far-off date plausible", async () => {
     // The exploit the previous round's `now?: Date` opened: supply BOTH the date
     // and the clock it is judged against, and every date is one day from
