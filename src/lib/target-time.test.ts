@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { isUsableHhmm, targetTimeToday } from "@/lib/target-time";
 
@@ -185,5 +187,66 @@ describe("isUsableHhmm", () => {
         new Date(2026, 7, 16, hour, minute, 0, 0).getTime(),
       );
     }
+  });
+});
+
+/**
+ * #269 — the fallback and `Settings.workdayEndTime`'s schema default are the SAME
+ * 17:00, and this is what stops them drifting apart.
+ *
+ * ⚠️ Duo review round 5 of `!364`, grounded. The entire published rationale for
+ * falling back to 17:00 — in this module's docblock, in `doseDeadline`'s, and in
+ * the review note explaining why an unusable `dueAfter` is treated as absent — is
+ * *"17:00 is `Settings.workdayEndTime`'s own schema default"*. That was true by
+ * inspection and pinned by nothing, so editing `@default("17:00")` in
+ * `prisma/schema.prisma` would have left three docblocks quietly asserting a
+ * relationship that no longer held.
+ *
+ * ## Asserted, deliberately NOT derived
+ *
+ * Reading the schema default at runtime would make the fallback *follow* the
+ * column, and that is the wrong behaviour rather than the expensive one: the
+ * fallback feeds a medication deadline, so a schema edit would silently move when
+ * a dose reads as **missed**. A failing test asks a person to decide; a derivation
+ * decides for them. The duplication is intentional and this is its control.
+ *
+ * ## Why the extraction is inline
+ *
+ * `CLAUDE.md` asks a repo-reading guard to be a pure `fs`-free module with its own
+ * unit tests, so its parser can be exercised on synthetic input. That shape is for
+ * a **guard with a parser**; this is one assertion over one line, and a module plus
+ * a test file for four string operations is the `#234` failure — a check that grows
+ * into a project. If a second constant ever needs the same treatment, that is the
+ * point at which it earns the module.
+ */
+describe("the 17:00 fallback and the schema default", () => {
+  it("matches Settings.workdayEndTime's @default in prisma/schema.prisma", () => {
+    const schema = readFileSync(
+      join(process.cwd(), "prisma/schema.prisma"),
+      "utf8",
+    );
+    // Located by string operations rather than a pattern: `regexp-source-hygiene`
+    // stands in for a demoted CWE-185 rule, and there is nothing to report if
+    // there is no regex. The column name is unique in this file.
+    const line = schema
+      .split("\n")
+      .find((l) => l.trimStart().startsWith("workdayEndTime "));
+    expect(
+      line,
+      "workdayEndTime is no longer declared in the schema",
+    ).toBeTruthy();
+    const marker = '@default("';
+    const from = line!.indexOf(marker) + marker.length;
+    const schemaDefault = line!.slice(from, line!.indexOf('"', from));
+    expect(schemaDefault).toBe("17:00");
+
+    // Asserted through the OBSERVABLE fallback rather than by exporting the
+    // constants, so the thing pinned is the behaviour the rationale claims and
+    // not a private value that happens to agree with it.
+    const now = new Date(2026, 7, 16, 12, 0);
+    const [hour, minute] = schemaDefault.split(":").map(Number);
+    expect(targetTimeToday("nonsense", now)).toBe(
+      new Date(2026, 7, 16, hour, minute, 0, 0).getTime(),
+    );
   });
 });
