@@ -432,6 +432,15 @@ describe.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
     // obvious place and this reds until the image side follows — the same
     // mechanism as the prisma/tsx/dotenv pins asserted above, for the same
     // reason.
+    //
+    // ⚠️ What this cannot see, stated because the loop below reads as broader
+    // than it is: a repo override on some OTHER package that is also present in
+    // the image's tools tree but is not repeated here. The check runs in the one
+    // direction that is statically decidable — every entry the image forces must
+    // be one the repo resolved — because the reverse needs the image's dependency
+    // tree, and only an `npm install` produces that. So an override added for a
+    // package the prisma/tsx/dotenv tree happens to pull in must be added here by
+    // hand; the named assertion at the end is the only automatic one.
     it("pins the tools manifest's overrides to package-lock.json's versions", () => {
       const repo = JSON.parse(
         readFileSync(join(process.cwd(), "package.json"), "utf8"),
