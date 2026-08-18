@@ -23,7 +23,7 @@ import { isPlausibleLocalDate } from "@/lib/meds";
  * overwrite lands on the same row, and `Missed` was never stored, so there is no
  * transition to un-do.
  *
- * ## Nothing happens after the commit, and that is load-bearing
+ * ## No BOOKKEEPING happens after the commit, and that is load-bearing
  *
  * No `RewardEvent`, no `logReward`, no `awardBadge`, no streak touch. The reward
  * for logging is purely presentational — a string chosen and rendered — because
@@ -36,6 +36,37 @@ import { isPlausibleLocalDate } from "@/lib/meds";
  * in does not exist here. `src/lib/best-effort.ts` is on `main` and is
  * deliberately NOT reached for: wrapping a call with nothing after it would be
  * cargo-cult, and its own docblock names the three sites that earned it.
+ *
+ * ⚠️ **"Nothing" is not literally true and the earlier wording said it was.**
+ * `revalidatePath("/")` is the ONE statement after the commit, and an earlier
+ * draft of this section claimed nothing ran there at all — flagged on `!364`.
+ * The distinction the claim needs is *bookkeeping*, not *statements*: #257 is
+ * about a second WRITE whose failure strands a committed first one, and cache
+ * invalidation is neither a write nor something a retry could correct.
+ *
+ * The claim was narrowed rather than the code restructured, and the reason is
+ * that the code is already the framework's documented shape. Next 16's own
+ * `revalidatePath` reference (`node_modules/next/dist/docs`, the version-matched
+ * source of truth this repo reads first) gives `await submitForm();
+ * revalidatePath('/')` as the Server Function example, specifies a `void` return,
+ * and names exactly two failure conditions — a path over 1024 characters, and
+ * being called outside a server environment. A literal `"/"` inside a
+ * `"use server"` module settles both at compile time. Every other writer in this
+ * repo calls it the same bare way (`account.ts`, `braindump.ts`, `breakdown.ts`,
+ * `calendar-feed.ts`, `focus.ts`), and **not one `revalidatePath` call anywhere
+ * here sits inside a `bestEffort`** — including in the three files that use
+ * `bestEffort` most heavily. Wrapping this one would make it the only such site
+ * in the repo and would contradict `best-effort.ts`'s own *"what this is NOT
+ * for"*, which reserves the primitive for a statement whose failure the caller
+ * can do nothing about **and** whose absence costs the person something.
+ *
+ * Moving the call BEFORE the upsert was also considered and is strictly worse: it
+ * would invalidate the cache while the old value is still the committed one, so a
+ * concurrent render could repopulate it with pre-write data.
+ *
+ * A future statement added after the commit does NOT inherit this reasoning. It
+ * gets the #257 question asked again from scratch, which is what a claim about
+ * bookkeeping — rather than a claim about line count — leaves room for.
  *
  * ## No AI, ever
  *
@@ -298,6 +329,10 @@ export async function logMedsDose(input: {
   // `inbox-view.tsx`), not from /dashboard — an answer behind a navigation step
   // is an answer you do not get. So "/" is the path whose values this write
   // changes, which is what `revalidation-hygiene` asks every writer to name.
+  //
+  // This is the ONE statement after the commit. Why it is not wrapped, and why
+  // anything ADDED below it needs the #257 question asked again, is in the
+  // header docblock — stated once there rather than restated here.
   revalidatePath("/");
 
   return { ok: true, state };
