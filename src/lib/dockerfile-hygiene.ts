@@ -152,3 +152,73 @@ export function stageInstructions(
 
   return collected;
 }
+
+/**
+ * A `printf '<json>' > <path>` redirect. Global, because a RUN may write more
+ * than one file and the caller asks for a specific one; `matchAll` builds its own
+ * regex from this rather than advancing `lastIndex` here, so a module-level `g`
+ * flag is safe to share (`.exec`/`.test` in a loop would not be).
+ */
+const PRINTF_REDIRECT = /printf\s+'([^']*)'\s*>\s*(\S+)/g;
+
+/** The npm manifest a stage writes into an isolated install prefix. */
+export interface IsolatedManifest {
+  /** The JSON text written, with printf's trailing `\n` escape removed. */
+  json: string;
+  /** Parsed manifest, or `null` when `json` is not a JSON object. */
+  manifest: { overrides?: Record<string, unknown> } | null;
+}
+
+/**
+ * The manifest a stage `printf`s into an isolated npm prefix, e.g.
+ * `printf '{"private":true}' > /opt/tools/package.json`.
+ *
+ * The prefix is isolated so that installing the image's CLIs cannot make npm
+ * treat the standalone output's package.json as the project root and reinstall
+ * the whole app tree on top of it (#71). The consequence callers check is the
+ * other half of that: npm reads THIS manifest as the root instead, so the repo's
+ * `overrides` do not reach the install — and no lockfile is committed for it, so
+ * every build resolves it afresh. Anything the image must force has to be forced
+ * here too, and pinned exactly.
+ *
+ * Returns `null` when no RUN writes `manifestPath`, and a non-null result with
+ * `manifest: null` when something is written there that is not a JSON object.
+ * The two need different failure messages, and a thrown `SyntaxError` names
+ * neither — so parsing is reported, not raised.
+ *
+ * The redirect target is matched rather than just the surrounding command, so a
+ * RUN that writes several files cannot have another one's payload read as this
+ * manifest.
+ */
+export function isolatedManifest(
+  runs: readonly string[],
+  manifestPath: string,
+): IsolatedManifest | null {
+  for (const run of runs) {
+    if (!run.includes(manifestPath)) continue;
+
+    for (const [, payload, target] of run.matchAll(PRINTF_REDIRECT)) {
+      if (target !== manifestPath) continue;
+
+      // printf's argument is shell-quoted source, so its trailing newline is the
+      // two characters `\` and `n`, not a newline.
+      const json = payload.replace(/\\n$/, "");
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(json);
+      } catch {
+        return { json, manifest: null };
+      }
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      )
+        return { json, manifest: null };
+
+      return { json, manifest: parsed as IsolatedManifest["manifest"] };
+    }
+  }
+
+  return null;
+}

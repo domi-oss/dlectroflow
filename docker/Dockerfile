@@ -60,21 +60,30 @@ ENV HOSTNAME=0.0.0.0
 # be forced in the shipped image has to be forced twice — once for the repo (CI,
 # local dev, and what the dependency scanner reads out of package-lock.json) and
 # once here, for the copy that is actually grafted into /app/node_modules and
-# runs in the cluster. `deepmerge-ts` is pinned to ^8.0.1 for CVE-2026-40345
-# (HIGH, stack exhaustion on recursive object graphs): `prisma` pulls
-# `@prisma/config`, which depends on `deepmerge-ts` at an EXACT `7.1.5`, so no
-# range bump reaches it and naming the package on the install line below does not
-# either — measured in node:22-alpine, that produces a hoisted 8.0.1 AND a nested
-# @prisma/config/node_modules/deepmerge-ts@7.1.5, which is the copy
-# @prisma/config would load. Only an override collapses it to one.
+# runs in the cluster. `deepmerge-ts` is forced for CVE-2026-40345 (HIGH, stack
+# exhaustion on recursive object graphs): `prisma` pulls `@prisma/config`, which
+# depends on `deepmerge-ts` at an exact version, so no range bump reaches it, and
+# naming the package on the install line below does not either — that leaves the
+# forced copy hoisted with a nested @prisma/config/node_modules copy still on the
+# vulnerable version, and the nested one is what @prisma/config loads. Only an
+# override collapses it to a single copy.
+#
+# ⚠️ Pinned EXACTLY here, unlike the repo's own override, which is a range. That
+# asymmetry is deliberate: there is no lockfile behind THIS manifest, so every
+# image build re-resolves it and a range would silently graft a newer release
+# than the one CI resolved and ran migrations against, with no MR behind it. The
+# repo side stays a range because package-lock.json holds it still. The version
+# must equal what the lockfile resolved — src/lib/dockerfile-hygiene.test.ts
+# reads it from there rather than hard-coding one, so a bump reds until this line
+# follows, exactly as it does for the pins on the install line below.
 #
 # This is the load-bearing half of that fix. Fixing only the repo's package.json
 # turns the dependency scan green while the running image still carries the
 # vulnerable copy, because the scanner reads the lockfile and the pod gets this
-# install. Do not "simplify" the overrides block out; dockerfile-hygiene fails if
-# it goes missing.
+# install. Do not "simplify" the overrides block out, and do not relax the pin to
+# a range; dockerfile-hygiene fails on either.
 RUN mkdir -p /opt/tools \
-  && printf '{"name":"dlectroflow-image-tools","private":true,"overrides":{"deepmerge-ts":"^8.0.1"}}\n' > /opt/tools/package.json \
+  && printf '{"name":"dlectroflow-image-tools","private":true,"overrides":{"deepmerge-ts":"8.0.1"}}\n' > /opt/tools/package.json \
   && cd /opt/tools \
   && npm install --no-audit --no-fund --cache /tmp/npm-cache \
        prisma@6.19.3 dotenv@16.6.1 tsx@4.23.1 \
