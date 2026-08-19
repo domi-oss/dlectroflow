@@ -1451,6 +1451,50 @@ operators upgrading a self-hosted instance don't get surprised.
   read rendered as "1 failed pipeline" — and now degrade to `?`. No effect on a
   self-hosted instance; this is this project's own maintenance reporting.
 
+- **`deepmerge-ts` forced to 8.x, closing a HIGH advisory that was in the running
+  image (CVE-2026-40345 / GHSA-ggr8-5vv4-36mx).** Stack exhaustion when merging
+  recursive object graphs. It arrives transitively: `prisma` → `@prisma/config` →
+  `deepmerge-ts`, pinned at an **exact** `7.1.5`, so no ordinary range bump reaches
+  it and an `overrides` entry is the only mechanism that moves it.
+
+  **It mattered despite `prisma` being a devDependency.** The runtime image's
+  `runner` stage installs `prisma`, `tsx` and `dotenv` into an isolated prefix and
+  grafts the result into `/app/node_modules`, because the migrate initContainer runs
+  `npx prisma migrate deploy` and the seed and purge CronJob run `npx tsx`. The
+  vulnerable copy was confirmed present in a running production pod, not inferred.
+
+  ⚠️ **Fixed in two places, and the second is the one that reaches production.**
+  Because that prefix is isolated, npm reads its own synthetic manifest as the
+  project root, so the repo's `overrides` do not apply to it. Both Dockerfiles now
+  carry the override in that manifest as well. Measured in `node:22-alpine` (CI's
+  npm 10): with the repo override alone the image still resolved `7.1.5`, and naming
+  the package on the install line produced a hoisted `8.0.1` **plus** a nested
+  `@prisma/config/node_modules/deepmerge-ts@7.1.5` — the copy `@prisma/config`
+  actually loads. Only the override in that manifest collapses it to one.
+
+  ⚠️ **The two manifests pin differently, on purpose.** The repo's `overrides`
+  entry is a range (`^8.0.1`) because `package-lock.json` records the one version it
+  resolved to and `npm ci` reinstalls exactly that. The tools manifest has **no
+  committed lockfile** — every image build resolves it afresh — so it is pinned to an
+  **exact** `8.0.1`, like the `prisma`/`tsx`/`dotenv` versions beside it. A range
+  there would let a later 8.x release reach `/app/node_modules` with no MR and no
+  re-run of `prisma migrate deploy` behind it; measured on this package, an override
+  of `^7.0.0` resolves to `7.1.6` today rather than the `7.1.5` the lockfile era
+  pinned, so that drift is demonstrated rather than theoretical (Duo review on
+  !383).
+
+  Verified against the real code path rather than the version string: `npx prisma
+  migrate deploy` applies every migration against Postgres 16.15 with 8.0.1
+  resolved, and `prisma` reports `Loaded Prisma config from prisma.config.ts`, which
+  is the call that goes through `deepmerge`. `src/lib/dockerfile-hygiene.test.ts`
+  fails if either manifest drops the override, if the image pins anything other than
+  the version `package-lock.json` resolved, or if the image forces a package the repo
+  does not — it reads the expected version out of the lockfile rather than carrying a
+  literal, so a future bump reds until the image side follows.
+
+  **No operator action required**, and no application behaviour changes. A
+  self-hosted instance rebuilding from this tag picks it up automatically.
+
 ## [0.5.0] - 2026-08-01
 
 **More than one person can use it now.** dlectroflow stops being a single-owner
