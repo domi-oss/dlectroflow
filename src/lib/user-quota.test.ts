@@ -344,7 +344,17 @@ describe("peekUserAiUsage — what the People panel reports", () => {
   });
 
   it("reports the CURRENT window's count against the quota", async () => {
-    const started = new Date("2026-07-20T09:00:00.000Z");
+    // Now-relative, like the expired case below, and NOT a fixed instant — this
+    // line held `new Date("2026-07-20T09:00:00.000Z")` and reddened `main` on
+    // 2026-08-19. The default window is 720 hours, which is exactly 30 days, so
+    // that date's window lapsed at 2026-08-19T09:00:00Z and every run after it
+    // exercised the EXPIRED path instead: `peekUserAiUsage` then reported
+    // `used: 0` — correctly, per its own docblock — against an expectation of 12.
+    // A fixed start date inside a rolling window is a dated value with a
+    // detonation time, and it passes for 30 days before it never passes again.
+    // One hour ago keeps this case unambiguously live whatever the window is set
+    // to, since the smallest value the config accepts is 1.
+    const started = new Date(Date.now() - 1 * 3600_000);
     db.userAiUsage.findUnique.mockResolvedValue({
       userId: USER_ID,
       count: 12,
@@ -358,6 +368,12 @@ describe("peekUserAiUsage — what the People panel reports", () => {
       windowStartedAt: started,
       windowEndsAt: new Date(started.getTime() + 720 * 3600_000),
     });
+    // No extra "the window is still live" assertion here, deliberately. One was
+    // written and removed: the `toEqual` above already reds on exactly that
+    // condition and fires first, so it could not be watched failing on its own —
+    // and it would not have caught the reintroduction of a *recent* fixed date
+    // either, which is the shape that detonates later. It would have read as a
+    // control while being unable to fail, which is worse than the comment above.
   });
 
   it("reports an EXPIRED window as a spent one, so the owner sees the same number enforcement will", async () => {
