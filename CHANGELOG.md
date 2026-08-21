@@ -78,8 +78,8 @@ read the upgrade notes before deploying.
   credential is unreachable, unrevocable and uncascadable, so the owning member
   already saw "Not connected" — but **if you see that warning, go to Settings →
   Integrations and connect Google again.**
-- **Your focus-sound setting is rewritten in place, and there is nothing to do
-  about it (#180).** `focusSound` stops being a track id and becomes a plain
+- **Your focus-sound setting is rewritten in place, and it needs no action
+  from you (#180).** `focusSound` stops being a track id and becomes a plain
   switch (`off` / `on`), so every workspace that was not `off` is set to `on`, and
   the new `focusSoundCategories` array is derived in the same migration — from the
   single category slug #70 stored, or, where that was never set, from the `lofi_*`
