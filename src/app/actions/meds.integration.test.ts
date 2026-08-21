@@ -691,21 +691,48 @@ describe("logMedsDose — idempotency and correction", () => {
       where: { workspaceId: WS },
     });
 
+    // ⚠️ This used to read `rows[0].markedAt >= first.markedAt`, and it was NOT
+    // a control: `>=` is satisfied by equality, so an update branch that stopped
+    // touching `markedAt` — the exact regression the sentence above describes —
+    // passed it. Measured, not argued: with `logMedsDose`'s upsert changed to
+    // `update: { state }`, this spec stayed green.
+    //
+    // The bracket below says what the sentence always meant — `markedAt` is the
+    // instant of the CORRECTION, not of the first press — and both bounds are
+    // read from this process's clock, which is the same clock that writes the
+    // value.
+    //
+    // The 25 ms wait is what keeps the bracket's lower bound biting. Without it
+    // the two presses land inside the same millisecond often enough that the
+    // create-time value would satisfy `>= beforeCorrection` and the control
+    // would silently stop detecting anything; with it, the broken-update run
+    // above missed by 28 ms. Same wait the overlap spec below uses.
+    //
+    // Duo (`!364`) read this as a DB-clock/app-clock comparison, because
+    // `20260816120000_meds_tracker` declares `"markedAt" ... DEFAULT
+    // CURRENT_TIMESTAMP`. That default is never reached: Prisma's query engine
+    // materialises `@default(now())` on the APP host and sends it as a bound
+    // parameter, so the create-time value comes from this process too. Verified
+    // by query log — `INSERT INTO "GuestDailyActivity" ("day","ipHash",
+    // "createdAt") VALUES ($1,$2,$3)` with `createdAt` bound — while this
+    // machine's Postgres clock ran 12 ms AHEAD and the written value still
+    // landed inside a Node-side bracket. Nothing here writes `MedsDoseLog` with
+    // raw SQL, so there is no path on which the column default applies.
+    await new Promise((r) => setTimeout(r, 25));
+    const beforeCorrection = Date.now();
     await logMedsDose({
       medicationDoseId: "itest-269-dose",
       state: MedsDoseState.Taken,
       date: TODAY,
     });
+    const afterCorrection = Date.now();
+
     const rows = await db.medsDoseLog.findMany({ where: { workspaceId: WS } });
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe(first.id);
     expect(rows[0].state).toBe(MedsDoseState.Taken);
-    // `markedAt` moves, because the correction is when the reader actually said
-    // this — and v2's history is about what they told it, not when the first
-    // guess was made.
-    expect(rows[0].markedAt.getTime()).toBeGreaterThanOrEqual(
-      first.markedAt.getTime(),
-    );
+    expect(rows[0].markedAt.getTime()).toBeGreaterThanOrEqual(beforeCorrection);
+    expect(rows[0].markedAt.getTime()).toBeLessThanOrEqual(afterCorrection);
   });
 
   it("writes ONE row for two writes that genuinely overlap", async () => {
