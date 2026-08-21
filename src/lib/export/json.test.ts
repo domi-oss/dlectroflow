@@ -5,8 +5,14 @@ import { makeSnapshot, makeEmptySnapshot } from "./__tests__/fixture";
 const snapshot = makeSnapshot();
 const parsed = JSON.parse(exportJson(snapshot));
 
-/** Every string value anywhere in the tree, for the "is it in there at all"
- *  assertions that are the only honest way to test an omission. */
+/** Every KEY NAME anywhere in the tree, for the "is the field in there at all"
+ *  assertions that are the only honest way to test a field's omission.
+ *
+ *  ⚠️ Keys, never values — the docblock here used to say "every string value",
+ *  and a reader who trusted it wrote a `not.toContain("missed")` against a token
+ *  that can only ever be a value, producing an assertion that could not fail
+ *  (Duo review, `!364`). Use {@link everyStringValue} for what the archive SAYS;
+ *  this one is for which fields it HAS. */
 function everyKey(value: unknown, keys: string[] = []): string[] {
   if (Array.isArray(value)) {
     for (const v of value) everyKey(v, keys);
@@ -17,6 +23,21 @@ function everyKey(value: unknown, keys: string[] = []): string[] {
     }
   }
   return keys;
+}
+
+/** Every string VALUE anywhere in the tree — {@link everyKey}'s sibling, for an
+ *  absence that is about content rather than shape: a token that must appear
+ *  nowhere in the document no matter which field a future serialiser hangs it
+ *  off. Exact-match, because `toContain` on an array compares elements. */
+function everyStringValue(value: unknown, values: string[] = []): string[] {
+  if (typeof value === "string") {
+    values.push(value);
+  } else if (Array.isArray(value)) {
+    for (const v of value) everyStringValue(v, values);
+  } else if (value && typeof value === "object") {
+    for (const v of Object.values(value)) everyStringValue(v, values);
+  }
+  return values;
 }
 
 describe("export.json — the round-trippable tier", () => {
@@ -240,7 +261,20 @@ describe("export.json — the round-trippable tier", () => {
       (l: { date: string }) => l.date === "2026-07-03",
     );
     expect(july3).toHaveLength(1);
-    expect(everyKey(parsed)).not.toContain("missed");
+    // A VALUE sweep, not `everyKey`. This line used to read
+    // `everyKey(parsed)).not.toContain("missed")`, which could not fail: `missed`
+    // is only ever the value of a `state` field, never a key name (Duo review,
+    // `!364`). Measured rather than reasoned — with a real `missed` row in the
+    // fixture the key version stayed green and only the loop below went red.
+    //
+    // It is also strictly wider than that loop, which reads
+    // `medsDoseLogs[*].state` and nothing else: this is the line that fails if a
+    // future serialiser materialises the derived state ANYWHERE in the document
+    // — a `missedDoses` array, a per-dose `lastState`, a summary block.
+    expect(everyStringValue(parsed)).not.toContain("missed");
+    // The control that stops the sweep passing because it collected nothing, in
+    // the same shape the shoppingSummary and clientKey absences above use.
+    expect(everyStringValue(parsed)).toContain("taken");
     for (const log of parsed.medsDoseLogs) {
       expect(["taken", "skipped"]).toContain(log.state);
     }
