@@ -29,6 +29,44 @@ operators upgrading a self-hosted instance don't get surprised.
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+### Fixed
+
+- **A second merge no longer cancels the first one's production deploy.** Merging
+  two changes in quick succession could leave production on neither commit, with
+  both merges landed and nothing red to say so — which is why merges here have been
+  done one at a time with somebody watching each deploy finish.
+
+  The cause was `workflow:auto_cancel:on_new_commit` sitting at its default,
+  `conservative`. Under that mode GitLab treats a job that **has not started** as
+  interruptible whatever it is configured as, and `deploy_production` is
+  stage-scheduled behind build and test *and* queues on `resource_group: production`
+  — so at the moment a second merge lands it has reliably not started.
+  `resource_group` was widening the window rather than protecting the job, which the
+  comment above it now says. Measured on pipeline `2762854030`: `build_app`,
+  `test_app`, `e2e_test`, `build_image` and four of five scanners all succeeded, the
+  image was built and pushed, and the deploy was cancelled without ever starting.
+  `alert_pipeline_failure` was cancelled in the same sweep, which is why it was
+  quiet rather than loud.
+
+  Now set to `interruptible`, so the job's own declared value decides. The build,
+  test and scan jobs that carry `interruptible: true` still get cancelled and re-run
+  on the newer pipeline; `deploy_production` and `alert_pipeline_failure` are no
+  longer eligible.
+
+  **`deploy_review` gains `interruptible: true` explicitly**, because it is the one
+  deploy that *should* be abandoned when superseded — nobody opens a review app for
+  a commit two pushes old, and without the key it would have inherited the
+  protection meant for production and run every stale `helm upgrade` to completion.
+  Cancelling it is safe: `--atomic` is already set and helm rolls back on SIGTERM,
+  so the release does not wedge. `stop_review` keeps the default deliberately — a
+  teardown a human clicked must finish.
+
+  Nothing can double-deploy: `resource_group: production` still
+  serialises the two, and with **Prevent outdated deployment jobs** on, an older
+  deploy reaching the runner after a newer one fails visibly as `failed outdated
+  deployment job` instead of overwriting it. **No operator action required** — this
+  is CI configuration only, with no effect on the application or its data.
+
 ## [0.6.0] - 2026-08-21
 
 **The app stops failing quietly.** Every inbox write, the capture bar and the
@@ -1667,43 +1705,6 @@ read the upgrade notes before deploying.
     instance, and carries a reason-bearing allowlist per rule — the same contract
     `fetch-host-hygiene` uses. Verified failing on the unfixed tree first: 15
     text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
-
-- **A second merge no longer cancels the first one's production deploy.** Merging
-  two changes in quick succession could leave production on neither commit, with
-  both merges landed and nothing red to say so — which is why merges here have been
-  done one at a time with somebody watching each deploy finish.
-
-  The cause was `workflow:auto_cancel:on_new_commit` sitting at its default,
-  `conservative`. Under that mode GitLab treats a job that **has not started** as
-  interruptible whatever it is configured as, and `deploy_production` is
-  stage-scheduled behind build and test *and* queues on `resource_group: production`
-  — so at the moment a second merge lands it has reliably not started.
-  `resource_group` was widening the window rather than protecting the job, which the
-  comment above it now says. Measured on pipeline `2762854030`: `build_app`,
-  `test_app`, `e2e_test`, `build_image` and four of five scanners all succeeded, the
-  image was built and pushed, and the deploy was cancelled without ever starting.
-  `alert_pipeline_failure` was cancelled in the same sweep, which is why it was
-  quiet rather than loud.
-
-  Now set to `interruptible`, so the job's own declared value decides. The build,
-  test and scan jobs that carry `interruptible: true` still get cancelled and re-run
-  on the newer pipeline; `deploy_production` and `alert_pipeline_failure` are no
-  longer eligible.
-
-  **`deploy_review` gains `interruptible: true` explicitly**, because it is the one
-  deploy that *should* be abandoned when superseded — nobody opens a review app for
-  a commit two pushes old, and without the key it would have inherited the
-  protection meant for production and run every stale `helm upgrade` to completion.
-  Cancelling it is safe: `--atomic` is already set and helm rolls back on SIGTERM,
-  so the release does not wedge. `stop_review` keeps the default deliberately — a
-  teardown a human clicked must finish.
-
-  Nothing can double-deploy: `resource_group: production` still
-  serialises the two, and with **Prevent outdated deployment jobs** on, an older
-  deploy reaching the runner after a newer one fails visibly as `failed outdated
-  deployment job` instead of overwriting it. **No operator action required** — this
-  is CI configuration only, with no effect on the application or its data.
-
 ### Security
 
 - **Freezing an account now actually stops it writing (#220).** Revoking somebody
