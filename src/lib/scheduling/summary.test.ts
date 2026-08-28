@@ -89,8 +89,8 @@ describe("scheduleSummary — the feasible case", () => {
 //
 // measured under node:22-alpine (ICU 78.2), the image test_app and the build both
 // run. So anything that counts the month's letters passes for eleven months of the
-// year and reds for the twelfth. e2e/smoke/schedule-menu.spec.ts:123 counted them,
-// and because e2e_test sits in the `build` stage while deploy_production sits in
+// year and reds for the twelfth. e2e/smoke/schedule-menu.spec.ts counted them, and
+// because e2e_test sits in the `build` stage while deploy_production sits in
 // `deploy`, its September red does not merely fail a test — it skips the
 // production deploy, silently.
 //

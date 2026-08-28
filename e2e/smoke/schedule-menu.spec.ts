@@ -119,10 +119,10 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   //
   // The letter classes are unbounded, deliberately. They used to be pinned to a
   // count of three, and the one on the month was a wall-clock timebomb: en-GB
-  // abbreviates
-  // September to "Sept", four letters, and every other month to three, so the
-  // assertion passed for eleven months and reddened the `build` stage for the
-  // twelfth — which skips deploy_production entirely (#271's class).
+  // abbreviates September to "Sept", four letters, and every other month to
+  // three, so the assertion passed for eleven months and reddened the `build`
+  // stage for the twelfth — which skips deploy_production entirely (#271's
+  // class).
   //
   // What this still guarantees is the seam, which is all it was ever for: anchored
   // `^…$`, so the whole raw textContent is the literal copy below and nothing else,
