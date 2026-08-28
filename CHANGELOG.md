@@ -29,7 +29,153 @@ operators upgrading a self-hosted instance don't get surprised.
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+## [0.6.0] - 2026-08-21
+
+**The app stops failing quietly.** Every inbox write, the capture bar and the
+focus timer now say so when something does not land, instead of leaving a row
+unchanged or reporting a save that never happened — and a piece of bookkeeping
+that fails after the write no longer claims the work itself failed. Alongside
+that: the focus timer plays the full lo-fi catalog and remembers named
+playlists, the inbox gained notes, an offline capture queue and an optional
+shopping list, you can subscribe to your own schedule from a calendar app, the
+app follows your device's colour scheme, and the task row fits a 360px phone
+again. Underneath, fifteen database migrations — five of them carrying data, so
+read the upgrade notes before deploying.
+
+### ⚠️ Upgrade notes
+
+- **This release migrates the database. Fifteen Prisma migrations run before the
+  app container starts** — on Kubernetes via the `migrate` initContainer, on
+  Docker Compose via the `migrate` service. Take a backup first. The set: the
+  per-user calendar feed (`CalendarFeed`, #154), `GoogleAuth.userId SET NOT NULL`
+  (#122, described below), the focus-sound category column and its replacement by
+  an array (#70, #180), task and step notes (#44), `BrainDumpItem`'s note and the
+  three schedule-intent columns (#186 / #179), named focus playlists
+  (`FocusPlaylist`, #185), the shopping list and its inbox summary row
+  (`ShoppingItem`, `ShoppingSummary`, #199), `(taskId, order)` UNIQUE on `Step`
+  (#245), `User.displayName` and `Settings.focusQuickAccess` (#252),
+  `BrainDumpItem.clientKey` (#175), the per-day engagement ledger
+  (`EngagementDay`, #233) and its backfill, and the collapse of two aging
+  thresholds into one hours column (#261).
+  **Five of the fifteen carry data statements** rather than schema alone —
+  `settings_focus_sound_categories` (#180), `google_auth_user_id_not_null`
+  (#122), `step_task_order_unique` (#245), `engagement_day_backfill` (#233) and
+  `aging_hours_single_source` (#261) — and those five are the ones worth reading
+  the notes for.
+- **An orphaned Google credential is destroyed by this upgrade, and the member it
+  belonged to has to reconnect (#122).** `GoogleAuth.userId` becomes `NOT NULL`,
+  which is the enforce half of the repair/enforce pair #118 deliberately split
+  across two releases: v0.5.0 could not take it, because `SET NOT NULL` applied
+  during a rolling update rejects the write the *old* pods are still making, and
+  the inbox would have 500ed for the length of the rollout. `SET NOT NULL`
+  re-validates every existing row, so one orphan would abort the statement and
+  wedge `prisma migrate deploy` partway through the release — the migration
+  therefore deletes any `userId IS NULL` row first, and **logs each one it removed
+  with its id and `updatedAt`, at `WARNING` level**. On an instance that came
+  through v0.5.0 this matches zero rows and prints a `NOTICE` saying so. A
+  non-zero count is a bug report, not routine cleanup: it means something wrote an
+  orphan after #118. Nothing user-reachable is lost either way — a NULL-`userId`
+  credential is unreachable, unrevocable and uncascadable, so the owning member
+  already saw "Not connected" — but **if you see that warning, go to Settings →
+  Integrations and connect Google again.**
+- **Your focus-sound setting is rewritten in place, and it needs no action
+  from you (#180).** `focusSound` stops being a track id and becomes a plain
+  switch (`off` / `on`), so every workspace that was not `off` is set to `on`, and
+  the new `focusSoundCategories` array is derived in the same migration — from the
+  single category slug #70 stored, or, where that was never set, from the `lofi_*`
+  track id the workspace was playing. The picker comes back on the category it was
+  already on. `Settings.focusSoundCategory` is dropped afterwards, and the new
+  array carries a containment CHECK so a hand-edited unknown slug is still
+  rejected by the database rather than by the app.
+- **Steps that shared a position are renumbered before the new UNIQUE index goes
+  on (#245).** `(taskId, order)` becomes UNIQUE on `Step`, and an index cannot be
+  created over rows that already violate it — so the migration repairs first. For
+  each colliding pair the oldest row keeps its position (ties broken by
+  `createdAt`, then `id`) and the rest are moved to the end of that to-do's
+  sequence, then `Step.total` is corrected to the real count on every to-do it
+  touched. **No step is deleted**, but a to-do that was carrying duplicates will
+  list its steps in a different order afterwards. On an instance that never hit
+  the double-press race described under Fixed, this matches zero rows.
+- **The two aging thresholds become one, and your minutes value is carried
+  across (#261).** `Settings` carried two answers to "is this item aging?" —
+  `agingThresholdMinutes` (default 240) and `agingHours` (default 4) — in
+  different units, both editable, nothing reconciling them. The minutes column is
+  dropped, but not before its value is converted to the nearest whole hour,
+  floored at 1, and **only where it had been moved off its own default while
+  `agingHours` was still on its** — so a workspace that had deliberately set both
+  keeps the hours value it chose. 90 minutes becomes 2h. The same migration drops
+  the two demo overrides that rescaled aging and the daily round-up into seconds
+  so hours of behaviour could fire live on stage (`Settings.demoOverrideSeconds`,
+  `Settings.roundupDemoOverride`), and five single-column indexes that were each
+  a prefix of a wider index already on the same model (#208) — every read they
+  served is served by the wider one, and writes get cheaper.
+- **The engagement ledger is backfilled from rows that already exist (#233)**, in
+  its own migration after the schema one, so a failure there leaves the schema
+  change intact rather than stranded behind a P3009.
+- **No new *required* environment variables, and none removed.** Two optional
+  groups arrive: **`FOCUS_CATALOG_ORIGIN`** (Helm: `focus.catalogOrigin`) for the
+  streamed lo-fi catalog, and **`B2_BUCKET` / `B2_PREFIX` / `B2_KEY_ID` /
+  `B2_APP_KEY`** in `.env.prod` for the Compose stack's second backup destination
+  (Helm: `backup.b2.*` plus `secret.b2KeyId` / `secret.b2AppKey`, off by default).
+  Both are described in full under Added. The Compose `backup` crontab line
+  changes from `run --rm backup` to `run --rm backup-upload` if you take the
+  second destination.
+- **The pinned Postgres image moves to 16.15.**
+  `charts/dlectroflow/values.yaml` is the one file that names the new tag, up
+  from `16.14`; the three pins in `docker/docker-compose*.yml` and the two in
+  `.gitlab-ci.yml` pin the same image by digest under the bare `postgres:16` tag,
+  so they move with it without the tag changing. A patch bump within the same
+  major; no action beyond the usual pull.
+
 ### Added
+
+- **The app follows your device's colour scheme, and the Appearance setting is
+  now three-state (#85).** The app never read `prefers-color-scheme` anywhere: the
+  entire theme bootstrap was `localStorage.getItem('df-theme') === 'dark'` in
+  `src/app/layout.tsx`, with no OS fallback, so **a first visit always landed on
+  light whatever the device was set to** — and an installed home-screen app, which
+  gets its own storage jar, started on the light default *on every launch*, a
+  241-luminance-unit jump from the `#0a0510` splash to the `#fdf6fa` light
+  background. Settings → Appearance now offers **Follow my system** / **Light** /
+  **Dark**, defaulting to the first. Because macOS, iOS, Windows and Android all
+  already switch appearance on their own schedule, following them *is* the
+  "automatic with time of day" the issue asked for; there is no in-app scheduler.
+
+  Anyone who has already pressed the toggle keeps their choice — `light` and
+  `dark` are the only values shipped code has ever written and both are honoured;
+  anything else falls back to `system`. `<html>` now carries two facts:
+  `class="dark"` is the **resolved** theme, `data-theme` is the **preference**,
+  because the class alone can no longer express the setting. The header keeps its
+  two-state button, which writes an explicit override keyed off the resolved
+  theme, so one press always gives the other theme. `ThemeSync`
+  (`src/components/theme-sync.tsx`) sits in the **root** layout so an OS switch
+  mid-session is followed on `/login`, `/privacy` and `/terms` too, which render
+  outside the `(app)` group and have no header.
+
+  **The bootstrap is tested by being executed.** `src/lib/theme.ts` builds the
+  `<head>` script as a string from the same constants the components read, and
+  `theme.test.ts` runs that string across every stored value × both OS settings,
+  plus private mode (storage throws) and a browser with no `matchMedia`;
+  `layout.test.tsx` asserts the `<head>` inlines *that same string*, so the tested
+  half and the shipped half cannot diverge. The contrast gate was strengthened in
+  the same pass: every scan now asserts the theme actually applied before axe
+  runs, and `setTheme` emulates `prefers-color-scheme` to the **opposite** of the
+  theme requested. Proof that matters: with the override deliberately broken, all
+  11 dark tests failed on the applied-theme assertion **and axe reported no
+  contrast violation on any of them** — so before this change all 11 would have
+  passed green while scanning a light page.
+
+  **The iOS home-screen icon is opaque (#254, folded in here).**
+  `src/app/apple-icon.png` shipped at 180x180 with **25,054 of its 32,400 pixels
+  fully transparent (77.3%)**, and iOS composites a transparent home-screen icon
+  against **black** — so adding dlectroflow to an iPhone home screen produced a
+  black square with a small mark in it. It had been like that since #13/#40, and
+  nothing could see it: Next emits the `<link rel="apple-touch-icon">` from the
+  file's mere existence, so every check in the repo was satisfied by a file that
+  rendered wrong. `src/app/apple-icon.test.ts` now asserts the **absence of an
+  alpha channel** rather than a transparency percentage, because a PNG with no
+  alpha channel and no `tRNS` chunk cannot be transparent — the guarantee is
+  structural and there is no threshold to re-argue at the next regeneration.
 
 - **The task row's action bar fits a phone (#253).** At 360px the row had grown to
   roughly seven stacked bands of controls. This is a **height** fix and not a
@@ -109,6 +255,21 @@ operators upgrading a self-hosted instance don't get surprised.
   **`/privacy` has changed and its effective date has moved**: text you typed is
   now stored in the browser, which it never was before, so the notice names both
   stores and gives the retention as three triggers.
+
+- **Typing `{` in a brain dump closes the brace for you (#201).** The note syntax
+  is a trailing `{…}` group, and on a phone `{` and `}` are two or three taps deep
+  in the symbol layer — real friction on the one control that has to be faster
+  than the thought it captures, paid on every note by the people who use the
+  feature most. `{` now inserts `{}` with the caret between them, or wraps the
+  selection; `}` types over a `}` that is already there rather than adding a
+  second; and Backspace between the pair removes both, so the keystroke that
+  would have undone the `{` alone undoes what the auto-close added. It refuses
+  entirely when the field already ends in a brace group, because only the last
+  group is the note and silently creating a second one would reassign which text
+  becomes it. The rule is pure and lives in
+  `src/lib/braindump-note-syntax.ts` beside `inlineNoteInsertion`, which owns the
+  **Add a note** button's behaviour, so the keyboard and the button cannot
+  disagree about a field that already contains a trailing group.
 
 - **A name in the header, and one-tap access to the timer and the shopping list
   (#252).** The bar greeted people by their **provider username** — the
@@ -659,6 +820,32 @@ operators upgrading a self-hosted instance don't get surprised.
   caught the worst of these, and its "new Prisma **model**" row now covers a new
   **field** — which is how three of them got in.
 
+- **The in-app `/help` page was audited line by line against the tree, and the
+  drift it found is fixed.** Every claim was checked against the component that
+  implements it rather than against the help text's description of it. Corrected:
+  the breathing pacer is **Ring-style only** — `timer-visual.tsx` reaches the
+  breathing markup in its `ring` branch alone, and an unset style resolves to
+  `mug` on the playful voice, so for one whole voice the documented default
+  behaviour was the one thing that could not happen; "manage reminders" named no
+  real section (it is **Notifications**, and every toggle in it is inert until the
+  browser grants permission); and the colour scheme is described as three-state,
+  not "light and dark", after #85 landed while this audit was in flight.
+
+  Three of the app menu's seven destinations were **absent from the page
+  entirely** and now have sections: **Library** and **Activity** (the
+  getting-started list promised the reader they would "earn points toward your
+  streak" and never gave that payoff an address — linked by their menu labels, not
+  their routes, because `/dashboard` renders as **Activity**), **shopping-list
+  mode** (`Settings.shoppingList` defaults false and `/shopping` answers
+  `notFound()` while it is off, so the switch is the only thing that reveals the
+  feature exists), and **Appearance** and **Integrations** under `Voice & settings`,
+  which had named three of Settings' eleven sections. Appearance names
+  **Atkinson Hyperlegible** and **OpenDyslexic** by name — someone who cannot
+  comfortably read the app is exactly who opens a help page. **Moving inbox items
+  between lists** is now documented as both the drag *and* its non-pointer
+  `Move to` equivalent, because documenting only the drag describes the app to
+  whoever can perform it (WCAG 2.1.1 / 2.5.7).
+
 - **The footer's Privacy, Terms and Source links now open in a new tab (#200).**
   That footer sits under every screen, the inbox included, and the old
   behaviour took you away from the page you were on. The reasoning written
@@ -671,6 +858,47 @@ operators upgrading a self-hosted instance don't get surprised.
   says so out loud: its name reads "Privacy (opens in a new tab)". Sighted
   users watch the tab appear; anyone using a screen reader is told, which is
   the part that would otherwise be missing.
+
+- **Inline code, keys and file paths now render as a chip instead of running into
+  the prose around them (#182).** The report was words jammed together on `/help`,
+  and the sweep found two different causes behind the one symptom. The first: the
+  page's `<kbd>` elements carried no class and there was no global `kbd`/`code`
+  rule at all, so Tailwind's preflight left them at `font-size: 1em` in the mono
+  face with no padding and no edge — twenty sites across seven files, ten of them
+  wearing a `text-xs` copied site to site down `privacy/page.tsx` that set the
+  size and never the separation. The fix is **one base rule in
+  `src/app/globals.css`, not a `<Kbd>` component**, because a component only fixes
+  the sites that remember to opt in; all twenty are corrected by editing one file
+  and the twenty-first cannot be written wrong.
+
+  The chip's two surfaces are **precomputed per theme rather than a
+  `color-mix()`**. They were a mix, which reads better, and it shipped a hazard:
+  Lightning CSS cannot evaluate a mix of two custom properties at build time and
+  emits a fallback of the first colour neat — `background-color: var(--foreground)`
+  under `color: var(--foreground)`, which is 1:1, text not merely low-contrast but
+  literally invisible. Measured on this palette the chips read 11.77:1 (light) and
+  10.29:1 (dark) for text, past AAA.
+
+  The second cause is its own guard: JSX drops a newline adjacent to a tag but
+  keeps one between two words, and **Prettier writes the broken form itself** when
+  a line grows past `printWidth: 80` — so the defect lands in a diff that looks
+  like formatting, and axe has no rule for it. `src/lib/jsx-text-weld.ts` is a
+  pure, `fs`-free AST scan in the same shape as `a11y-class-hygiene`. Zero live
+  welds across every non-test `.tsx` file in `src/`, and the test measures its own
+  sensitivity in CI by injecting the exact defect into every real source with the
+  opposite shape: **181 of 190 caught**, every miss inspected and documented.
+
+- **Settings and Help no longer open with two identical back controls (#172).**
+  Each page rendered a page-level `← Back` above the `<h1>` and a second, identical
+  one about 40px below it in the sticky "Jump to…" bar, pointing at the same
+  place. The duplicate was not an accident — #131 folded a copy into the sticky bar
+  because the page-level control scrolls away with the header and left a reader
+  stranded at the bottom of a long page — but the bar is `sticky top-0`, so both
+  are on screen at scroll position zero and the pair only ever rendered together.
+  The **sticky** copy is the one kept, because it is present at *every* scroll
+  position including zero. `<BackLink>`'s `page` variant is untouched: Library,
+  Activity, the task detail page and the breakdown chat still use it, and none of
+  them has a sticky nav.
 
 - **Inbox drag now runs on the browser's own drag and drop (#163).**
   `@dnd-kit/core` is replaced by `@atlaskit/pragmatic-drag-and-drop`. Dragging a
@@ -853,6 +1081,32 @@ operators upgrading a self-hosted instance don't get surprised.
   re-schedule that times out will not recreate the task it was updating, which
   would have left two entries and two calendar blocks for one step.
 
+- **A failed bookkeeping write no longer reports that your work did not save
+  (#257).** A write commits in its own transaction and then a *consequence of that
+  success* — points, a badge, a streak touch, a Google sync — runs on the next
+  line with nothing atomic between them and nothing catching. The exception
+  propagated out of the server action, so you were told the work failed over work
+  that is in the database, and your next move was to press the button again. The
+  rule, from `!330`'s review: **the `try` governs the write; anything after it is a
+  consequence of success and cannot un-write the row.**
+
+  The sweep found **five sites, not the two the issue named** — `confirmBreakdown`
+  and all three of its post-commit statements, and `completeStep`, `completeFocus`,
+  `markTaskCompleted` and `beginFocus` in `src/app/actions/focus.ts`. At
+  `completeStep` this is a **data-integrity fix, not a message fix**: the guard is
+  `if (!step || step.done) return`, so once the step write lands every later press
+  returns early, and a propagating payout left the to-do **Active with zero open
+  steps and no press that could ever finish it**, with three revalidations unrun.
+  At `completeFocus` a retry was not idempotent either — `sessionCheck` matches an
+  already-closed session, so throwing invited a **double-pay** rather than
+  preventing one.
+
+  One shared wrapper, `bestEffort(tag, workspaceId, work)` in
+  `src/lib/best-effort.ts`, rather than five copies: one `bestEffort` per
+  consequence, so one failure cannot cancel the others, and every failure is
+  recorded under its own tag (`breakdown_streak_touch_failed`,
+  `task_complete_points_failed`, …) so an operator can see what did not settle.
+
 - **Completing the same to-do from two places at once no longer pays for it twice
   (#233).** Both payouts were guarded by a read taken before the write, so two
   simultaneous completions of one to-do both saw it as not yet complete, both passed
@@ -876,6 +1130,33 @@ operators upgrading a self-hosted instance don't get surprised.
   neighbouring writers already take, because inverting it in one writer is how a
   deadlock gets built. The three local writes became one transaction as well, so a
   to-do can no longer be left completed with its task still active.
+
+- **Every inbox write now says so when it does not land (#225).** `run()` in
+  `inbox-view.tsx` was four lines with no `try`: a rejected server action surfaced
+  as an unhandled rejection inside the transition and the user was told nothing —
+  the row simply did not change. **Twenty-seven call sites across ten actions**,
+  with no `error.tsx` anywhere in `src/` to catch them at the framework level
+  either. `run()` itself is hardened rather than each call site, and it now
+  *requires* a logical target (row id + field) and the words the write was about,
+  so a new call site cannot opt out of the part that makes the notice mean
+  something.
+
+  **One notice slot at the top of the list, plus a focus move**, rather than a
+  per-row message. The inbox is a long bucketed list whose sections truncate
+  behind "See all" and whose Done bucket shows a window, so a per-row message is
+  silent exactly when the row is not rendered — including the case a failed delete
+  is most likely to arrive in. One slot works because the notice **quotes the
+  item's own text**, which answers "which row" without the row being on screen;
+  the focus move is what stops the notice itself being off screen, since a focused
+  control is scrolled into view by the browser. Focus returns to the control that
+  started the write, or to the capture field when that control has gone
+  (WCAG 2.4.3), and is not taken at all if you moved focus during the wait.
+  Failures are keyed by `{ id, field }` rather than by closure identity, carry
+  sequence numbers so a late-settling older attempt cannot overwrite a newer
+  record, and a second press at the same target is **absorbed into the write
+  already in flight** rather than firing a duplicate — which matters beyond
+  tidiness for `keepAsTask`, where two in flight leave an orphaned `Task` row
+  nothing can reach.
 
 - **Scheduling a single-task to-do no longer makes a second copy of it (#244).**
   Creating the task and linking the item to it were atomic with each other, but the
@@ -1191,6 +1472,29 @@ operators upgrading a self-hosted instance don't get surprised.
   was made and not kept, because a failure there left the row looking untouched
   with nothing said.
 
+- **The capture bar no longer says "captured ✓" before the write succeeds
+  (#210).** `submit()` cleared the input and set the confirmation
+  **unconditionally**, before and regardless of the server call, and `run()` had
+  no `try`/`catch` — so a rejected `createBrainDumpItem` told you your words were
+  saved after having destroyed the only copy of them. Capture is the one
+  irreversible loss in the app; every other inbox action works on an `id` that
+  exists because the server already has the row. The failure path had **zero**
+  coverage: every existing spec mocked the action as resolving.
+
+  The input still clears on press, so the instant-capture feel is unchanged, and
+  the words are **restored on failure** — but only into a field you have not since
+  typed into. `captured ✓` is now contingent on the write resolving, a
+  `role="alert"` notice **quotes the words it could not save** so they survive even
+  when the field has moved on, and the wait is bounded so a hung pod surfaces
+  instead of looking exactly like the original bug. Focus is deliberately **not**
+  moved to the notice: the capture input never unmounts and is where you are still
+  typing, so taking focus would interrupt you and fight the restored text
+  (WCAG 3.2.2). Retry uses `aria-disabled` rather than `disabled`, because a
+  native disabled element cannot hold focus and pressing it would drop you to
+  `body` (WCAG 2.4.3). Where the deployment has moved on, the control is a
+  **Reload** instead, because a retry would re-post an action id the server has
+  forgotten.
+
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete
   the only filled button in the row — so the leading, most prominent, most
@@ -1313,6 +1617,18 @@ operators upgrading a self-hosted instance don't get surprised.
   invited". Error logging is again untouched — the test that proves the four are
   silent also proves a genuine database failure still prints.
 
+- **Pasting the wrong provider's API key into Settings is now refused at save time
+  (#177).** A member being onboarded pasted the wrong provider's key into their own
+  LLM key field. It saved, it decrypted, it went to Anthropic, and Anthropic
+  answered `401 invalid x-api-key` — and two individually reasonable behaviours
+  combined to hide that completely, so Settings went on showing the key as present
+  while every breakdown failed. `src/lib/llm/key-shape.ts` applies an
+  **asymmetric** check: a key whose shape is recognisably *another* provider's is
+  rejected, and a key it merely does not recognise is accepted, because the
+  failure mode of guessing wrong in that direction is refusing a key that works.
+  Every message the panel shows is a fixed label from that module's table, never
+  anything derived from the key itself.
+
 - **The WCAG-AA failures the accessibility suite could not see, and the gate that
   now catches them (#109, #117).** Both issues are one structural blind
   spot: the automated gates only measure what is painted during the scan, so a
@@ -1424,6 +1740,15 @@ operators upgrading a self-hosted instance don't get surprised.
   operator-set rather than attacker-set, so exploitation required an operator to
   paste a malformed value — but the guard was there to make that safe and did not.
 
+- **`js-yaml` 4.3.0 → 4.3.1 and `nanoid` 3.3.16 → 3.3.18, both lockfile-only
+  (#192).** Two findings sat `DETECTED` on `main` with identical uuids on `main`'s
+  own pipeline and on every open MR's head pipeline, which is what marks them
+  inherited rather than introduced — and an inherited HIGH still scores as *new*
+  against an unfinished baseline, so it was blocking merge requests that changed
+  no dependency manifest at all. Both dependents' declared ranges already admitted
+  the patched versions, so `package.json` is untouched and neither needed
+  dismissing.
+
 - **`.ics` text values now escape every line terminator, not just `\n` (#154).**
   `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
   5545 §3.3.11 permits no control character but HTAB, and a literal CR inside a
@@ -1446,6 +1771,19 @@ operators upgrading a self-hosted instance don't get surprised.
   The test that should have caught it could not: it stripped `\r\n` and then
   looked only for `\n`, on a fixture containing no line terminator at all, so it
   passed with the defect present. It now asserts on text that would leak one.
+- **Twelve dependency advisories cleared, one of them in the production tree
+  (#165).** `main` was carrying twelve dependency-scanning findings that no
+  pipeline had reported, because the advisory database moved after `main` was last
+  scanned — six HIGH, and nothing in any open MR had introduced them: the same
+  commit scanned as 0 findings at 15:33Z and 12 at 23:43Z on 2026-08-03 with an
+  unchanged dependency tree. The production-reachable one is **`postcss` 8.5.20 →
+  8.5.25** (`CVE-2026-69153` / `GHSA-fxqj-rqcc-2cmp`, MEDIUM), reached via `next`
+  and now held by a top-level `overrides` entry. `package.json` and
+  `package-lock.json` only; no source file is touched. The zero afterwards is
+  evidenced rather than asserted — the identical query returns **12** on the
+  pre-bump pipeline and **0** on the post-bump one, which matters because a
+  pipeline-level query against `main` itself returns 0 by design.
+
 - **The dependency bot can no longer walk a security override back into a CVE
   range (#161).** `brace-expansion` is held at the patched `^5.0.8` by a
   top-level npm `override` because CVE-2026-14257 / GHSA-mh99-v99m-4gvg has no
@@ -2652,7 +2990,8 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.5.0...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.6.0...main
+[0.6.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.5.0...v0.6.0
 [0.5.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.4.0...v0.5.0
 [0.4.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.3.0...v0.4.0
 [0.3.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...v0.3.0
