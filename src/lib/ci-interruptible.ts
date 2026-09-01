@@ -102,7 +102,18 @@ export type InterruptibleDeclaration =
   /** `interruptible: true` — safe to cancel. */
   | { kind: "true" }
   /** `interruptible: false` — the default, said out loud. */
-  | { kind: "false" };
+  | { kind: "false" }
+  /**
+   * The key is there with a value this module will not interpret.
+   *
+   * Not folded into `absent`, because YAML 1.1 — which is what GitLab's Ruby
+   * parser reads — treats `yes`, `on` and `y` as **true**. Reporting
+   * `interruptible: yes` on `deploy_production` as `absent` would be a guard
+   * passing a job that GitLab considers cancellable: the precise silent false
+   * pass this module exists to prevent. `interruptiblePolicyGaps` flags it in
+   * both directions rather than guessing which way it resolves.
+   */
+  | { kind: "unknown"; value: string };
 
 /**
  * Read a job's own `interruptible:` declaration, or `null` if the job is not in
@@ -137,9 +148,10 @@ export function parseJobInterruptible(
     if (indent.length !== 2) continue;
     if (value === "true") return { kind: "true" };
     if (value === "false") return { kind: "false" };
-    // Anything else is neither — report it as present-but-unreadable by falling
-    // through to `absent` would be a lie, so treat it as a gap-worthy value.
-    return { kind: "absent" };
+    // Deliberately NOT `absent`. See `InterruptibleDeclaration`: YAML 1.1 reads
+    // `yes`/`on`/`y` as true, so treating an uninterpreted value as "no key"
+    // would report an interruptible `deploy_production` as safe.
+    return { kind: "unknown", value };
   }
   return { kind: "absent" };
 }
@@ -194,12 +206,16 @@ export function interruptiblePolicyGaps(gitlabCiYml: string): string[] {
       );
       continue;
     }
-    if (declared.kind === "true") {
-      const why =
-        job.startsWith(".")
-          ? `it is extended by ${MUST_FINISH_JOBS.join(" and ")}, so this unprotects them while their own blocks still read absent`
-          : `a second merge or push would cancel it`;
-      gaps.push(`${job} is interruptible: true but must finish — ${why}`);
+    // `absent` and `false` are both fine here and mean the same thing to GitLab.
+    // `unknown` is not: YAML 1.1 reads `yes`/`on`/`y` as true, so an
+    // uninterpreted value has to be reported rather than assumed harmless.
+    if (declared.kind === "true" || declared.kind === "unknown") {
+      const why = job.startsWith(".")
+        ? `it is extended by ${MUST_FINISH_JOBS.join(" and ")}, so this unprotects them while their own blocks still read absent`
+        : `a second merge or push would cancel it`;
+      const value =
+        declared.kind === "true" ? "true" : `${declared.value} (uninterpreted)`;
+      gaps.push(`${job} is interruptible: ${value} but must finish — ${why}`);
     }
   }
 

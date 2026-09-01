@@ -35,7 +35,10 @@ function shapedFile(
     "workflow:",
     ...(over.mode === null
       ? []
-      : ["  auto_cancel:", `    on_new_commit: ${over.mode ?? "interruptible"}`]),
+      : [
+          "  auto_cancel:",
+          `    on_new_commit: ${over.mode ?? "interruptible"}`,
+        ]),
     "  rules:",
     '    - if: "$CI_COMMIT_TAG"',
     ".deploy_base:",
@@ -75,6 +78,22 @@ describe("parseJobInterruptible", () => {
     expect(parseJobInterruptible(shapedFile(), "deploy_production")).toEqual({
       kind: "absent",
     });
+  });
+
+  it("does not read a YAML 1.1 truthy word as an absent key", () => {
+    // GitLab parses this file with Ruby's YAML, which is 1.1: `yes`, `on` and `y`
+    // are all **true**. Folding them into `absent` would report an interruptible
+    // `deploy_production` as safe — a guard passing the exact defect it exists to
+    // catch, and silently, which is the only kind that survives.
+    for (const word of ["yes", "on", "y", "True", "1"]) {
+      expect(
+        parseJobInterruptible(
+          shapedFile({ production: word }),
+          "deploy_production",
+        ),
+        word,
+      ).toEqual({ kind: "unknown", value: word });
+    }
   });
 
   it("returns null for a job that is not in the file", () => {
@@ -136,9 +155,9 @@ describe("parseJobInterruptible", () => {
 describe("parseAutoCancelOnNewCommit", () => {
   it("reads the mode out of the workflow block", () => {
     expect(parseAutoCancelOnNewCommit(shapedFile())).toBe("interruptible");
-    expect(parseAutoCancelOnNewCommit(shapedFile({ mode: "conservative" }))).toBe(
-      "conservative",
-    );
+    expect(
+      parseAutoCancelOnNewCommit(shapedFile({ mode: "conservative" })),
+    ).toBe("conservative");
   });
 
   it("returns null when the workflow block declares no auto_cancel", () => {
@@ -167,6 +186,18 @@ describe("interruptiblePolicyGaps", () => {
     const gaps = interruptiblePolicyGaps(shapedFile({ production: "true" }));
     expect(gaps.join("\n")).toMatch(/deploy_production/);
     expect(gaps).toHaveLength(1);
+  });
+
+  it("flags an uninterpreted value on a must-finish job", () => {
+    // The companion to the parser case above: `yes` is true to GitLab, so this
+    // must be a gap and not a pass. Both directions are covered because a
+    // must-abandon job with `yes` is equally unreadable.
+    const gaps = interruptiblePolicyGaps(shapedFile({ production: "yes" }));
+    expect(gaps.join("\n")).toMatch(/deploy_production.*yes.*uninterpreted/);
+    expect(gaps).toHaveLength(1);
+    expect(
+      interruptiblePolicyGaps(shapedFile({ review: "yes" })).join("\n"),
+    ).toMatch(/deploy_review/);
   });
 
   it("flags interruptible: true on a shared deploy template", () => {
@@ -275,7 +306,9 @@ describe("the repo's own .gitlab-ci.yml", () => {
     const annotated = gitlabCiYml
       .split("\n")
       .map((line) => {
-        if (/^(  interruptible:\s*\S+|    on_new_commit:\s*\S+)\s*$/.test(line)) {
+        if (
+          /^(  interruptible:\s*\S+|    on_new_commit:\s*\S+)\s*$/.test(line)
+        ) {
           applied += 1;
           return `${line}   # why`;
         }
@@ -283,11 +316,24 @@ describe("the repo's own .gitlab-ci.yml", () => {
       })
       .join("\n");
 
+    // A floor with headroom, not a census. "More than nothing was found" and
+    // "this is how many there are" are different assertions and only the second
+    // goes stale — and an exact count here would red this test whenever an
+    // unrelated job's key changed, blaming #226 for something else entirely.
+    // There were 11 annotatable lines on 2026-09-01.
     expect(
       applied,
-      "expected to annotate every interruptible: line plus on_new_commit: — has the file been reformatted?",
-    ).toBeGreaterThan(10);
+      "expected to annotate several interruptible: lines plus on_new_commit: — has the file been reformatted?",
+    ).toBeGreaterThanOrEqual(6);
     expect(annotated).not.toBe(gitlabCiYml);
+
+    // The floor above says the mutation was substantial; these say it landed on
+    // the two lines the assertions below actually read. Without them the helper
+    // could annotate ten irrelevant lines and still prove nothing.
+    expect(annotated).toContain(
+      `    on_new_commit: ${AUTO_CANCEL_MODE}   # why`,
+    );
+    expect(annotated).toContain("  interruptible: true   # why");
 
     expect(parseAutoCancelOnNewCommit(annotated)).toBe(AUTO_CANCEL_MODE);
     expect(interruptiblePolicyGaps(annotated)).toEqual([]);
