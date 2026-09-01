@@ -197,6 +197,81 @@ describe("readPngPixels: un-filtering", () => {
   });
 });
 
+/**
+ * ⚠️ Greyscale, added after Duo found the gap on `!397`.
+ *
+ * `readPngFacts`'s `countable` predicate accepted colour type 4 (grey+alpha)
+ * while `readPngPixels` rejected everything but RGB and RGBA — so
+ * `readPngFacts` on a grey+alpha PNG **threw** instead of returning facts. Not
+ * reachable from any asset in this repo today, which is exactly why it needed a
+ * test: the first grey source anyone rasterises would have turned
+ * `apple-icon.test.ts` from a guard into an import-time error.
+ *
+ * ⚠️ Duo's suggested remedy — drop colour type 4 from `countable` — is declined,
+ * and the reason is the whole point of these cases. `fullyTransparentPixels:
+ * null` MEANS "transparency is impossible here"; that is the contract
+ * `apple-icon.test.ts` reads it under ("0 (no alpha channel)"). A grey+alpha PNG
+ * can be fully transparent, so reporting `null` for one would be a false
+ * negative dressed as a graceful degradation. Supporting the colour type is two
+ * lines and is the honest fix.
+ */
+describe("readPngPixels: greyscale colour types", () => {
+  it("reads grey+alpha (type 4) as 2 channels and counts its transparency", () => {
+    const png = synthesisePng({
+      width: 8,
+      height: 8,
+      colourType: 4,
+      alphaAt: (x) => (x < 2 ? 0 : 255),
+    });
+    const pixels = readPngPixels(png);
+    expect(pixels.channels).toBe(2);
+
+    const facts = readPngFacts(png);
+    expect(facts.colourType).toBe(4);
+    expect(facts.hasAlphaChannel).toBe(true);
+    // 2 of 8 columns, 8 rows. `null` here would be the false negative.
+    expect(facts.fullyTransparentPixels).toBe(16);
+  });
+
+  it("reads plain grey (type 0) as 1 channel and reports transparency impossible", () => {
+    const png = synthesisePng({ width: 4, height: 4, colourType: 0 });
+    expect(readPngPixels(png).channels).toBe(1);
+    const facts = readPngFacts(png);
+    expect(facts.hasAlphaChannel).toBe(false);
+    // Correct here, and for the right reason: colour type 0 has nowhere to put
+    // transparency, so "impossible" is true rather than a shrug.
+    expect(facts.fullyTransparentPixels).toBeNull();
+  });
+
+  it("recovers grey+alpha samples through the Paeth filter too", () => {
+    // The filter predictors step back by BYTES-PER-PIXEL, so a 2-channel image
+    // exercises a different stride than the 3- and 4-channel cases above.
+    const png = synthesisePng({
+      width: 5,
+      height: 4,
+      colourType: 4,
+      filter: 4,
+      pixelAt: (x, y) => [
+        (x * 41 + y * 17) & 0xff,
+        0,
+        0,
+        (x * 23 + y * 7) & 0xff,
+      ],
+    });
+    const { data, channels } = readPngPixels(png);
+    expect(channels).toBe(2);
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 5; x++) {
+        const at = (y * 5 + x) * 2;
+        expect([data[at], data[at + 1]], `pixel (${x}, ${y})`).toEqual([
+          (x * 41 + y * 17) & 0xff,
+          (x * 23 + y * 7) & 0xff,
+        ]);
+      }
+    }
+  });
+});
+
 describe("synthesisePng: the fixture builder is itself sound", () => {
   it("emits a valid PNG signature", () => {
     expect(synthesisePng({ width: 1, height: 1 }).subarray(0, 8)).toEqual(

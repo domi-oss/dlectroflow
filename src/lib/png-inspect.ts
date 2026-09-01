@@ -19,12 +19,23 @@ import { inflateSync, deflateSync } from "node:zlib";
  *
  * ── Scope, deliberately narrow ──────────────────────────────────────────────
  *
- * 8-bit, non-interlaced, RGB or RGBA. That is what every asset in this repo is,
- * and everything outside it THROWS rather than returning a plausible-looking
- * answer — a silently wrong pixel buffer is worse than no reader, because the
- * assertions built on it would go green. Palette (colour type 3) needs PLTE
- * expansion, 16-bit needs endian handling and Adam7 needs seven passes; none is
- * needed here and each is a way to be subtly wrong.
+ * 8-bit, non-interlaced, and any of the four colour types that need no palette:
+ * grey (0), RGB (2), grey+alpha (4) and RGBA (6). Everything outside that THROWS
+ * rather than returning a plausible-looking answer — a silently wrong pixel
+ * buffer is worse than no reader, because the assertions built on it would go
+ * green. Palette (colour type 3) needs PLTE expansion, 16-bit needs endian
+ * handling and Adam7 needs seven passes; none is needed here and each is a way to
+ * be subtly wrong.
+ *
+ * ⚠️ The two GREY types are supported because of a real bug, not for
+ * completeness. The first version of this module accepted colour type 4 in
+ * `readPngFacts`'s transparency-counting predicate while `readPngPixels`
+ * rejected it, so `readPngFacts` on a grey+alpha PNG **threw** instead of
+ * returning facts (Duo review, `!397`). Narrowing the predicate instead was
+ * declined: `fullyTransparentPixels: null` MEANS "transparency is impossible
+ * here" — that is the contract `src/app/apple-icon.test.ts` reads it under — and
+ * a grey+alpha PNG can be fully transparent, so `null` for one would be a false
+ * negative dressed up as graceful degradation.
  *
  * ── Kept free of `fs` ───────────────────────────────────────────────────────
  *
@@ -40,10 +51,27 @@ export const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 /** Colour types that carry a per-pixel alpha channel (PNG spec, bit 2). */
 const ALPHA_BIT = 4;
 
-/** PNG colour types this reader can turn into pixels. */
+/**
+ * PNG colour types this reader can turn into pixels, and how many 8-bit samples
+ * each stores per pixel (PNG spec 11.2.2, table 11.1). Colour type 3 (palette)
+ * is deliberately absent — it stores one index per pixel and needs its PLTE
+ * chunk expanded, which nothing here needs and everything here would get wrong.
+ *
+ * The map is the single source of the sample count: the un-filterer steps its
+ * predictors back by exactly this many bytes, so a hard-coded 3-or-4 was the
+ * thing that made grey support a bug rather than an omission.
+ */
+const COLOUR_TYPE_GREY = 0;
 const COLOUR_TYPE_RGB = 2;
-const COLOUR_TYPE_RGBA = 6;
 const COLOUR_TYPE_GREY_ALPHA = 4;
+const COLOUR_TYPE_RGBA = 6;
+
+const SAMPLES_PER_PIXEL: Readonly<Record<number, number>> = {
+  [COLOUR_TYPE_GREY]: 1,
+  [COLOUR_TYPE_RGB]: 3,
+  [COLOUR_TYPE_GREY_ALPHA]: 2,
+  [COLOUR_TYPE_RGBA]: 4,
+};
 
 export type PngFacts = {
   width: number;
@@ -62,7 +90,7 @@ export type PngFacts = {
 export type PngPixels = {
   width: number;
   height: number;
-  /** 3 for RGB, 4 for RGBA. Read it; do not assume 4. */
+  /** 1 grey, 2 grey+alpha, 3 RGB, 4 RGBA. Read it; do not assume 3 or 4. */
   channels: number;
   /** Un-filtered 8-bit samples, `width * height * channels` long. */
   data: Buffer;
@@ -165,13 +193,14 @@ export function readPngPixels(buffer: Buffer): PngPixels {
   if (bitDepth !== 8) {
     throw new Error(`unsupported bit depth ${bitDepth}: only 8 is supported`);
   }
-  if (colourType !== COLOUR_TYPE_RGB && colourType !== COLOUR_TYPE_RGBA) {
+  const channels = SAMPLES_PER_PIXEL[colourType];
+  if (!channels) {
     throw new Error(
-      `unsupported colour type ${colourType}: only 2 (RGB) and 6 (RGBA) are ` +
-        `supported — a palette image would need its PLTE chunk expanded`,
+      `unsupported colour type ${colourType}: only 0 (grey), 2 (RGB), ` +
+        `4 (grey+alpha) and 6 (RGBA) are supported — a palette image would need ` +
+        `its PLTE chunk expanded`,
     );
   }
-  const channels = colourType === COLOUR_TYPE_RGBA ? 4 : 3;
   const stride = width * channels;
   const raw = inflateSync(readChunks(buffer).idat);
   const expected = height * (stride + 1);
@@ -271,7 +300,9 @@ export function synthesisePng({
   pixelAt?: (x: number, y: number) => [number, number, number, number];
 }): Buffer {
   const declaredType = colourType ?? (rgb ? COLOUR_TYPE_RGB : COLOUR_TYPE_RGBA);
-  const channels = declaredType === COLOUR_TYPE_RGBA ? 4 : 3;
+  // Unsupported types still need a plausible stride so the REJECTION paths can be
+  // exercised on a fixture that is otherwise well formed; 3 is the sane default.
+  const channels = SAMPLES_PER_PIXEL[declaredType] ?? 3;
   const stride = width * channels;
 
   // Unfiltered samples first, then encode each row with the requested filter, so
@@ -287,10 +318,18 @@ export function synthesisePng({
         alphaAt?.(x, y) ?? 255,
       ];
       const at = y * stride + x * channels;
-      plain[at] = r;
-      plain[at + 1] = g;
-      plain[at + 2] = b;
-      if (channels === 4) plain[at + 3] = a;
+      // Grey types store ONE luminance sample, and `r` is it — the fixture's
+      // caller passes a 4-tuple whatever the colour type, so the mapping is
+      // named here rather than left for a reader to infer from a stride.
+      if (channels <= 2) {
+        plain[at] = r;
+        if (channels === 2) plain[at + 1] = a;
+      } else {
+        plain[at] = r;
+        plain[at + 1] = g;
+        plain[at + 2] = b;
+        if (channels === 4) plain[at + 3] = a;
+      }
     }
   }
 

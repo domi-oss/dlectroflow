@@ -417,6 +417,16 @@ describe("the generated icons (#277)", () => {
    */
   function furthestDrawn(src: string, mode: "luminance" | "alpha") {
     const { data, width, height, channels } = read(src);
+    // ⚠️ Loud, not lenient. `png-inspect` also reads 1- and 2-channel greyscale
+    // PNGs, and on those the luminance arithmetic below would take the ALPHA
+    // sample for green and read past the pixel for blue — a plausible-looking
+    // wrong number, which is the one thing this file must never produce. Every
+    // icon here is RGB or RGBA; a regeneration that changed that should stop the
+    // suite rather than quietly re-measure the safe zone against nonsense.
+    expect(
+      channels,
+      `${src} decoded to ${channels} channels; the measurement below assumes RGB`,
+    ).toBeGreaterThanOrEqual(3);
     const cx = width / 2 - 0.5;
     const cy = height / 2 - 0.5;
     let furthest = 0;
