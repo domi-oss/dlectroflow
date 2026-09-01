@@ -854,8 +854,14 @@ deploy_review:
   # (non-persistent Postgres, per-deploy secrets) and `auto_stop_in` caps the
   # tail. The window is narrow, too — this job starts only after build+test+e2e,
   # so most cancellations arrive before it has started, which is the case this
-  # key is actually here for. None of that holds for prod, which is why
-  # `deploy_production` keeps the default.
+  # key is actually here for. Measured over the 16 days to 2026-09-01: 0 of 78
+  # completed runs of this job had a new pipeline created inside them, and all 37
+  # cancellations in that period landed before it started. None of that holds for
+  # prod, which is why `deploy_production` keeps the default.
+  #
+  # Recovery, if it ever does wedge: deploy-runbook.md § 20. Short version — the
+  # job goes red (no `allow_failure`), `stop_review` clears it in one click, and
+  # `auto_stop_in` below clears it unattended within 12 hours regardless.
   interruptible: true
   # Serialize helm per review env: a follow-up push otherwise races the previous
   # pipeline's still-running helm op on the same release → "another operation is

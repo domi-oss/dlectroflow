@@ -57,9 +57,29 @@ operators upgrading a self-hosted instance don't get surprised.
   deploy that *should* be abandoned when superseded — nobody opens a review app for
   a commit two pushes old, and without the key it would have inherited the
   protection meant for production and run every stale `helm upgrade` to completion.
-  Cancelling it is safe: `--atomic` is already set and helm rolls back on SIGTERM,
-  so the release does not wedge. `stop_review` keeps the default deliberately — a
+  Cancelling it is **accepted rather than free**, and the trade is stated here
+  because the earlier draft of this entry got it wrong. `--atomic` does start a
+  rollback on SIGTERM, but the container's ten-second grace period is not
+  guaranteed to let it finish, so a cancellation landing mid-upgrade can leave that
+  MR's own release wedged and the next review deploy failing with `another
+  operation (install/upgrade/rollback) is in progress`. The blast radius is one
+  review app: the job goes red rather than quiet, `stop_review` clears it in one
+  click, and `auto_stop_in: 12 hours` clears it unattended regardless.
+  `docs/deploy-runbook.md` § 20 is the recovery. Measured over the 16 days to
+  2026-09-01 the case did not arise — 0 of 78 completed review deploys had a new
+  pipeline created inside them, and all 37 cancellations in that period landed
+  before the job had started. `stop_review` keeps the default deliberately — a
   teardown a human clicked must finish.
+
+- **The cancellation policy is now asserted, not just commented.**
+  `src/lib/ci-interruptible.ts` fails the suite if
+  `workflow:auto_cancel:on_new_commit` drifts off `interruptible`, if
+  `deploy_production` or `stop_review` ever becomes interruptible — including via
+  an `interruptible: true` on the shared `.deploy_base` template, which would
+  unprotect both while each job's own block still read clean — or if
+  `deploy_review` loses its explicit `true`. Under this mode every job's value is
+  load-bearing, and the only thing holding the line was a comment saying "Do not
+  add `interruptible: true` to this job."
 
   Nothing can double-deploy: `resource_group: production` still
   serialises the two, and with **Prevent outdated deployment jobs** on, an older

@@ -1020,3 +1020,67 @@ evaluates a constraint. That is what made the original defect structurally
 incapable of failing anywhere but production. To reproduce: hold the later
 migrations aside, `migrate deploy` to the point before, seed representative rows,
 put them back, `migrate deploy`. The wider class is tracked in #190.
+
+## 20. A review app that will not deploy — `another operation in progress`
+
+`deploy_review` fails with
+`Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress`.
+Quoted inline rather than fenced because every fenced block in this file is shell
+that gets pasted, and `prod-state-alert.test.ts` parses them all with `bash -n` —
+a parenthesised error message is not a subshell.
+
+Helm treats a release that is mid-operation as a pessimistic lock, so this is
+always the same *message* from two different situations, and only one of them
+needs you.
+
+**First, decide which one it is by retrying the job.** That is the whole triage
+step, and it is cheaper than reading anything below.
+
+**It retries green — a concurrent helm op was genuinely still running.** Two
+pipelines on one MR each reached `helm upgrade` against the same release. Hit on
+`!46` (job `15364383755`, 2026-07-15): the second pipeline's deploy started 17
+seconds before the first one's finished, failed on the lock, and the retry two
+minutes later succeeded. `deploy_review` now carries
+`resource_group: review/$CI_MERGE_REQUEST_IID`, which serialises the jobs and is
+why this shape should not recur. Nothing to clean up.
+
+**It retries red — a killed helm op left the release pending.** This one does not
+self-clear, because no operation is actually running: the release *status* is
+`pending-upgrade` or `pending-rollback` and stays that way. `deploy_review` is
+`interruptible: true`, so a push landing inside its 1–4 minute run cancels it
+mid-`helm upgrade`; `--atomic` starts a rollback that the container's ~10s grace
+period does not let finish. `.gitlab-ci.yml` documents the mechanism at the job.
+
+**The recovery is `stop_review`.** Open the MR's environment and stop it, then
+re-run `deploy_review`. Teardown is a complete recovery rather than a rollback to
+unpick: it deletes the namespace, and helm keeps release history *in* the release
+namespace, so the wedged release goes with it. The review app holds nothing that
+matters — non-persistent Postgres, per-deploy secrets.
+
+Three things make this less alarming than it reads:
+
+- **It is loud.** `deploy_review` has no `allow_failure`, so the MR pipeline is
+  red. This cannot rot unnoticed the way #145's teardown failures did.
+- **It self-heals.** `auto_stop_in: 12 hours` triggers `stop_review` without
+  anybody clicking, so the wedge has a ceiling even if the MR is abandoned.
+- **It is rare.** The cancellation has to land inside the job's own run, and the
+  job starts a median 675s after its pipeline and lasts 76–261s. Over the 16 days
+  to 2026-09-01: **0 of 78** completed `deploy_review` windows had a new pipeline
+  created inside them, and all 37 cancelled `deploy_review` jobs in that period
+  were cancelled having **never started**. The three closest push pairs (547–683s
+  apart) all fall in that second group.
+
+**None of this can happen to production.** `deploy_production` carries no
+`interruptible` key, so `workflow:auto_cancel:on_new_commit: interruptible` never
+cancels it — that is the whole point of `!382`, and
+`src/lib/ci-interruptible.test.ts` fails if the key ever appears.
+
+**Why there is no automatic pre-flight recovery in `deploy_review`.** It was
+considered and measured away rather than forgotten. It would work — `helm
+rollback` has no pending-status check (`pkg/action/rollback.go`, unlike
+`prepareUpgrade`'s `Info.Status.IsPending()` refusal), so a pre-flight
+`helm rollback` on a wedged release is accepted. But at a measured rate of zero
+over two weeks, against a failure that is already red, capped at 12 hours and
+cleared by one click, it would be a guard costing more to review than the defect
+costs to hit. If it ever does start firing, that measurement is the thing to
+redo first.
