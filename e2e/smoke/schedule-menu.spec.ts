@@ -116,11 +116,28 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({
   // The summary line, assembled from JSX — the exact bug class this guards.
   // Read the RAW textContent: Playwright's text matchers normalise whitespace,
   // which would make a collapsed-seam assertion vacuous.
+  //
+  // The letter classes are unbounded, deliberately. They used to be pinned to a
+  // count of three, and the one on the month was a wall-clock timebomb: en-GB
+  // abbreviates September to "Sept", four letters, and every other month to
+  // three, so the assertion passed for eleven months and reddened the `build`
+  // stage for the twelfth — which skips deploy_production entirely (#271's
+  // class).
+  //
+  // What this still guarantees is the seam, which is all it was ever for: anchored
+  // `^…$`, so the whole raw textContent is the literal copy below and nothing else,
+  // with exactly one space at every seam — including before the date and either
+  // side of the day number. "3 steps· 2h15m", "3 steps  ·", "beforeTue 15 Sept",
+  // "Tue 15Sept" and any trailing whitespace all still fail. What it no longer
+  // guarantees is the abbreviations' length, i.e. it would not notice a switch to
+  // long month or weekday names. That is covered exactly, for all twelve months,
+  // by src/lib/scheduling/summary.test.ts — the right layer for it, since it is a
+  // property of the formatter and needs no browser to check.
   const summary = await dialog
     .getByRole("status")
     .evaluate((el) => el.textContent ?? "");
   expect(summary).toMatch(
-    /^3 steps · 2h15m of blocks, spread in order before \w{3} \d{1,2} \w{3}$/,
+    /^3 steps · 2h15m of blocks, spread in order before [A-Za-z]+ \d{1,2} [A-Za-z]+$/,
   );
 
   // Prefilled from the shared defaults: nothing has been persisted for this task.
