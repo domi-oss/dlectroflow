@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { GITLAB_OAUTH_CALLBACK_PATH } from "@/lib/auth/oauth-callback";
 import { readPngFacts, readPngPixels } from "@/lib/png-inspect";
 import { config as proxyConfig } from "@/proxy";
@@ -56,13 +57,53 @@ function isWithinScope(scope: string, pathname: string): boolean {
 }
 
 /**
- * Remove `//` line comments and block comments, so a source assertion is about
- * the CODE and not about the prose explaining it.
+ * Every `process.env` property access in a TypeScript source, found by PARSING.
+ *
+ * ⚠️ This started as a regex over comment-stripped source, which was wrong twice.
+ * It duplicated `stripComments` from `src/lib/source-text.ts` — the module that
+ * exists for exactly this step — and it inherited that helper's documented
+ * text-level limitation: a `//` inside a string literal reads as the start of a
+ * comment, so the rest of the line disappears. `source-text.ts` states the trade
+ * plainly and says which callers may take it: the failure direction is "a scanner
+ * missing a real occurrence", which is fine when a miss costs nothing.
+ *
+ * **This caller cannot take that trade**, and that is why it parses instead. A
+ * miss here is a **false pass** on the one guard standing between a build-cached
+ * route and a runtime variable baked in empty — the failure this whole file
+ * exists to prevent. `source-text.ts` names the remedy in as many words:
+ * *"Callers that cannot accept that trade should parse, as the AST-based scanners
+ * do."* `src/lib/fetch-host-hygiene.ts` and `src/lib/git-env-hygiene.ts` are
+ * those scanners, and `typescript` is a declared devDependency, so this is the
+ * repo's existing idiom rather than a new dependency.
+ *
+ * A parser sees neither comments nor string contents as code, so both holes close
+ * at once. (Duo review, `!397`.)
  */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+function processEnvAccesses(source: string, fileName: string): string[] {
+  const tree = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.ESNext,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  );
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    // `process.env` however it is spelled downstream: `process.env.X`,
+    // `process.env["X"]`, or a bare `process.env` handed to something else.
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "process" &&
+      node.name.text === "env"
+    ) {
+      const { line } = tree.getLineAndCharacterOfPosition(node.getStart(tree));
+      found.push(`${fileName}:${line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(tree, visit);
+  return found;
 }
 
 describe("isWithinScope: the containment helper can fail (#277)", () => {
@@ -160,28 +201,48 @@ describe("start_url and scope are RELATIVE (#277)", () => {
   });
 
   /**
-   * ⚠️ Comments are stripped before this looks for `process.env`, and that is not
-   * a nicety. `manifest.ts` EXPLAINS at length why it must not read a runtime
-   * variable, so the phrase is all over the file — a plain source grep reds on
-   * the documentation that exists to prevent the defect. This repo has paid for
-   * that class of mistake twice (see `src/lib/ci-docs-only.ts`), so the stripper
-   * carries its own control below.
+   * ⚠️ Parsed, not grepped. `manifest.ts` EXPLAINS at length why it must not read
+   * a runtime variable, so the phrase is all over the file — a plain source grep
+   * reds on the documentation that exists to prevent the defect. This repo has
+   * paid for that class of mistake twice (`manifest-hygiene` #76, `env-drift`
+   * #146), which is why `src/lib/source-text.ts` exists at all.
    */
   it("does not read process.env — the route is build-cached, so a runtime value bakes in", () => {
     const source = readFileSync(path.join(__dirname, "manifest.ts"), "utf8");
-    expect(stripComments(source)).not.toMatch(/process\s*\.\s*env/);
+    const accesses = processEnvAccesses(source, "src/app/manifest.ts");
+    expect(
+      accesses,
+      `src/app/manifest.ts reads process.env at ${accesses.join(", ")}. This route ` +
+        `is a Route Handler that Next CACHES by default, so a runtime variable is ` +
+        `read once in the build container — where it is unset — and baked in. The ` +
+        `symptom is a missing or wrong start_url with a green build and green tests.`,
+    ).toEqual([]);
   });
 
-  it("CONTROL: the comment stripper removes prose and keeps code", () => {
+  /**
+   * ⚠️ THE control, and it is doing three jobs. It shows the walker finds a real
+   * access at all; it shows the same walker is NOT fooled by the phrase appearing
+   * in a line comment, a block comment or a string; and the fourth line is the
+   * case that made a regex the wrong tool — a `//` inside a string literal, which
+   * a text-level stripper treats as the start of a comment and so deletes the
+   * real access sitting after it on the same line.
+   */
+  it("CONTROL: the walker finds real accesses and ignores comments and strings", () => {
     const sample = [
       "// a line comment mentioning process.env",
       "/* a block comment mentioning process.env",
       "   over two lines */",
-      "const origin = process.env.PUBLIC_ORIGIN;",
+      'const doc = "see https://x/y // process.env.NOPE"; const a = process.env.ONE;',
+      'const b = process.env["TWO"];',
+      "const plain = 'process.env.ALSO_NOPE';",
     ].join("\n");
-    const stripped = stripComments(sample);
-    expect(stripped).not.toMatch(/comment mentioning/);
-    expect(stripped).toMatch(/process\s*\.\s*env/);
+    const found = processEnvAccesses(sample, "sample.ts");
+    // Lines 4 and 5 (1-based) only: the two real accesses.
+    expect(found).toEqual(["sample.ts:4", "sample.ts:5"]);
+  });
+
+  it("CONTROL: the walker returns nothing for a file that genuinely has none", () => {
+    expect(processEnvAccesses("export const a = 1;\n", "empty.ts")).toEqual([]);
   });
 });
 

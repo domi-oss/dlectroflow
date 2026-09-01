@@ -208,7 +208,7 @@ test.describe("the Apple touch icon's served path (#254)", () => {
     expect((await context.request.get("/apple-icon")).status()).toBe(404);
   });
 
-  test("the served Apple icon is the committed file", async ({
+  test("the served Apple icon is the committed file, byte for byte", async ({
     page,
     context,
   }) => {
@@ -218,10 +218,28 @@ test.describe("the Apple touch icon's served path (#254)", () => {
       .getAttribute("href");
     const res = await context.request.get(href!);
     expect(res.status()).toBe(200);
-    expect((await res.body()).length).toBe(
+
+    // ⚠️ Bytes, not `.length`. The first version of this compared lengths and so
+    // reintroduced the self-referential flaw the icon cases above document and
+    // fix — a wrong or corrupted file of the same size would have passed. Duo
+    // caught it on !397, in the one test in this file that had not been probed.
+    const served = await res.body();
+    expect(served).toEqual(
       readFileSync(
         path.join(__dirname, "..", "..", "src", "app", "apple-icon.png"),
-      ).length,
+      ),
     );
+
+    // ⚠️ And the half byte-equality still cannot give, for the same reason the
+    // icon cases parse: equality against the committed file says the COPY is
+    // right and says nothing about whether the committed file is. These two facts
+    // are the ones `src/app/apple-icon.test.ts` asserts, re-asserted here on the
+    // bytes the built server actually handed over — 180x180 because that is what
+    // iOS asks for, and no alpha channel because iOS composites a transparent
+    // home-screen icon on BLACK, which is the #254 defect !349 fixed.
+    const facts = readPngFacts(served);
+    expect([facts.width, facts.height]).toEqual([180, 180]);
+    expect(facts.hasAlphaChannel).toBe(false);
+    expect(facts.hasTrnsChunk).toBe(false);
   });
 });
