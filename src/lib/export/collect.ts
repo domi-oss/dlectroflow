@@ -99,6 +99,8 @@ export async function collectExport(input: {
     focusSessions,
     focusPlaylists,
     shoppingItems,
+    medications,
+    medsDoseLogs,
     streak,
     streakRecords,
     badges,
@@ -154,6 +156,28 @@ export async function collectExport(input: {
       prisma.shoppingItem.findMany({
         where: { workspaceId },
         orderBy: [{ order: "asc" }, { id: "asc" }],
+      }),
+      // #269 — the medication regimen. Doses are reached through this scoped
+      // read as an `include`, exactly as steps and turns are through `task`
+      // above: `MedicationDose` carries no `workspaceId`, so it is exported as
+      // part of its parent rather than named here.
+      //
+      // Read unconditionally, NOT gated on `Settings.medsTracker`. The toggle
+      // hides the feature and deletes nothing, so a workspace with the switch off
+      // can still hold a full history — and an export that consulted the switch
+      // would silently omit special-category data the controller is holding.
+      prisma.medication.findMany({
+        where: { workspaceId },
+        include: { doses: { orderBy: [{ order: "asc" }, { id: "asc" }] } },
+        orderBy: [{ order: "asc" }, { id: "asc" }],
+      }),
+      // #269 — the dose history, ordered on `(date, id)`: `date` is the key the
+      // table exists to be read by, and the `id` tie-break is what makes two
+      // exports of unchanged data byte-identical, the property every other read
+      // here maintains.
+      prisma.medsDoseLog.findMany({
+        where: { workspaceId },
+        orderBy: [{ date: "asc" }, { id: "asc" }],
       }),
       prisma.streak.findUnique({ where: { workspaceId } }),
       prisma.streakRecord.findMany({
@@ -305,6 +329,8 @@ export async function collectExport(input: {
     focusSessions,
     focusPlaylists,
     shoppingItems,
+    medications,
+    medsDoseLogs,
     gamification: {
       streak,
       streakRecords,
