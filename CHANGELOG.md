@@ -64,7 +64,9 @@ operators upgrading a self-hosted instance don't get surprised.
   MR's own release wedged and the next review deploy failing with `another
   operation (install/upgrade/rollback) is in progress`. The blast radius is one
   review app: the job goes red rather than quiet, `stop_review` clears it in one
-  click, and `auto_stop_in: 12 hours` clears it unattended regardless.
+  click, and `auto_stop_in: 12 hours` clears it unattended in every case except a
+  wedge on an MR's very first deploy, which has no successful deployment for the
+  timer to count from.
   `docs/deploy-runbook.md` § 20 is the recovery. Measured over the 16 days to
   2026-09-01 the case did not arise — 0 of 78 completed review deploys had a new
   pipeline created inside them, and all 37 cancellations in that period landed

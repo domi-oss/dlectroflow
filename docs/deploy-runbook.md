@@ -1061,8 +1061,16 @@ Three things make this less alarming than it reads:
 
 - **It is loud.** `deploy_review` has no `allow_failure`, so the MR pipeline is
   red. This cannot rot unnoticed the way #145's teardown failures did.
-- **It self-heals.** `auto_stop_in: 12 hours` triggers `stop_review` without
-  anybody clicking, so the wedge has a ceiling even if the MR is abandoned.
+- **It usually self-heals.** `auto_stop_in: 12 hours` triggers `stop_review`
+  without anybody clicking — #145 is the proof that the timer really does fire a
+  `when: manual` stop job, because there it fired six times and the job failed on
+  `missing_dependency_failure` instead of running. That is fixed (`needs: []`), so
+  the wedge now has a 12-hour ceiling even on an abandoned MR. **The exception is
+  a wedge on an MR's *first* deploy**: the timer counts from a successful
+  deployment, and a release stuck in `pending-install` never had one, so that case
+  does need the click. It is also the case `helm rollback` cannot fix — there is
+  no revision 0 to roll back to — which is a second reason `stop_review` is the
+  documented recovery rather than a helm incantation.
 - **It is rare.** The cancellation has to land inside the job's own run, and the
   job starts a median 675s after its pipeline and lasts 76–261s. Over the 16 days
   to 2026-09-01: **0 of 78** completed `deploy_review` windows had a new pipeline
