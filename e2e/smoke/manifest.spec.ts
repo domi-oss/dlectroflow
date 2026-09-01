@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import manifestSource from "../../src/app/manifest";
 import { readPngFacts } from "../../src/lib/png-inspect";
@@ -143,22 +143,24 @@ test.describe("every declared icon is really in the built bundle", () => {
       expect(res.status()).toBe(200);
       expect(res.headers()["content-type"]).toContain("image/png");
 
-      // ⚠️ Content, not just status. `.next/standalone` omits `public/`, so a
-      // wrong or missing asset COPY in the runtime stage is exactly the class of
-      // fault that leaves every HTML route at 200 while every public file 404s.
-      // Probed: pointing this at a path the copy would not have brought reds all
-      // four cases on `Expected: 200, Received: 404`.
+      // ⚠️ Bytes, not status and not `.length`. `.next/standalone` omits
+      // `public/`, so a wrong or missing asset COPY in the runtime stage is
+      // exactly the class of fault that leaves every HTML route at 200 while
+      // every public file 404s — and a same-size wrong file is the quieter half
+      // of it. Same shape as the Apple-icon case below, deliberately: this test
+      // compared `.length` until Duo pointed out the sibling already did it
+      // properly (!397), and two shapes for one question in one file is how the
+      // weaker one survives.
       const served = await res.body();
-      const onDisk = statSync(
-        path.join(PUBLIC_DIR, src.replace(/^\//, "")),
-      ).size;
-      expect(served.length).toBe(onDisk);
+      const onDiskPath = path.join(PUBLIC_DIR, src.replace(/^\//, ""));
+      expect(served).toEqual(readFileSync(onDiskPath));
 
-      // ⚠️ The length comparison alone is SELF-REFERENTIAL — truncate the
-      // committed file and both sides shrink together, so it goes green. That is
-      // a real hole and it was found by probing rather than reasoned about. The
-      // served bytes are therefore parsed and measured against what the manifest
-      // DECLARES, which is a fact the file on disk cannot move.
+      // ⚠️ The half byte-equality CANNOT give, which is why it is not the only
+      // assertion here. Equality against the committed file says the COPY is
+      // right and says nothing about whether the committed file is right —
+      // corrupt both and they still agree. So the served bytes are also parsed
+      // and measured against what the manifest DECLARES, which is a fact the
+      // file on disk cannot move.
       const facts = readPngFacts(served);
       expect(`${facts.width}x${facts.height}`).toBe(
         declared.icons!.find((i) => i.src === src)!.sizes,
