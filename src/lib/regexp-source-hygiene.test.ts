@@ -475,6 +475,14 @@ describe("the real tree", () => {
     // why the number is re-counted after a `main` sync and not only after an edit
     // to a pattern. Recounted here from the scanner's own output (30), with `main`'s
     // 29 and this branch's single addition as the two-sided control.
+    //
+    // 30 -> 31 on #277: `new RegExp(`^${pattern}$`)` in `src/app/manifest.test.ts`,
+    // which anchors the matcher IMPORTED from `src/proxy.ts` so the manifest and
+    // its four icon paths can be asserted to bypass the auth gate. It classifies
+    // `test-only`. Recounted from the scanner's own output (31, of which 17 are
+    // test-only, 9 constant, 2 escaped and 3 unreviewed) rather than from 30 + 1,
+    // exactly as the paragraph above asks — the count was run before this line was
+    // edited, and the +1 happened to be the prediction this time.
     expect(
       sites.length,
       "A `new RegExp` was added to or removed from src/ or e2e/. That is fine — " +
@@ -486,7 +494,7 @@ describe("the real tree", () => {
         "stay green. If the count went DOWN and you did not delete a " +
         "construction, the tokeniser has stopped seeing one, which is the bug " +
         "this guard exists to prevent.",
-    ).toBe(30);
+    ).toBe(31);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);
