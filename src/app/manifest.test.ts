@@ -30,23 +30,29 @@ const m = manifest();
 /**
  * Is `pathname` inside `scope`?
  *
- * The Web App Manifest spec's scope test is a **path-prefix** match, where the
- * scope's own string is taken up to and including its final `/`. So `/` contains
- * everything, `/app/` contains `/app/x` but not `/application`, and — the case
- * this repo has to get right — a scope of `/app` would NOT contain
- * `/api/auth/gitlab/callback`.
+ * ⚠️ A **plain string prefix**, and that is the algorithm rather than a
+ * simplification of it. The Web App Manifest spec's *within scope* steps are:
+ * same origin, then *"Return a boolean indicating whether targetPath starts with
+ * scopePath"* — with a note spelling out the consequence: *"The URL string
+ * matching in this algorithm is prefix-based rather than path-structural (e.g. a
+ * target URL string `/prefix-of/resource.html` will match an app with scope
+ * `/prefix`)."*
  *
- * Written out rather than string-compared because the spec's step 1 says so in
- * as many words: *"Assert containment, not string equality."* An equality
- * assertion on `scope === "/"` would go green for a manifest whose scope happened
- * to be `"/"` and would say nothing at all about the property that matters, so it
- * would keep passing if somebody narrowed the scope to `/app/` "for tidiness".
+ * ⚠️ The first version of this helper truncated a scope at its last `/` before
+ * comparing, on a recalled rule that does not exist. It agreed with the real
+ * algorithm on every value this repo uses, so nothing caught it — checked
+ * against the spec text rather than reasoned about. The trailing-slash case
+ * below is what the difference looks like, and it is a real footgun: a scope of
+ * `/app` admits `/application`.
+ *
+ * Written out rather than string-compared because the design spec's TDD step 1
+ * says so in as many words: *"Assert containment, not string equality."* An
+ * equality assertion on `scope === "/"` would go green for a manifest whose scope
+ * happened to be `"/"` while saying nothing about the property that matters, so
+ * it would keep passing if somebody narrowed the scope "for tidiness".
  */
 function isWithinScope(scope: string, pathname: string): boolean {
-  const base = scope.endsWith("/")
-    ? scope
-    : scope.slice(0, scope.lastIndexOf("/") + 1);
-  return pathname.startsWith(base);
+  return pathname.startsWith(scope);
 }
 
 /**
@@ -70,10 +76,10 @@ describe("isWithinScope: the containment helper can fail (#277)", () => {
     expect(isWithinScope("/inbox/", "/api/auth/gitlab/callback")).toBe(false);
   });
 
-  it("does not treat a scope as a bare string prefix", () => {
-    // `/app` (no trailing slash) truncates to `/`, per the spec's rule, so it
-    // contains everything — but it must never be read as matching `/application`
-    // while excluding `/app/x`.
+  it("is prefix-based, not path-structural — the trailing slash is load-bearing", () => {
+    // Straight out of the spec's own note. A scope missing its trailing slash
+    // admits a SIBLING path, which is why `scope` is never written without one.
+    expect(isWithinScope("/app", "/application")).toBe(true);
     expect(isWithinScope("/app/", "/application")).toBe(false);
     expect(isWithinScope("/app/", "/app/x")).toBe(true);
   });
@@ -215,9 +221,13 @@ describe("both icon purposes are declared, at both sizes (#277)", () => {
   });
 
   /**
-   * A manifest naming an absent icon is valid JSON and a broken install: Chrome
-   * treats a 404 on a declared icon as a failed installability check, so the
-   * install option simply never appears.
+   * A manifest naming an absent icon is valid JSON, and there is no build error,
+   * no console warning and no failing request to say so. Chrome's installability
+   * check needs a FETCHABLE icon of at least 144px, so a set that 404s takes the
+   * install option away with nothing on screen explaining it. Asserting the file
+   * is on disk is the cheapest place to catch a typo in an `src`;
+   * `e2e/smoke/manifest.spec.ts` is where it is caught for real, against the
+   * built server.
    */
   it("every declared src exists in public/ and is the size it claims", () => {
     for (const icon of icons) {
@@ -278,7 +288,11 @@ describe("display and shortcuts (#277)", () => {
   it("carries a name and a short_name that fits under a home screen icon", () => {
     expect(m.name).toBeTruthy();
     expect(m.short_name).toBeTruthy();
-    // Android truncates the label under the icon at roughly 12 characters.
+    // 12 is not a spec number — it is the widely-cited practical limit before a
+    // launcher ellipsises the label, and it varies by launcher and by font size
+    // setting. The assertion is here to make a RENAME stop and think about the
+    // home-screen label, which is the one place the app's name is read in
+    // isolation, rather than to certify any particular device.
     expect(m.short_name!.length).toBeLessThanOrEqual(12);
   });
 

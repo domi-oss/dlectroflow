@@ -47,11 +47,12 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "dlectroflow",
-    // Android truncates the label under a home-screen icon at roughly 12
-    // characters, and "dlectroflow" is 11 — so the full name fits and there is
-    // nothing to abbreviate. Stated rather than omitted: with no `short_name` a
-    // browser falls back to `name`, which happens to be right here, and a future
-    // rename would silently start truncating.
+    // "dlectroflow" is 11 characters and fits under a home-screen icon, so
+    // there is nothing to abbreviate. Declared anyway rather than left to fall
+    // back to `name`: a rename would otherwise silently start ellipsising in the
+    // one place the app's name is read in isolation. (The ~12-character budget is
+    // a practical launcher limit, not a spec number; manifest.test.ts asserts it
+    // so a rename has to stop and think.)
     short_name: "dlectroflow",
     // Deliberately NOT the same sentence as `metadata.description` in
     // src/app/layout.tsx. That one is a search snippet; this one is what an
