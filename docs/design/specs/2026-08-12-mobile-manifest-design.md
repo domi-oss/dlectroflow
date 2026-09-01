@@ -140,6 +140,27 @@ is in `PUBLIC_PREFIXES`, so a signed-out fetch falls through to the guest branch
 is broken and installability is unaffected — but the blanket sentence above holds only for the
 extension-carrying paths, and that is exactly the kind of distinction this section exists to pin.
 
+⚠️⚠️ **MEASURED WRONG on 2026-09-01, while implementing `#277`. The paragraph above is the one thing in
+this document that does not reproduce, and it is left in place rather than deleted because it has now
+produced a wrong statement in two artefacts.** Next does **not** serve the convention at an extensionless
+pathname. Against a real standalone build of `51cd454 + #277`, the emitted tag is
+`<link rel="apple-touch-icon" href="/apple-icon.png?apple-icon.<hash>.png">` and a request to
+`/apple-icon` returns **404**. So:
+
+* the served pathname **carries an extension**, which means `/apple-icon.png` is **excluded** by the
+  matcher exactly like the manifest and the four icons — it does **not** reach the gate, and **no guest
+  cookie is minted** by an icon fetch. Nothing is broken either way; the conclusion above was right and
+  the mechanism under it was inverted.
+* the inference two sections down — that a rival file at `public/apple-icon.png` "would be served at a URL
+  nothing links to" — **does not hold.** Both candidates resolve on the **same pathname**, so it is a
+  **route-precedence** question, not a never-fetched-URL one. **The instruction is unchanged:** replace the
+  `app/**` convention file, never add a second icon under `public/`.
+
+`#254`'s description recorded the same correction on 2026-08-14 and predicted it would "fire exactly once,
+on whoever implements this issue's remaining build slice". It did. It is now a **test** rather than a
+sentence — `e2e/smoke/manifest.spec.ts` asserts the href's pathname ends `.png` and that `/apple-icon`
+404s — so the next reader gets a result instead of a choice between two documents.
+
 ⚠️ **That is an incidental property of a regex, not a stated guarantee, and that is the actual finding.**
 `gate.ts` says nothing about the manifest. It works today additionally because `OWNER_ONLY_PREFIXES` is
 **empty** and `AUTHENTICATED_PREFIXES` is only `/api/account/` and `/api/google/oauth/` — but if either the
@@ -383,6 +404,15 @@ one-frame jump into the app is the cheaper of the two, so `#0a0510` stands.**
 The lever for revisiting this is not in this file: it is giving the app a `prefers-color-scheme` default,
 so a dark-system user lands in the dark theme and the seamless path becomes the common one.
 
+⚠️ **That lever has since been PULLED, so the paragraph above overstates the residual cost.** Re-read at
+`51cd454` on 2026-09-01: `#85` shipped in `!349`, and `src/app/layout.tsx` now runs
+`THEME_BOOTSTRAP_SCRIPT` (`src/lib/theme.ts`), which resolves a **three-state** setting —
+system / light / dark, defaulting to **system** — and consults `prefers-color-scheme`. So a freshly
+installed app on a dark handset, with no stored preference, paints **dark**, and the 4-luminance-unit
+seamless path is the common one rather than the rare one. The 241-unit jump is now only what a user who has
+explicitly chosen the light theme sees. The decision below is unchanged and is now cheaper than it was when
+it was taken; nothing here needs re-arguing.
+
 ### `shortcuts` — one entry
 
 Long-press the icon → **"New brain dump"**, straight into the capture field. A few lines in the same
@@ -428,10 +458,14 @@ TDD, failing test first, in this order:
    was misread cannot go green. ⚠️ **Derive the list from the manifest's own `icons` array, not by hand** —
    a hand-written list of three leaves both maskable paths unchecked, and those are precisely the ones
    Android fetches for the home screen.
-   ⚠️ **The Apple touch icon is deliberately not in this list.** It is served at the extensionless
-   `/apple-icon`, so it *is* matched by the matcher — asserting it alongside the others would simply be
-   false. It passes through the gate rather than being redirected; see *Unauthenticated reachability*. This converts the extension-exclusion accident into a checked property: if someone
-   later removes that exclusion or gates `/`, this reds instead of install silently failing on first visit.
+   ⚠️ **The Apple touch icon is deliberately not in this list**, and the REASON given here was wrong — see
+   the measured correction under *Unauthenticated reachability*. It is served at `/apple-icon.png?<hash>`,
+   an extension-carrying pathname, so it is **excluded** by the matcher along with everything else rather
+   than matched by it. The right reason to leave it out of this list is simpler: the manifest does not name
+   it, Safari ignores the manifest's `icons` in favour of its own file convention, and
+   `src/app/apple-icon.test.ts` already owns that file. This converts the extension-exclusion accident into
+   a checked property: if someone later removes that exclusion or gates `/`, this reds instead of install
+   silently failing on first visit.
    ⚠️ Import the matcher from `proxy.ts`; do **not** copy the pattern into the test, or the test stops
    describing the deployed gate the moment the real one changes.
 
