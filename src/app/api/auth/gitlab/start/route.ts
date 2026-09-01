@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthProvider } from "@/lib/auth/providers";
 import { createPkce, randomState } from "@/lib/oauth-pkce";
 import { requestOrigin } from "@/lib/origin";
+import { GITLAB_OAUTH_CALLBACK_PATH } from "@/lib/auth/oauth-callback";
 
 export const runtime = "nodejs";
 
@@ -26,7 +27,7 @@ const OAUTH_NONCE_TTL_SECONDS = 30 * 60;
 
 export async function GET(req: Request): Promise<Response> {
   const origin = requestOrigin(req);
-  const redirectUri = `${origin}/api/auth/gitlab/callback`;
+  const redirectUri = `${origin}${GITLAB_OAUTH_CALLBACK_PATH}`;
   const { verifier, challenge } = createPkce();
   const state = randomState();
   const res = NextResponse.redirect(

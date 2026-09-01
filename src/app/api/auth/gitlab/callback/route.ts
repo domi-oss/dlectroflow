@@ -9,6 +9,7 @@ import {
   USER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
 import { requestOrigin, inboundHost } from "@/lib/origin";
+import { GITLAB_OAUTH_CALLBACK_PATH } from "@/lib/auth/oauth-callback";
 import { recordAuthFailure } from "@/lib/observability";
 
 export const runtime = "nodejs";
@@ -77,7 +78,7 @@ export async function GET(req: Request): Promise<Response> {
     const token = await provider.exchangeCode({
       code,
       codeVerifier: verifier,
-      redirectUri: `${origin}/api/auth/gitlab/callback`,
+      redirectUri: `${origin}${GITLAB_OAUTH_CALLBACK_PATH}`,
     });
     profile = await provider.fetchProfile(token);
   } catch (err) {
