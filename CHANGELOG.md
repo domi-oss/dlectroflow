@@ -29,6 +29,66 @@ operators upgrading a self-hosted instance don't get surprised.
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+### Fixed
+
+- **A second merge no longer cancels the first one's production deploy.** Merging
+  two changes in quick succession could leave production on neither commit, with
+  both merges landed and nothing red to say so — which is why merges here have been
+  done one at a time with somebody watching each deploy finish.
+
+  The cause was `workflow:auto_cancel:on_new_commit` sitting at its default,
+  `conservative`. Under that mode GitLab treats a job that **has not started** as
+  interruptible whatever it is configured as, and `deploy_production` is
+  stage-scheduled behind build and test *and* queues on `resource_group: production`
+  — so at the moment a second merge lands it has reliably not started.
+  `resource_group` was widening the window rather than protecting the job, which the
+  comment above it now says. Measured on pipeline `2762854030`: `build_app`,
+  `test_app`, `e2e_test`, `build_image` and four of five scanners all succeeded, the
+  image was built and pushed, and the deploy was cancelled without ever starting.
+  `alert_pipeline_failure` was cancelled in the same sweep, which is why it was
+  quiet rather than loud.
+
+  Now set to `interruptible`, so the job's own declared value decides. The build,
+  test and scan jobs that carry `interruptible: true` still get cancelled and re-run
+  on the newer pipeline; `deploy_production` and `alert_pipeline_failure` are no
+  longer eligible.
+
+  **`deploy_review` gains `interruptible: true` explicitly**, because it is the one
+  deploy that *should* be abandoned when superseded — nobody opens a review app for
+  a commit two pushes old, and without the key it would have inherited the
+  protection meant for production and run every stale `helm upgrade` to completion.
+  Cancelling it is **accepted rather than free**, and the trade is stated here
+  because the earlier draft of this entry got it wrong. `--atomic` does start a
+  rollback on SIGTERM, but the container's ten-second grace period is not
+  guaranteed to let it finish, so a cancellation landing mid-upgrade can leave that
+  MR's own release wedged and the next review deploy failing with `another
+  operation (install/upgrade/rollback) is in progress`. The blast radius is one
+  review app: the job goes red rather than quiet, `stop_review` clears it in one
+  click, and `auto_stop_in: 12 hours` clears it unattended in every case except a
+  wedge on an MR's very first deploy, which has no successful deployment for the
+  timer to count from.
+  `docs/deploy-runbook.md` § 20 is the recovery. Measured over the 16 days to
+  2026-09-01 the case did not arise — 0 of 78 completed review deploys had a new
+  pipeline created inside them, and all 37 cancellations in that period landed
+  before the job had started. `stop_review` keeps the default deliberately — a
+  teardown a human clicked must finish.
+
+- **The cancellation policy is now asserted, not just commented.**
+  `src/lib/ci-interruptible.ts` fails the suite if
+  `workflow:auto_cancel:on_new_commit` drifts off `interruptible`, if
+  `deploy_production` or `stop_review` ever becomes interruptible — including via
+  an `interruptible: true` on the shared `.deploy_base` template, which would
+  unprotect both while each job's own block still read clean — or if
+  `deploy_review` loses its explicit `true`. Under this mode every job's value is
+  load-bearing, and the only thing holding the line was a comment saying "Do not
+  add `interruptible: true` to this job."
+
+  Nothing can double-deploy: `resource_group: production` still
+  serialises the two, and with **Prevent outdated deployment jobs** on, an older
+  deploy reaching the runner after a newer one fails visibly as `failed outdated
+  deployment job` instead of overwriting it. **No operator action required** — this
+  is CI configuration only, with no effect on the application or its data.
+
 ## [0.6.0] - 2026-08-21
 
 **The app stops failing quietly.** Every inbox write, the capture bar and the
